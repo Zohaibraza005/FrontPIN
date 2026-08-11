@@ -1,0 +1,10 @@
+-- AlterTable
+ALTER TABLE `Organization` ADD COLUMN `address` VARCHAR(191) NULL,
+    ADD COLUMN `email` VARCHAR(191) NULL,
+    ADD COLUMN `emergencyContact` VARCHAR(191) NULL,
+    ADD COLUMN `phone` VARCHAR(191) NULL,
+    ADD COLUMN `subscriptionEnd` DATETIME(3) NULL,
+    ADD COLUMN `subscriptionPlan` ENUM('BASIC', 'PRO', 'ENTERPRISE') NOT NULL DEFAULT 'BASIC',
+    ADD COLUMN `subscriptionStart` DATETIME(3) NULL,
+    ADD COLUMN `subscriptionStatus` ENUM('ACTIVE', 'EXPIRED', 'CANCELLED', 'TRIAL') NOT NULL DEFAULT 'ACTIVE',
+    ADD COLUMN `totalEmployees` INTEGER NULL DEFAULT 0;

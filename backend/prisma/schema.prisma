@@ -1,0 +1,1232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+//////////////////////////////////////////////////
+//////////////////// ENUMS ///////////////////////
+//////////////////////////////////////////////////
+
+enum RoleType {
+  ADMIN
+  SUPERVISOR
+  USER
+}
+
+enum ProjectStatus {
+  PLANNING
+  IN_PROGRESS
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LeavePayType {
+  PAID
+  UNPAID
+}
+
+enum SubscriptionPlan {
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  TRIAL
+}
+//////////////////////////////////////////////////
+//////////////// ORGANIZATION ////////////////////
+//////////////////////////////////////////////////
+
+model Organization {
+  id              Int       @id @default(autoincrement())
+  name            String
+  category        String?
+  orgTimeZone    String?
+  
+  // 🔹 Contact Information
+  phone           String?
+  email           String?
+  emergencyContact String?
+  address         String?
+  
+  // 🔹 Organization Details
+  totalEmployees  Int?      @default(0)
+
+  // 🔹 Subscription
+  subscriptionPlan   SubscriptionPlan @default(BASIC)
+  subscriptionStatus SubscriptionStatus @default(ACTIVE)
+  subscriptionStart  DateTime?
+  subscriptionEnd    DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  // 🔹 Existing Relations
+  companies      Company[]
+  employees      Employee[]
+  Department     Department[]
+  Client         Client[]
+  Project        Project[]
+  LeaveType      LeaveType[]
+  LeaveRequest   LeaveRequest[]
+  Overtime       Overtime[]
+  InvoiceCompany InvoiceCompany[]
+  Invoice        Invoice[]
+  Payroll        Payroll[]
+  PayrollRun     PayrollRun[]
+  Job            Job[]
+  Candidate      Candidate[]
+  
+  @@index([deletedAt])
+}
+
+//////////////////////////////////////////////////
+////////////////// COMPANY ///////////////////////
+//////////////////////////////////////////////////
+
+model Company {
+  id Int @id @default(autoincrement())
+
+  name    String
+  address String?
+  type    String? // office | warehouse | remote
+
+  capacity Int?
+  active   Boolean @default(true)
+
+  enableGeofence Boolean @default(false)
+  latitude       Float?
+  longitude      Float?
+  radius         Float? // meters
+
+  timezone String?
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  employees Employee[]
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  deletedAt  DateTime?
+  Department Department[]
+  Schedule   Schedule[]
+
+  @@index([organizationId])
+  @@index([deletedAt])
+}
+
+//////////////////////////////////////////////////
+////////////////// EMPLOYEE //////////////////////
+//////////////////////////////////////////////////
+
+model Employee {
+  id Int @id @default(autoincrement())
+
+  // Personal Info
+  firstName    String
+  lastName     String
+  username     String  @unique
+  email        String  @unique
+  password     String?
+  pin          String?
+  profileImage String?
+  employeeId   String? @unique
+  phoneNumber  String?
+  nationalId   String?
+
+  canLogin Boolean @default(true) // 🔥 New field
+
+  role RoleType @default(USER)
+
+  // Relations
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id])
+
+  departmentId Int?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  supervisorId Int?
+  supervisor   Employee?  @relation("SupervisorRelation", fields: [supervisorId], references: [id])
+  subordinates Employee[] @relation("SupervisorRelation")
+
+  jobInfo        EmployeeJob?
+  payroll        EmployeePayroll?
+  privileges     EmployeePrivilege[]
+  increments     EmployeeIncrement[]
+  leaveRequests  LeaveRequest[]      @relation("EmployeeLeaveRequests")
+  reviewedLeaves LeaveRequest[]      @relation("LeaveReviewedBy")
+
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  deletedAt            DateTime?
+  RefreshToken         RefreshToken[]
+  Project              Project[]
+  ProjectLog           ProjectLog[]
+  Task                 Task[]
+  TaskAssignee         TaskAssignee[]
+  TaskLog              TaskLog[]
+  Schedule             Schedule[]
+  Attendance           Attendance[]
+  AttendancePunch      AttendancePunch[]
+  ActivityLog          ActivityLog[]
+  AttendanceAuditLog   AttendanceAuditLog[]
+  overtimes            Overtime[]           @relation("EmployeeOvertime")
+  overtimeCreated      Overtime[]           @relation("OvertimeCreatedBy")
+  overtimeReviewed     Overtime[]           @relation("OvertimeReviewedBy")
+  Invoice              Invoice[]
+  InvoiceTransaction   InvoiceTransaction[]
+  InvoiceLog           InvoiceLog[]
+  payrollRecords       Payroll[]            @relation("EmployeePayrollRecords")
+  payrollCreated       Payroll[]            @relation("PayrollCreatedBy")
+  Remark               Remark[]
+  payrollRunsGenerated PayrollRun[]         @relation("PayrollRunGeneratedBy")
+  payrollRunsApproved  PayrollRun[]         @relation("PayrollApprovedBy")
+  payrollAuditLogs     PayrollAuditLog[]
+  payrollComponents    PayrollComponent[]
+
+  // Payroll Audit Logs
+  Job Job[]
+
+  @@index([organizationId])
+  @@index([companyId])
+  @@index([departmentId])
+}
+
+//////////////////////////////////////////////////
+/////////////// REFRESH TOKEN ////////////////////
+//////////////////////////////////////////////////
+
+model RefreshToken {
+  id Int @id @default(autoincrement())
+
+  hashedToken String   @db.VarChar(255)
+  expiresAt   DateTime
+  revoked     Boolean  @default(false)
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([expiresAt])
+}
+
+model Department {
+  id Int @id @default(autoincrement())
+
+  title  String
+  status String @default("active")
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+  Employee  Employee[]
+
+  @@index([organizationId])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model EmployeeJob {
+  id Int @id @default(autoincrement())
+
+  employeeId Int      @unique
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  employmentStatus String?
+  designation      String?
+  hiringDate       DateTime?
+  workMode         String?
+
+  allowExtraHours Boolean @default(false)
+  maxExtraHours   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmployeePayroll {
+  id Int @id @default(autoincrement())
+
+  employeeId Int      @unique
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  payoutType String // daily | hourly | monthly
+  rate       Float
+  currency   String
+  cycleDate  Int
+
+  overtimeRate Float?
+
+  annualLeaves Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmployeeIncrement {
+  id Int @id @default(autoincrement())
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  type  String // percentage | flat
+  value Float
+
+  previousSalary Float
+  newSalary      Float
+
+  effectiveDate DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+}
+
+enum PrivilegeModule {
+  EMPLOYEE
+  ATTENDANCE
+  LEAVE
+  PROJECT
+  TASK
+  INVOICE
+  REPORT
+  OVERTIME
+  ENABLE_GPS
+}
+
+model EmployeePrivilege {
+  id Int @id @default(autoincrement())
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  module PrivilegeModule
+
+  canCreate Boolean @default(false)
+  canRead   Boolean @default(true)
+  canUpdate Boolean @default(false)
+  canDelete Boolean @default(false)
+
+  // For special cases like REPORT (own team only)
+  ownTeamOnly Boolean @default(false)
+
+  @@unique([employeeId, module])
+  @@index([employeeId])
+}
+
+model Client {
+  id Int @id @default(autoincrement())
+
+  name    String
+  phone   String
+  email   String?
+  address String
+  city    String
+  state   String
+  zip     String
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projects Project[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  Invoice   Invoice[]
+
+  @@index([organizationId])
+}
+
+model Project {
+  id Int @id @default(autoincrement())
+
+  title       String
+  description String
+
+  startDate DateTime
+  endDate   DateTime?
+
+  budget Float
+  spent  Float @default(0)
+
+  status   ProjectStatus @default(PLANNING)
+  progress Int           @default(0)
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clientId Int
+  client   Client @relation(fields: [clientId], references: [id])
+
+  createdById Int
+  createdBy   Employee @relation(fields: [createdById], references: [id])
+
+  attachments ProjectAttachment[]
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  deletedAt  DateTime?
+  ProjectLog ProjectLog[]
+  Task       Task[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model ProjectAttachment {
+  id Int @id @default(autoincrement())
+
+  projectId Int
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  fileName String
+  filePath String
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+enum ProjectLogAction {
+  CREATED
+  UPDATED
+  DELETED
+  STATUS_CHANGED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DELETED
+}
+
+model ProjectLog {
+  id Int @id @default(autoincrement())
+
+  projectId Int
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId Int
+  user   Employee @relation(fields: [userId], references: [id])
+
+  action ProjectLogAction
+
+  title       String
+  description String?
+
+  oldValue String? // For status changes etc
+  newValue String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id             Int          @id @default(autoincrement())
+  title          String
+  description    String?
+  organizationId Int? // 👈 ADD THIS
+  status         String       @default("TODO")
+  progress       Int          @default(0)
+  deadline       DateTime?
+  priority       TaskPriority @default(MEDIUM) // 👈 NEW COLUMN
+
+  projectId Int?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdById Int
+  createdBy   Employee @relation(fields: [createdById], references: [id])
+
+  assignees   TaskAssignee[]
+  attachments TaskAttachment[]
+  logs        TaskLog[]
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+  ActivityLog ActivityLog[]
+  remarks     Remark[]
+
+  @@index([projectId])
+}
+enum AssigneeTaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+model TaskAssignee {
+  id Int @id @default(autoincrement())
+
+  taskId Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  status AssigneeTaskStatus @default(TODO)
+  progress Int @default(0)
+
+  startedAt DateTime?
+  completedAt DateTime?
+
+  @@unique([taskId, employeeId])
+}
+
+model TaskAttachment {
+  id     Int  @id @default(autoincrement())
+  taskId Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  fileName String
+  filePath String
+
+  createdAt DateTime @default(now())
+}
+
+model TaskLog {
+  id Int @id @default(autoincrement())
+
+  taskId Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId Int
+  user   Employee @relation(fields: [userId], references: [id])
+
+  action      String
+  title       String
+  description String?
+
+  createdAt DateTime @default(now())
+}
+
+model Schedule {
+  id Int @id @default(autoincrement())
+
+  ////////////////////////////////////////////////
+  // Employee Binding
+  ////////////////////////////////////////////////
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  ////////////////////////////////////////////////
+  // Days & Time
+  ////////////////////////////////////////////////
+  days      Json // ["Mon","Tue"]
+  startTime String
+  endTime   String
+
+  ////////////////////////////////////////////////
+  // Work Location (Company is Location)
+  ////////////////////////////////////////////////
+  companyId Int?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  ////////////////////////////////////////////////
+  // Early In / Out
+  ////////////////////////////////////////////////
+  allowEarlyIn   Boolean @default(false)
+  earlyInMinutes Int?
+
+  allowEarlyOut   Boolean @default(false)
+  earlyOutMinutes Int?
+
+  ////////////////////////////////////////////////
+  // Overtime
+  ////////////////////////////////////////////////
+  overtimeAllowed Boolean @default(false)
+  overtimeMinutes Int?
+
+  ////////////////////////////////////////////////
+  // Half Day
+  ////////////////////////////////////////////////
+  allowHalfDay   Boolean @default(false)
+  halfDayMinutes Int?
+
+  ////////////////////////////////////////////////
+  // Breaks
+  ////////////////////////////////////////////////
+  breaksAllowed  Boolean @default(false)
+  breakDurations Json // [15, 20]
+
+  ////////////////////////////////////////////////
+  // Metadata
+  ////////////////////////////////////////////////
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model Attendance {
+  id Int @id @default(autoincrement())
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  date DateTime
+
+  // 🔵 SHIFT SNAPSHOT
+  shiftStartTime String?
+  shiftEndTime   String?
+
+  // CHECK IN
+  checkInTime   DateTime?
+  checkInLat    Float?
+  checkInLong   Float?
+  checkInIP     String?
+  checkInMethod String?
+  checkInDevice String?
+  summary       String?
+
+  // CHECK OUT
+  checkOutTime   DateTime?
+  checkOutLat    Float?
+  checkOutLong   Float?
+  checkOutIP     String?
+  checkOutMethod String?
+  checkOutDevice String?
+
+  isLate      Boolean @default(false)
+  lateMinutes Int     @default(0)
+
+  isEarlyOut      Boolean @default(false)
+  earlyOutMinutes Int     @default(0)
+
+  overtimeMinutes    Int @default(0)
+  totalWorkedMinutes Int @default(0)
+  totalBreakMinutes  Int @default(0)
+
+  status String
+
+  autoClockedOut Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  punches    AttendancePunch[]
+  activities ActivityLog[]
+  audits     AttendanceAuditLog[]
+
+  @@unique([employeeId, date])
+}
+
+model AttendancePunch {
+  id Int @id @default(autoincrement())
+
+  attendanceId Int
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  type String // CHECK_IN | CHECK_OUT | BREAK_START | BREAK_END | AUTO_CLOCK_OUT
+
+  punchTime DateTime @default(now())
+
+  lat    Float?
+  lng    Float?
+  ip     String?
+  device String?
+  method String // PIN | FACE | ADMIN | SYSTEM
+
+  createdAt DateTime @default(now())
+
+  @@index([attendanceId])
+}
+
+model ActivityLog {
+  id Int @id @default(autoincrement())
+
+  attendanceId Int
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  taskId Int?
+  task   Task? @relation(fields: [taskId], references: [id])
+
+  type String // TASK | GENERAL | BREAK
+
+  startTime       DateTime
+  endTime         DateTime?
+  durationMinutes Int?
+
+  autoStopped  Boolean @default(false)
+  idleDetected Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([taskId])
+}
+
+model AttendanceAuditLog {
+  id Int @id @default(autoincrement())
+
+  attendanceId Int
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  editedById Int
+  editedBy   Employee @relation(fields: [editedById], references: [id])
+
+  fieldChanged String
+  oldValue     String?
+  newValue     String?
+
+  reason String?
+
+  createdAt DateTime @default(now())
+}
+
+model LeaveType {
+  id       Int     @id @default(autoincrement())
+  name     String
+  code     String  @unique
+  isActive Boolean @default(true)
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  leaveRequests LeaveRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model LeaveRequest {
+  id Int @id @default(autoincrement())
+
+  // 👤 Employee who applied
+  employeeId Int
+  employee   Employee @relation("EmployeeLeaveRequests", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // 🏷 Leave Type
+  leaveTypeId Int
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  // 🏢 Organization
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // 📅 Dates
+  startDate DateTime
+  endDate   DateTime
+  days      Float    @default(1)
+
+  reason String?
+
+  // 📌 Status
+  status  LeaveStatus   @default(PENDING)
+  payType LeavePayType?
+
+  // 👮 Reviewer (Admin/Supervisor)
+  reviewedById Int?
+  reviewedBy   Employee? @relation("LeaveReviewedBy", fields: [reviewedById], references: [id])
+
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+enum OvertimeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Overtime {
+  id Int @id @default(autoincrement())
+
+  // 🔹 Employee who gets overtime
+  employeeId Int
+  employee   Employee @relation("EmployeeOvertime", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // 🔹 Who created overtime (Admin only)
+  createdById Int
+  createdBy   Employee @relation("OvertimeCreatedBy", fields: [createdById], references: [id])
+
+  // 🔹 Who approved/rejected
+  reviewedById Int?
+  reviewedBy   Employee? @relation("OvertimeReviewedBy", fields: [reviewedById], references: [id])
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  date   DateTime
+  hours  Float
+  rate   Float // multiplier e.g 1.5
+  amount Float // calculated for payroll
+
+  reason String?
+
+  status OvertimeStatus @default(PENDING)
+
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([date])
+}
+
+enum InvoiceCompanyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model InvoiceCompany {
+  id Int @id @default(autoincrement())
+
+  name    String
+  title   String
+  phone   String
+  email   String?
+  vat     String?
+  logoUrl String?
+
+  status InvoiceCompanyStatus @default(ACTIVE)
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  invoices Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Invoice {
+  id Int @id @default(autoincrement())
+
+  invoiceNumber String @unique
+
+  companyId Int
+  company   InvoiceCompany @relation(fields: [companyId], references: [id])
+
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  issueDate DateTime
+  dueDate   DateTime?
+
+  currency String
+
+  subtotal Float
+  discount Float
+  tax      Float
+  total    Float
+
+  paidAmount Float @default(0)
+  balance    Float
+
+  status InvoiceStatus @default(UNPAID)
+
+  items        InvoiceItem[]
+  transactions InvoiceTransaction[]
+  logs         InvoiceLog[]
+
+  createdById Int
+  createdBy   Employee @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id Int @id @default(autoincrement())
+
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  quantity    Float
+  unitPrice   Float
+
+  discountType  String
+  discountValue Float
+
+  total Float
+}
+
+model InvoiceTransaction {
+  id Int @id @default(autoincrement())
+
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount        Float
+  paymentMethod String?
+  reference     String?
+
+  createdById Int
+  createdBy   Employee @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+model InvoiceLog {
+  id Int @id @default(autoincrement())
+
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  action      String
+  description String?
+
+  userId Int
+  user   Employee @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+enum PayrollStatus {
+  DRAFT
+  GENERATED
+  PAID
+}
+
+model Payroll {
+  id Int @id @default(autoincrement())
+
+  employeeId Int
+  employee   Employee @relation("EmployeePayrollRecords", fields: [employeeId], references: [id])
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  payoutType     String
+  rate           Float
+  currency       String
+  isEditable     Boolean @default(true)
+  workingDays    Int
+  presentDays    Int
+  absentDays     Int
+  leaveDays      Int
+  lateDays       Int
+  paymentMethod  String? // BANK | CASH | TRANSFER
+  transactionRef String?
+
+  overtimeHours Float @default(0)
+
+  grossSalary Float
+  netSalary   Float
+  runId       Int?
+  run         PayrollRun? @relation(fields: [runId], references: [id])
+
+  locked Boolean   @default(false)
+  paidAt DateTime?
+
+  status PayrollStatus @default(GENERATED)
+
+  createdById Int
+  createdBy   Employee @relation("PayrollCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // ✅ ADD THIS RELATION
+
+  components PayrollComponent[]
+  auditLogs  PayrollAuditLog[]
+
+  @@index([employeeId])
+  @@index([organizationId])
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  GENERATED
+  UNDER_REVIEW
+  APPROVED
+  LOCKED
+  PAID
+}
+
+model PayrollRun {
+  id Int @id @default(autoincrement())
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  month Int
+  year  Int
+
+  status PayrollRunStatus @default(DRAFT)
+
+  totalEmployees Int       @default(0)
+  totalGross     Float     @default(0)
+  totalNet       Float     @default(0)
+  lockedAt       DateTime?
+
+  generatedById Int
+  generatedBy   Employee @relation("PayrollRunGeneratedBy", fields: [generatedById], references: [id])
+
+  approvedById Int?
+  approvedBy   Employee? @relation("PayrollApprovedBy", fields: [approvedById], references: [id])
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payrolls Payroll[]
+
+  @@unique([organizationId, month, year])
+}
+
+enum PayrollComponentType {
+  BASIC
+  ALLOWANCE
+  BONUS
+  COMMISSION
+  TAX
+  LOAN
+  DEDUCTION
+  OVERTIME
+}
+
+model PayrollComponent {
+  id Int @id @default(autoincrement())
+
+  payrollId Int
+  payroll   Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  type   PayrollComponentType
+  title  String
+  amount Float
+
+  createdById Int?
+  createdBy   Employee? @relation(fields: [createdById], references: [id])
+
+  isTaxable Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+model PayrollAuditLog {
+  id Int @id @default(autoincrement())
+
+  payrollId Int
+  payroll   Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  action        String // CREATED | UPDATED | APPROVED | PAID | DELETED
+  performedById Int
+  performedBy   Employee @relation(fields: [performedById], references: [id])
+
+  note String?
+
+  createdAt DateTime @default(now())
+}
+
+// Add these new models to the end of your Prisma schema
+
+model Remark {
+  id          Int                @id @default(autoincrement())
+  title       String?
+  content     String
+  taskId      Int
+  task        Task               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdById Int
+  createdBy   Employee           @relation(fields: [createdById], references: [id])
+  attachments RemarkAttachment[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
+
+  @@index([taskId])
+  @@index([createdById])
+  @@index([deletedAt])
+}
+
+model RemarkAttachment {
+  id       Int     @id @default(autoincrement())
+  remarkId Int
+  remark   Remark  @relation(fields: [remarkId], references: [id], onDelete: Cascade)
+  fileName String
+  filePath String
+  mimeType String?
+
+  createdAt DateTime @default(now())
+
+  @@index([remarkId])
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ON_HOLD
+}
+
+enum JobPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CandidateStatus {
+  APPLIED
+  SHORTLISTED
+  INTERVIEW
+  OFFERED
+  HIRED
+  REJECTED
+}
+
+model Job {
+  id Int @id @default(autoincrement())
+
+  title       String
+  description String?
+
+  department     String
+  location       String
+  experience     Int?
+  salaryMin      Float?
+  salaryMax      Float?
+  positions      Int?
+  employmentType String?
+  deadline       DateTime?
+
+  skills String?
+
+  priority JobPriority @default(MEDIUM)
+  status   JobStatus   @default(DRAFT)
+
+  ////////////////////////////////////////
+  // 🔥 Binding
+  ////////////////////////////////////////
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  postedById Int
+  postedBy   Employee @relation(fields: [postedById], references: [id])
+
+  ////////////////////////////////////////
+
+  candidates Candidate[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([priority])
+}
+
+model Candidate {
+  id Int @id @default(autoincrement())
+
+  name    String
+  email   String
+  phone   String?
+  cnic    String?
+  address String?
+
+  qualification String?
+  experience    Int?
+
+  cvUrl String?
+
+  status CandidateStatus @default(APPLIED)
+
+  ////////////////////////////////////////
+  // 🔥 Bind with Job + Org
+  ////////////////////////////////////////
+
+  jobId Int
+  job   Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  ////////////////////////////////////////
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([jobId])
+  @@index([status])
+}
