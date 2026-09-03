@@ -36,6 +36,7 @@ import Jobs from "./pages/Jobs";
 import JobApplicants from "./pages/JobApplicants";
 import Organization from "./pages/Organization";
 import { Register } from "./pages/Register";
+import { Profile } from "./pages/Profile";
 
 // Wrapper component for providers
 import { Navigate } from "react-router";
@@ -118,6 +119,7 @@ export const router = createBrowserRouter([
       { path: "performance", Component: Performance },
       { path: "assets", Component: Assets },
       { path: "reports", Component: Reports },
+      { path: "profile", Component: Profile },
       { path: "*", Component: NotFound },
     ],
   },

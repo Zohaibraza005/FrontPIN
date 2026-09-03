@@ -1,15 +1,10 @@
 // pages/PostJob.tsx
 import { useState } from "react";
-import { departmentAPI, locationAPI } from "../services/api";
+import { departmentAPI, locationAPI, jobAPI } from "../services/api";
 import { useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Button } from "../components/ui/button";
@@ -22,31 +17,30 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { toast } from "sonner";
-import { jobAPI } from "../services/api";
 
 export default function PostJob() {
   const navigate = useNavigate();
 
   const [departments, setDepartments] = useState<any[]>([]);
-const [locations, setLocations] = useState<any[]>([]);
-useEffect(() => {
-  const fetchData = async () => {
-    try {
-      const [depRes, locRes] = await Promise.all([
-        departmentAPI.getDepartments(),
-        locationAPI.getLocations(),
-      ]);
+  const [locations, setLocations] = useState<any[]>([]);
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [depRes, locRes] = await Promise.all([
+          departmentAPI.getDepartments(),
+          locationAPI.getLocations(),
+        ]);
 
-      setDepartments(depRes.data);
-      setLocations(locRes.data);
+        setDepartments(depRes.data);
+        setLocations(locRes.data);
 
-    } catch (err) {
-      toast.error("Failed to load departments or locations");
-    }
-  };
+      } catch (err) {
+        toast.error("Failed to load departments or locations");
+      }
+    };
 
-  fetchData();
-}, []);
+    fetchData();
+  }, []);
 
   const [form, setForm] = useState({
     title: "",
@@ -70,7 +64,7 @@ useEffect(() => {
         toast.error("Please fill required fields");
         return;
       }
-  
+
       const payload = {
         ...form,
         experience: form.experience ? Number(form.experience) : null,
@@ -79,13 +73,13 @@ useEffect(() => {
         positions: form.positions ? Number(form.positions) : null,
         deadline: form.deadline || null,
       };
-  
+
       await jobAPI.createJob(payload);
-  
+
       toast.success("🎉 Job posted successfully!");
-  
+
       navigate("/jobs");
-  
+
     } catch (error) {
       console.error(error);
       toast.error("Failed to post job");
@@ -113,9 +107,7 @@ useEffect(() => {
           </div>
         </div>
 
-        <Button onClick={handleSubmit}>
-          Publish Job
-        </Button>
+       
       </div>
 
       {/* ================= FORM CARD ================= */}
@@ -164,11 +156,11 @@ useEffect(() => {
                   <SelectValue placeholder="Select Department" />
                 </SelectTrigger>
                 <SelectContent>
-                {departments.map((dep) => (
-                <SelectItem key={dep.id} value={dep.id.toString()}>
-                  {dep.title}
-                </SelectItem>
-              ))}
+                  {departments.map((dep) => (
+                    <SelectItem key={dep.id} value={dep.id.toString()}>
+                      {dep.title}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -184,12 +176,12 @@ useEffect(() => {
                   <SelectValue placeholder="Select Location" />
                 </SelectTrigger>
                 <SelectContent>
-  {locations.map((loc) => (
-    <SelectItem key={loc.id} value={loc.id.toString()}>
-      {loc.name}
-    </SelectItem>
-  ))}
-</SelectContent>
+                  {locations.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.id.toString()}>
+                      {loc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           </div>
@@ -319,8 +311,13 @@ useEffect(() => {
               }
             />
           </div>
-
+          <div className="flex justify-end">
+            <Button onClick={handleSubmit}>
+              Publish Job
+            </Button>
+          </div>
         </CardContent>
+
       </Card>
     </div>
   );

@@ -6,6 +6,6 @@ const { protect } = require("../../middleware/auth");
 
 router.post("/",protect,upload.single("logo"), controller.createInvoiceCompany);
 router.get("/", protect, controller.getInvoiceCompanies);
-// router.patch("/:id", updateInvoiceCompany);
-// router.delete("/:id", deleteInvoiceCompany);
+router.put("/:id", protect, upload.single("logo"), controller.updateInvoiceCompany);
+router.delete("/:id", protect, controller.deleteInvoiceCompany);
 module.exports = router;

@@ -43,6 +43,7 @@ async function login({ identifier, password }) {
       canLogin: true,
       profileImage:true,
       jobInfo:true,
+      privileges: true,
     },
   });
 
@@ -98,7 +99,8 @@ async function login({ identifier, password }) {
       organizationId: user.organizationId,
       companyId: user.companyId,
       jobInfo: user?.jobInfo ? user?.jobInfo: null,
-      profileImage:user?.profileImage
+      profileImage:user?.profileImage,
+      privileges: user.privileges || []
     },
     accessToken,
     refreshToken,

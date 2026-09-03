@@ -33,7 +33,7 @@ exports.createSchedule = async (req, res) => {
       const isHalfDay = Boolean(allowHalfDay || allow_half_day || halfDayAllowed || half_day_allowed);
       const halfDayMins = isHalfDay ? (halfDayMinutes || half_day_minutes || 240) : null;
   
-      const orgId = req.user.organizationId;
+      const orgId = req.user.orgId;
   
       if (!selectedIds?.length || !days?.length || !startTime || !endTime) {
         return res.status(400).json({
@@ -53,7 +53,8 @@ exports.createSchedule = async (req, res) => {
           where: {
             id: { in: selectedIds },
             organizationId: orgId,
-            deletedAt: null
+            deletedAt: null,
+            NOT: { role: "ADMIN" }
           }
         });
       }
@@ -63,7 +64,8 @@ exports.createSchedule = async (req, res) => {
           where: {
             departmentId: { in: selectedIds },
             organizationId: orgId,
-            deletedAt: null
+            deletedAt: null,
+            NOT: { role: "ADMIN" }
           }
         });
       }
@@ -73,7 +75,8 @@ exports.createSchedule = async (req, res) => {
           where: {
             companyId: { in: selectedIds },
             organizationId: orgId,
-            deletedAt: null
+            deletedAt: null,
+            NOT: { role: "ADMIN" }
           }
         });
       }
@@ -81,7 +84,7 @@ exports.createSchedule = async (req, res) => {
       if (!employees.length) {
         return res.status(400).json({
           success: false,
-          message: "No employees found"
+          message: "No valid employee targets found. Schedules cannot be created for Super Admin accounts."
         });
       }
   
@@ -184,21 +187,50 @@ exports.createSchedule = async (req, res) => {
 
 exports.getSchedules = async (req, res) => {
   try {
-    const orgId = req.user.organizationId;
+    const orgId = req.user.orgId;
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    // Build where clause based on role
+    const whereClause = {
+      deletedAt: null,
+      employee: {
+        organizationId: orgId,
+        NOT: { role: "ADMIN" }
+      }
+    };
+
+    // Non-admin users (Agent / USER) only see their own schedule
+    if (role === "USER" || role === "user") {
+      whereClause.employeeId = userId;
+    } else if (role === "SUPERVISOR" || role === "supervisor") {
+      whereClause.employee = {
+        organizationId: orgId,
+        deletedAt: null,
+        NOT: { role: "ADMIN" },
+        OR: [
+          { id: userId },
+          { supervisorId: userId }
+        ]
+      };
+    }
 
     const schedules = await prisma.schedule.findMany({
-      where: {
-        deletedAt: null,
-        employee: {
-          organizationId: orgId
-        }
-      },
+      where: whereClause,
       include: {
         employee: {
           select: {
             id: true,
             firstName: true,
-            lastName: true
+            lastName: true,
+            role: true,
+            companyId: true,
+            company: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
           }
         },
         company: true

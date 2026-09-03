@@ -70,6 +70,7 @@ import {
 } from './ui/select';
 import { Input } from './ui/input';
 import { API_URL, attendanceAPI } from '../services/api';
+import { locationAPI } from '../services/locationAPI';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
@@ -77,19 +78,19 @@ import { cn } from './ui/utils';
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN'] },
-  { icon: FolderKanban, label: 'Projects', path: '/projects', roles: ['ADMIN', 'SUPERVISOR'] },
-  { icon: CheckSquare, label: 'Tasks', path: '/tasks', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN'] },
-  { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Users, label: 'Employee', path: '/employees', roles: ['ADMIN'] },
+  { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
+  { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
+  // { icon: FolderKanban, label: 'Projects', path: '/projects', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PROJECT' },
+  // { icon: CheckSquare, label: 'Tasks', path: '/tasks', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'TASK' },
+  // { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'INVOICE' },
+  { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
+  { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
+  { icon: Users, label: 'Employee', path: '/employees', roles: ['ADMIN'], module: 'EMPLOYEE' },
   { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN'] },
   // { icon: MapPin, label: 'Locations', path: '/locations', roles: ['ADMIN'] },
   // { icon: MapPin, label: 'Departments', path: '/departments', roles: ['ADMIN'] },
-  { icon: UserPlus, label: 'Recruitment', path: '/jobs', roles: ['ADMIN'] },
-  { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN'] },
+  // { icon: UserPlus, label: 'Recruitment', path: '/jobs', roles: ['ADMIN'] },
+  { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
   {
     icon: Cog,
     label: 'Organization',
@@ -138,6 +139,48 @@ export const Layout: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [endOfDaySummary, setEndOfDaySummary] = useState<string>('');
   const [summaryError, setSummaryError] = useState<string>('');
+
+  // Location header state
+  const getInitialHeaderLoc = () => {
+    const stored = localStorage.getItem("selectedLocation") || localStorage.getItem("dashboard-selected-location") || "all";
+    return stored.toLowerCase() === "all" ? "all" : stored;
+  };
+  const [selectedHeaderLocation, setSelectedHeaderLocation] = useState(getInitialHeaderLoc);
+  const [headerLocations, setHeaderLocations] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const res = await locationAPI.getLocations();
+        setHeaderLocations(res?.data || res || []);
+      } catch (err) {
+        console.error("Failed to fetch locations in header:", err);
+      }
+    };
+    if (user?.role === 'ADMIN' || user?.role === 'SUPERVISOR') {
+      fetchLocations();
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const val = e.detail || localStorage.getItem("selectedLocation") || "all";
+      const normalized = val.toLowerCase() === "all" ? "all" : val;
+      setSelectedHeaderLocation(normalized);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
+
+  const handleHeaderLocationChange = (val: string) => {
+    const normalized = val.toLowerCase() === "all" ? "all" : val;
+    setSelectedHeaderLocation(normalized);
+    localStorage.setItem("selectedLocation", normalized);
+    localStorage.setItem("dashboard-selected-location", normalized);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: normalized }));
+  };
 
 
   // Attendance states
@@ -213,15 +256,20 @@ export const Layout: React.FC = () => {
   }, []);
 
   const [isTodayOff, setIsTodayOff] = useState(false);
+  const [realTime, setRealTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setRealTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const loadTodayStatus = async () => {
+    if (user?.role === 'ADMIN') return;
     try {
       const res = await attendanceAPI.getTodayStatus();
       updateBreakData(res);
 
-      if (res.isOffDay) {
-        setIsTodayOff(true);
-      }
+      setIsTodayOff(Boolean(res.isOffDay));
 
       if (res.clockedOut) {
         setIsClockedIn(false);
@@ -343,7 +391,8 @@ export const Layout: React.FC = () => {
         return;
       }
 
-      if (!selectedItem) return;
+      const itemToUse = selectedItem || "General Work";
+      const tabToUse = selectedTab || "activity";
 
       const location = await getLocation();
 
@@ -351,9 +400,9 @@ export const Layout: React.FC = () => {
       const payload = {
         lat: location.lat || 0,
         lng: location.lng || 0,
-        activityType: selectedTab,
-        activityName: selectedTab === "activity" ? selectedItem : undefined,
-        taskId: selectedTab === "task" ? Number(selectedItem) : null,
+        activityType: tabToUse,
+        activityName: tabToUse === "activity" ? itemToUse : undefined,
+        taskId: tabToUse === "task" && itemToUse ? Number(itemToUse) : null,
         method: 'PIN'
       };
 
@@ -375,6 +424,7 @@ export const Layout: React.FC = () => {
       setElapsedTime(0);
 
       setDrawerOpen(false);
+      window.dispatchEvent(new CustomEvent('attendance-updated'));
       if (window?.tracking) {
         await window.tracking.start(res.id)
       }
@@ -594,7 +644,8 @@ export const Layout: React.FC = () => {
       setEndOfDaySummary('');           // clear summary
       setSummaryError('');
       setDrawerOpen(false);
-      loadTodayStatus()
+      loadTodayStatus();
+      window.dispatchEvent(new CustomEvent('attendance-updated'));
       if (window.tracking) {
         await window.tracking.stop()
       }
@@ -612,7 +663,32 @@ export const Layout: React.FC = () => {
     return null;
   }
 
-  const filteredMenuItems = menuItems.filter(item => item.roles.includes(user.role));
+  const filteredMenuItems = menuItems.filter(item => {
+    // 1. Check if the user's role is allowed for this item
+    if (!item.roles.includes(user.role)) {
+      return false;
+    }
+
+    // 2. ADMIN role bypasses privilege restrictions
+    if (user.role === 'ADMIN') {
+      return true;
+    }
+
+    // 3. Check specific module privileges if defined
+    if (item.module) {
+      const privileges = user.privileges || [];
+      const priv = privileges.find(p => p.module === item.module);
+      if (priv) {
+        return priv.canRead;
+      }
+      
+      // Default fallback when privilege record is missing in DB/session
+      const defaultVisibleModules = ['ATTENDANCE', 'TASK', 'LEAVE', 'OVERTIME', 'SCHEDULE'];
+      return defaultVisibleModules.includes(item.module);
+    }
+
+    return true;
+  });
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -808,213 +884,211 @@ export const Layout: React.FC = () => {
 
           <div className="flex items-center gap-3">
 
-            {isClockedIn ? (
-              <TooltipProvider>
-                <div className="flex items-center gap-2 sm:gap-3 relative flex-wrap">
-                  {/* Break / Resume Button */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className={`h-9 w-9 transition-colors ${isOnBreak
-                          ? 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200'
-                          : 'hover:bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
-                        onClick={handleBreak}
-                      >
-                        <Coffee className="h-5 w-5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs p-3 space-y-1.5 max-w-xs">
-                      <div className="font-bold text-sm text-gray-900 border-b pb-1 flex items-center justify-between gap-2">
-                        <span>Break Status</span>
-                        <span className="text-xs font-normal text-gray-500">
-                          {allowedBreakCount > 0 ? `${allowedBreakCount} allowed (${totalAllowedBreakMinutes}m total)` : '0 allowed'}
-                        </span>
-                      </div>
-                      {isOnBreak ? (
-                        <div className="text-amber-700 font-semibold">
-                          Currently taking Break {currentBreakNumber}{allowedBreakCount > 0 ? ` of ${allowedBreakCount}` : ''}
-                        </div>
-                      ) : (
-                        <div className="text-gray-600 font-medium">
-                          Next break: Break {currentBreakNumber}{allowedBreakCount > 0 ? ` of ${allowedBreakCount}` : ''}
-                        </div>
-                      )}
-                      <div className="text-gray-600 text-[11px]">
-                        Total Used Break Time: <span className="font-semibold">{totalUsedBreakMinutes} mins</span>
-                      </div>
-                      {completedBreaks.length > 0 && (
-                        <div className="pt-1 border-t space-y-1 text-[11px]">
-                          <div className="font-semibold text-gray-700">Completed Breaks:</div>
-                          {completedBreaks.map((b: any) => (
-                            <div key={b.breakNumber} className="flex justify-between text-gray-600">
-                              <span>Break #{b.breakNumber}</span>
-                              <span className="font-mono">{b.durationMinutes} min</span>
+            {user?.role !== 'ADMIN' && (
+              isClockedIn ? (
+                <TooltipProvider>
+                  <div className="flex items-center gap-2 sm:gap-2.5 bg-gray-50 border border-gray-200/80 rounded-xl px-2.5 py-1.5 shadow-xs flex-nowrap">
+                    {/* Actions Group */}
+                    <div className="flex items-center gap-1">
+                      {/* Break / Resume Button */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={`h-8 w-8 transition-colors rounded-lg ${isOnBreak
+                              ? 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200'
+                              : 'hover:bg-amber-50 text-amber-700 border-amber-200'
+                              }`}
+                            onClick={handleBreak}
+                          >
+                            <Coffee className="h-4.5 w-4.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="text-xs p-3 space-y-1.5 max-w-xs">
+                          <div className="font-bold text-sm text-gray-900 border-b pb-1 flex items-center justify-between gap-2">
+                            <span>Break Status</span>
+                            <span className="text-xs font-normal text-gray-500">
+                              {allowedBreakCount > 0 ? `${allowedBreakCount} allowed (${totalAllowedBreakMinutes}m total)` : '0 allowed'}
+                            </span>
+                          </div>
+                          {isOnBreak ? (
+                            <div className="text-amber-700 font-semibold">
+                              Currently taking Break {currentBreakNumber}{allowedBreakCount > 0 ? ` of ${allowedBreakCount}` : ''}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
+                          ) : (
+                            <div className="text-gray-600 font-medium">
+                              Next break: Break {currentBreakNumber}{allowedBreakCount > 0 ? ` of ${allowedBreakCount}` : ''}
+                            </div>
+                          )}
+                          <div className="text-gray-600 text-[11px]">
+                            Total Used Break Time: <span className="font-semibold">{totalUsedBreakMinutes} mins</span>
+                          </div>
+                          {completedBreaks.length > 0 && (
+                            <div className="pt-1 border-t space-y-1 text-[11px]">
+                              <div className="font-semibold text-gray-700">Completed Breaks:</div>
+                              {completedBreaks.map((b: any) => (
+                                <div key={b.breakNumber} className="flex justify-between text-gray-600">
+                                  <span>Break #{b.breakNumber}</span>
+                                  <span className="font-mono">{b.durationMinutes} min</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
 
-                  {/* Change Activity */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        disabled={isOnBreak}
-                        size="icon"
-                        className="h-9 w-9 hover:bg-indigo-50 text-indigo-600 border-indigo-200"
-                        onClick={() => {
-                          setDrawerMode('change');
-                          setPinVerified(true);
-                          setSelectedTab('activity');
-                          setSelectedItem('');
-                          setDrawerOpen(true);
-                        }}
-                      >
-                        <RefreshCw className="h-5 w-5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Change Activity / Task</TooltipContent>
-                  </Tooltip>
+                      {/* Change Activity */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            disabled={isOnBreak}
+                            size="icon"
+                            className="h-8 w-8 hover:bg-indigo-50 text-indigo-600 border-indigo-200 rounded-lg"
+                            onClick={() => {
+                              setDrawerMode('change');
+                              setPinVerified(true);
+                              setSelectedTab('activity');
+                              setSelectedItem('');
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            <RefreshCw className="h-4.5 w-4.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Change Activity / Task</TooltipContent>
+                      </Tooltip>
 
-                  {/* Clock Out */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        disabled={isOnBreak}
+                      {/* Clock Out */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            disabled={isOnBreak}
+                            size="icon"
+                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 rounded-lg"
+                            onClick={() => {
+                              setDrawerMode('clockout');
+                              setPinVerified(true);
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            <LogOut className="h-4.5 w-4.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Clock Out</TooltipContent>
+                      </Tooltip>
+                    </div>
 
-                        size="icon"
-                        className="h-9 w-9 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                        onClick={() => {
-                          setDrawerMode('clockout');
-                          setPinVerified(true);
-                          setDrawerOpen(true);
-                        }}
-                      >
-                        <LogOut className="h-5 w-5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Clock Out</TooltipContent>
-                  </Tooltip>
+                    {/* Vertical Divider */}
+                    <div className="h-5 w-px bg-gray-200 mx-0.5" />
 
-                  {/* Timer + Status */}
-                  <div className="flex items-center gap-2.5 pl-2 border-l border-gray-200">
-                    <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
-
-                      <div className="text-sm sm:text-lg font-mono font-bold text-gray-900 tracking-widest">
+                    {/* Timer & Status Group */}
+                    <div className="flex items-center gap-2 flex-nowrap">
+                      {/* Time Counter */}
+                      <div className="text-sm font-semibold font-mono text-gray-900 tracking-wider whitespace-nowrap">
                         {formatTime(elapsedTime)}
                       </div>
 
+                      {/* Status Badge */}
                       {isOnBreak ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-900 rounded-full border border-amber-300 flex items-center gap-1.5 shadow-xs">
-                            <Coffee className="w-3.5 h-3.5 text-amber-700 animate-pulse" />
-                            <span>
-                              On Break (Break {currentBreakNumber}{allowedBreakCount > 0 ? ` of ${allowedBreakCount}` : ''})
-                            </span>
+                        <div className="flex items-center gap-1.5 flex-nowrap">
+                          <span className="px-2 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-900 rounded-md border border-amber-200 flex items-center gap-1 whitespace-nowrap">
+                            <Coffee className="w-3 h-3 text-amber-700 animate-pulse" />
+                            <span className="hidden sm:inline">On Break</span>
                           </span>
-                          <span className="font-mono text-xs font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200" title="Active break timer">
-                            ⏱ {formatTime(activeBreakSeconds)}
+                          <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-250 whitespace-nowrap">
+                            {formatTime(activeBreakSeconds)}
                           </span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-1 text-[10px] sm:text-xs font-medium bg-green-100 text-green-800 rounded-full border border-green-300 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-green-600" />
+                        <div className="flex items-center gap-1 flex-nowrap">
+                          <span className="px-2 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 rounded-md border border-green-200 flex items-center gap-1 whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
                             <span>Working</span>
                           </span>
                           {totalUsedBreakMinutes > 0 && (
-                            <span className="text-[11px] text-gray-500 font-medium">
-                              (Breaks: {totalUsedBreakMinutes}m{allowedBreakCount > 0 ? ` / ${totalAllowedBreakMinutes}m` : ''})
+                            <span className="text-[10px] text-gray-400 font-medium hidden md:inline whitespace-nowrap">
+                              ({totalUsedBreakMinutes}m break)
                             </span>
                           )}
                         </div>
                       )}
 
-                    </div>
-
-
-                    <div className="flex items-center gap-1.5">
-                      {/* {isOnBreak ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
-                <Coffee className="h-3 w-3 mr-1" />
-                Break
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
-                <Clock className="h-3 w-3 mr-1" />
-                Working
-              </span>
-            )} */}
+                      {/* Current Activity */}
                       {currentActivity && (
-                        <div className="text-xs text-gray-500 ml-2 font-medium">
-                          {currentActivity.type === "task"
-                            ? `Task: ${currentActivity.name}`
-                            : `Activity: ${currentActivity.name}`}
+                        <div className="hidden lg:flex items-center gap-1 text-[10px] text-gray-400 max-w-[120px] whitespace-nowrap" title={currentActivity.name}>
+                          <span className="w-1 h-1 rounded-full bg-gray-300" />
+                          <span className="truncate">{currentActivity.name}</span>
                         </div>
                       )}
                     </div>
                   </div>
-                </div>
-              </TooltipProvider>
-            ) : clockedOutInfo ? (
-              <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border rounded-lg">
-                <div className="text-sm text-gray-600">
-                  <span className="font-medium text-green-600">
-                    In:{" "}
-                  </span>
-                  {new Date(clockedOutInfo.checkInTime).toLocaleTimeString()}
-                </div>
+                </TooltipProvider>
+              ) : clockedOutInfo ? (
+                <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border rounded-lg">
+                  <div className="text-sm text-gray-600">
+                    <span className="font-medium text-green-600">
+                      In:{" "}
+                    </span>
+                    {new Date(clockedOutInfo.checkInTime).toLocaleTimeString()}
+                  </div>
 
-                <div className="text-sm text-gray-600">
-                  <span className="font-medium text-red-600">
-                    Out:{" "}
-                  </span>
-                  {new Date(clockedOutInfo.checkOutTime).toLocaleTimeString()}
-                </div>
+                  <div className="text-sm text-gray-600">
+                    <span className="font-medium text-red-600">
+                      Out:{" "}
+                    </span>
+                    {new Date(clockedOutInfo.checkOutTime).toLocaleTimeString()}
+                  </div>
 
-              </div>
-            ) : (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="bg-green-600 hover:bg-green-700 text-white gap-1.5 px-4"
-                      onClick={() => {
-                        setDrawerMode('clockin');
-                        setPinVerified(false);
-                        setPinInput('');
-                        setSelectedTab('activity');
-                        setSelectedItem('');
-                        setDrawerOpen(true);
-                      }}
-                    >
-                      <Clock className="h-4 w-4" />
-                      Clock In
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Start your workday</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                </div>
+              ) : (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white gap-1.5 px-4"
+                        onClick={() => {
+                          setDrawerMode('clockin');
+                          setPinVerified(false);
+                          setPinInput('');
+                          setSelectedTab('activity');
+                          setSelectedItem('');
+                          setDrawerOpen(true);
+                        }}
+                      >
+                        <Clock className="h-4 w-4" />
+                        Clock In
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Start your workday</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )
             )}
 
-            {/* Help Tour Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={startTour}
-              className="hidden md:flex"
-            >
-              <HelpCircle className="size-4 mr-2" />
-              Take Tour
-            </Button>
+            {/* Location Selector */}
+            {(user?.role === 'ADMIN' || user?.role === 'SUPERVISOR') && (
+              <Select
+                value={selectedHeaderLocation}
+                onValueChange={handleHeaderLocationChange}
+              >
+                <SelectTrigger className="w-[150px] sm:w-[180px] bg-white text-black border-gray-300">
+                  <SelectValue placeholder="Select Location" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Locations</SelectItem>
+                  {headerLocations.map((loc: any) => (
+                    <SelectItem key={loc.id} value={String(loc.id)}>
+                      {loc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             {/* Notifications */}
             <div className="relative">
@@ -1070,33 +1144,75 @@ export const Layout: React.FC = () => {
                   setProfileOpen(!profileOpen);
                   setNotifOpen(false);
                 }}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 p-1.5 hover:bg-gray-100 rounded-full sm:rounded-lg"
               >
-                <div className="size-8 rounded-full bg-blue-600 text-white flex items-center justify-center">
-                  {user.firstName.charAt(0)}
-                </div>
-                <ChevronDown className="size-4" />
+                {user.profileImage ? (
+                  <img
+                    src={user.profileImage.startsWith("http") ? user.profileImage : `${API_URL}${user.profileImage}`}
+                    alt={user.firstName}
+                    className="size-8 rounded-full object-cover border border-blue-200"
+                  />
+                ) : (
+                  <div className="size-8 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-center font-semibold text-sm shadow-sm">
+                    {user.firstName ? user.firstName.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                )}
+                <span className="hidden md:inline-block text-sm font-medium text-gray-700">
+                  {user.firstName} {user.lastName || ''}
+                </span>
+                <ChevronDown className="size-4 text-gray-500" />
               </Button>
 
               {profileOpen && (
-                <div className="absolute right-0 mt-2 w-[85vw] sm:w-56 bg-white shadow-xl rounded-xl border z-50">
-                  <div className="p-4 border-b">
-                    <p className="font-medium">{user.firstName}</p>
-                    <p className="text-xs text-gray-500">{user.email}</p>
+                <div className="absolute right-0 mt-2 w-[85vw] sm:w-64 bg-white shadow-xl rounded-xl border border-gray-100 z-50 overflow-hidden divide-y divide-gray-100">
+                  <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50/50 flex items-center gap-3">
+                    {user.profileImage ? (
+                      <img
+                        src={user.profileImage.startsWith("http") ? user.profileImage : `${API_URL}${user.profileImage}`}
+                        alt={user.firstName}
+                        className="size-10 rounded-full object-cover border-2 border-white shadow-sm"
+                      />
+                    ) : (
+                      <div className="size-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-semibold text-base shadow-sm">
+                        {user.firstName ? user.firstName.charAt(0).toUpperCase() : 'U'}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-sm text-gray-900 truncate">
+                        {user.firstName} {user.lastName || ''}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                      <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold bg-blue-100 text-blue-700 rounded-full uppercase">
+                        {user.role || 'User'}
+                      </span>
+                    </div>
                   </div>
 
-                  <button
-                    className="w-full text-left px-4 py-2 hover:bg-gray-50"
-                  >
-                    Profile
-                  </button>
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        setProfileOpen(false);
+                        navigate('/profile');
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2.5 transition-colors"
+                    >
+                      <User className="size-4 text-gray-400 group-hover:text-blue-600" />
+                      My Profile
+                    </button>
+                  </div>
 
-                  <button
-                    onClick={logout}
-                    className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50"
-                  >
-                    Logout
-                  </button>
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        setProfileOpen(false);
+                        logout();
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
+                    >
+                      <LogOut className="size-4 text-red-500" />
+                      Logout
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1111,7 +1227,7 @@ export const Layout: React.FC = () => {
       </div>
 
       {/* Offcanvas Drawer */}
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <Sheet open={user?.role !== 'ADMIN' && drawerOpen} onOpenChange={(open) => user?.role !== 'ADMIN' && setDrawerOpen(open)}>
         <SheetContent
           side="right"
           className="w-full sm:w-[480px] md:w-[540px] overflow-y-auto"
@@ -1285,7 +1401,7 @@ export const Layout: React.FC = () => {
                       <div>
                         <p className="text-xs text-gray-500 uppercase tracking-wide">Today</p>
                         <span style={{ fontSize: 12 }} className="text-gray-900">
-                          {new Date().toLocaleDateString('en-GB', {
+                          {realTime.toLocaleDateString('en-GB', {
                             weekday: 'long',
                             year: 'numeric',
                             month: 'long',
@@ -1300,7 +1416,7 @@ export const Layout: React.FC = () => {
                       <div>
                         <p className="text-xs text-gray-500 uppercase tracking-wide">Current Time</p>
                         <p style={{ fontSize: 12 }} className="text-gray-900 tracking-wide">
-                          {new Date().toLocaleTimeString('en-US', {
+                          {realTime.toLocaleTimeString('en-US', {
                             hour: '2-digit',
                             minute: '2-digit',
                             hour12: true
@@ -1311,7 +1427,7 @@ export const Layout: React.FC = () => {
                   </div>
                 }
 
-                {drawerMode !== 'clockout' ? (
+                {drawerMode === 'change' && (
                   <Tabs value={selectedTab} onValueChange={(value) => setSelectedTab(value as 'activity' | 'task')}>
                     <TabsList className='mb-3'>
                       <TabsTrigger value="activity">Activity</TabsTrigger>
@@ -1351,7 +1467,9 @@ export const Layout: React.FC = () => {
                       </Select>
                     </TabsContent>
                   </Tabs>
-                ) : (
+                )}
+
+                {drawerMode === 'clockout' && (
                   <div className="space-y-6 px-3 py-4">
                     <div className="text-center">
                       <h3 className="text-lg font-semibold text-gray-800">Clock Out</h3>
@@ -1419,7 +1537,7 @@ export const Layout: React.FC = () => {
                 <Button variant="outline">Cancel</Button>
               </SheetClose>
               {drawerMode === 'clockin' && (
-                <Button onClick={handleClockIn} disabled={!selectedItem}>
+                <Button onClick={handleClockIn}>
                   Clock In
                 </Button>
               )}

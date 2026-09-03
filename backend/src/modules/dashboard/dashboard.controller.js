@@ -49,6 +49,9 @@ const getAdminDashboard = async (req, res) => {
     const startOfDayUTC = localStartOfDay.toJSDate();
     const endOfDayUTC = localEndOfDay.toJSDate();
 
+    const searchStartUTC = localStartOfDay.minus({ days: 1 }).toJSDate();
+    const searchEndUTC = localEndOfDay.plus({ days: 1 }).toJSDate();
+
     // ────────────────────────────────────────────────
     // Week range – start of week (Monday) to end of week (Sunday)
     // ────────────────────────────────────────────────
@@ -64,6 +67,8 @@ const getAdminDashboard = async (req, res) => {
     // 2️⃣ Location Filter
     // ────────────────────────────────────────────────
     const location = req.query.location;
+    const isLocationFiltered = location && String(location).toUpperCase() !== "ALL" && !isNaN(Number(location));
+    const locationIdNum = isLocationFiltered ? Number(location) : null;
 
     // ────────────────────────────────────────────────
     // 3️⃣ Employee Where Clause
@@ -71,11 +76,11 @@ const getAdminDashboard = async (req, res) => {
     const employeeWhere = {
       organizationId,
       deletedAt: null,
+      NOT: { role: "ADMIN" },
     };
 
-    if (location && location !== "ALL") {
-      employeeWhere.companyId = Number(location); // assuming location = companyId
-      // If your field is actually called locationId → keep as-is
+    if (isLocationFiltered) {
+      employeeWhere.companyId = locationIdNum;
     }
 
     // ────────────────────────────────────────────────
@@ -86,16 +91,30 @@ const getAdminDashboard = async (req, res) => {
       include: {
         Attendance: {
           where: {
-            date: {
-              gte: startOfDayUTC,
-              lt: endOfDayUTC, // exclusive end → covers full day
-            },
+            OR: [
+              {
+                date: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+              {
+                checkInTime: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+            ],
           },
+          orderBy: { createdAt: "desc" },
           include: {
-            activities: true,
+            activities: {
+              orderBy: { startTime: "asc" },
+            },
           },
         },
       },
+      orderBy: { firstName: "asc" },
     });
 
     const employeeIds = employees.map((e) => e.id);
@@ -118,24 +137,44 @@ const getAdminDashboard = async (req, res) => {
     // ────────────────────────────────────────────────
     // 6️⃣ Attendance Widget
     // ────────────────────────────────────────────────
+    const targetDateStr = selectedDateQuery.toFormat("yyyy-MM-dd");
     const attendanceWidget = employees.map((emp) => {
-      const attendance = emp.Attendance[0];
+      const attendance = emp.Attendance.find((att) => {
+        const keys = new Set();
+        if (att.date) {
+          keys.add(DateTime.fromJSDate(new Date(att.date)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        if (att.checkInTime) {
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        return keys.has(targetDateStr);
+      }) || emp.Attendance[0];
 
       let status = "ABSENT";
 
       if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
-      } else if (attendance) {
-        if (attendance.status === "BREAK") {
+      } else if (attendance && attendance.checkInTime) {
+        const hasOpenBreak = attendance.activities?.some(
+          (a) => a.type === "BREAK" && !a.endTime
+        );
+        if (attendance.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (attendance.checkInTime) {
-          status = attendance.isLate ? "LATE" : "PRESENT";
+        } else if (attendance.isLate || attendance.status === "LATE") {
+          status = "LATE";
+        } else {
+          status = "PRESENT";
         }
       }
 
       return {
         id: emp.id,
         name: `${emp.firstName} ${emp.lastName}`,
+        email: emp.email || "N/A",
         status,
         checkInTime: attendance?.checkInTime || null,
         checkOutTime: attendance?.checkOutTime || null,
@@ -153,8 +192,27 @@ const getAdminDashboard = async (req, res) => {
       ["PRESENT", "LATE", "BREAK"].includes(e.status)
     ).length;
 
+    const lateToday = attendanceWidget.filter(
+      (e) => e.isLate || e.status === "LATE"
+    ).length;
+
+    const overtimeRequests = await prisma.overtime.count({
+      where: {
+        OR: [
+          { date: { gte: startOfDayUTC, lte: endOfDayUTC } },
+          { createdAt: { gte: startOfDayUTC, lte: endOfDayUTC } },
+        ],
+        employee: {
+          organizationId,
+          deletedAt: null,
+          NOT: { role: "ADMIN" },
+          ...(isLocationFiltered ? { companyId: locationIdNum } : {}),
+        },
+      },
+    });
+
     const onLeave = leaveEmployeeIds.length;
-    const absentToday = totalEmployees - presentToday - onLeave;
+    const absentToday = Math.max(0, totalEmployees - presentToday - onLeave);
 
     // ────────────────────────────────────────────────
     // 8️⃣ Weekly Attendance Trend
@@ -166,9 +224,7 @@ const getAdminDashboard = async (req, res) => {
         employee: {
           organizationId,
           deletedAt: null,
-          ...(location && location !== "ALL"
-            ? { companyId: Number(location) }
-            : {}),
+          ...(isLocationFiltered ? { companyId: locationIdNum } : {}),
         },
       },
       _count: true,
@@ -271,6 +327,8 @@ const getAdminDashboard = async (req, res) => {
         presentToday,
         onLeave,
         absentToday,
+        lateToday,
+        overtimeRequests,
         activeProjects,
         completedTasks,
         pendingTasks,
@@ -331,7 +389,7 @@ const getWeeklyTimesheet = async (req, res) => {
     let companyWhere = {};
     const location = req.query.location;
 
-    if (location && location !== "ALL") {
+    if (location && String(location).toUpperCase() !== "ALL") {
       const companyId = Number(location);
       if (!isNaN(companyId)) {
         companyWhere = { companyId };
@@ -628,7 +686,34 @@ const getSupervisorDashboard = async (req, res) => {
 const getUserDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { start, end } = getWeekRange();
+    const { date } = req.query;
+
+    const employee = await prisma.employee.findUnique({
+      where: { id: userId },
+      include: {
+        company: true,
+        organization: true,
+        payroll: true,
+      },
+    });
+
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
+
+    const companyName = employee?.company?.name || employee?.organization?.name || "Frontpin";
+    const timezone = employee?.company?.timezone || "UTC";
+
+    let start, end;
+    if (date) {
+      const mDate = moment.tz(date, timezone);
+      start = mDate.clone().startOf("month").subtract(1, "day").startOf("day").utc().toDate();
+      end = mDate.clone().endOf("month").add(1, "day").endOf("day").utc().toDate();
+    } else {
+      const mDate = moment.tz(timezone);
+      start = mDate.clone().startOf("month").subtract(1, "day").startOf("day").utc().toDate();
+      end = mDate.clone().endOf("month").add(1, "day").endOf("day").utc().toDate();
+    }
 
     // 🔥 Fetch only this user's assignee records
     const weeklyAssignees = await prisma.taskAssignee.findMany({
@@ -636,7 +721,6 @@ const getUserDashboard = async (req, res) => {
         employeeId: userId,
         task: {
           deletedAt: null,
-          // createdAt: { gte: start, lte: end },
         },
       },
       include: {
@@ -681,23 +765,243 @@ const getUserDashboard = async (req, res) => {
       completed: weeklyTasks.filter((t) => t.myStatus === "COMPLETED").length,
       overdue: weeklyTasks.filter(
         (t) =>
-          t.deadline && t.deadline < new Date() && t.myStatus !== "COMPLETED"
+          t.deadline && new Date(t.deadline) < new Date() && t.myStatus !== "COMPLETED"
       ).length,
     };
 
-    // 🔥 Attendance same as before
+    // 🔥 Attendance same as before, including punches
     const weeklyAttendance = await prisma.attendance.findMany({
       where: {
         employeeId: userId,
         date: { gte: start, lte: end },
       },
+      include: {
+        punches: {
+          orderBy: { punchTime: "asc" },
+        },
+      },
       orderBy: { date: "asc" },
     });
+
+    // 🔥 Fetch user's leave requests
+    const leaves = await prisma.leaveRequest.findMany({
+      where: {
+        employeeId: userId,
+      },
+      include: {
+        leaveType: true,
+      },
+      orderBy: {
+        startDate: "desc",
+      },
+      take: 5,
+    });
+
+    // 🔥 Fetch user's overtime logs
+    const overtimes = await prisma.overtime.findMany({
+      where: {
+        employeeId: userId,
+      },
+      orderBy: {
+        date: "desc",
+      },
+      take: 5,
+    });
+
+    // 🔥 User Schedule & Today's Working/Off Status
+    const userSchedule = await prisma.schedule.findFirst({
+      where: { employeeId: userId, deletedAt: null },
+    });
+
+    const todayMoment = moment.tz(timezone);
+    const todayDayShort = todayMoment.format("ddd"); // "Mon", "Tue", etc.
+    let isTodayOff = false;
+
+    if (userSchedule && userSchedule.days) {
+      let scheduleDays = [];
+      if (Array.isArray(userSchedule.days)) {
+        scheduleDays = userSchedule.days;
+      } else if (typeof userSchedule.days === "string") {
+        try { scheduleDays = JSON.parse(userSchedule.days); } catch(e) {}
+      }
+      if (scheduleDays.length > 0) {
+        isTodayOff = !scheduleDays.some(
+          (d) => String(d).toLowerCase().startsWith(todayDayShort.toLowerCase())
+        );
+      }
+    } else {
+      // Default weekend check (Saturday / Sunday)
+      const dayNum = todayMoment.day();
+      if (dayNum === 0 || dayNum === 6) {
+        isTodayOff = true;
+      }
+    }
+
+    // 🔥 Real-Time Upcoming Holiday Calculation
+    const todayStart = todayMoment.clone().startOf("day");
+    const cYear = todayStart.year();
+
+    const annualHolidays = [
+      { title: "Kashmir Day", date: `${cYear}-02-05` },
+      { title: "Pakistan Day", date: `${cYear}-03-23` },
+      { title: "Labor Day", date: `${cYear}-05-01` },
+      { title: "Youm-e-Ashur", date: `${cYear}-07-14` },
+      { title: "Independence Day", date: `${cYear}-08-14` },
+      { title: "Defense Day", date: `${cYear}-09-06` },
+      { title: "Milad-un-Nabi", date: `${cYear}-09-16` },
+      { title: "Iqbal Day", date: `${cYear}-11-09` },
+      { title: "Quaid-e-Azam Day", date: `${cYear}-12-25` },
+      { title: "New Year's Day", date: `${cYear + 1}-01-01` },
+    ];
+
+    let nextHoliday = annualHolidays
+      .map((h) => ({ ...h, mDate: moment.tz(h.date, "YYYY-MM-DD", timezone) }))
+      .filter((h) => h.mDate.isSameOrAfter(todayStart))
+      .sort((a, b) => a.mDate.diff(b.mDate))[0];
+
+    if (!nextHoliday) {
+      nextHoliday = {
+        title: "New Year's Day",
+        date: `${cYear + 1}-01-01`,
+        mDate: moment.tz(`${cYear + 1}-01-01`, "YYYY-MM-DD", timezone),
+      };
+    }
+
+    const daysLeftNum = nextHoliday.mDate.diff(todayStart, "days");
+    const upcomingHoliday = {
+      title: nextHoliday.title,
+      date: nextHoliday.mDate.format("MMM D, YYYY"),
+      daysLeft:
+        daysLeftNum === 0
+          ? "Today"
+          : daysLeftNum === 1
+          ? "1 Day Left"
+          : `${daysLeftNum} Days Left`,
+    };
+
+    // 🔥 Leave Balances – per leave type for current year
+    const currentYear = new Date().getFullYear();
+    const yearStart = new Date(currentYear, 0, 1);
+    const yearEnd = new Date(currentYear, 11, 31, 23, 59, 59, 999);
+
+    const leaveTypes = await prisma.leaveType.findMany({
+      where: {
+        organizationId: employee.organizationId,
+        isActive: true,
+      },
+    });
+
+    const approvedLeaves = await prisma.leaveRequest.groupBy({
+      by: ["leaveTypeId"],
+      where: {
+        employeeId: userId,
+        status: "APPROVED",
+        startDate: { gte: yearStart, lte: yearEnd },
+      },
+      _sum: { days: true },
+    });
+
+    const usedMap = {};
+    for (const item of approvedLeaves) {
+      usedMap[item.leaveTypeId] = item._sum.days || 0;
+    }
+
+    const getQuota = (lt) => {
+      const code = String(lt.code || "").toUpperCase();
+      const name = String(lt.name || "").toUpperCase();
+
+      if (code.includes("ANNUAL") || name.includes("ANNUAL")) {
+        return employee?.payroll?.annualLeaves ?? 17;
+      }
+      if (code.includes("CASUAL") || name.includes("CASUAL")) {
+        return employee?.payroll?.casualLeaves ?? 10;
+      }
+      if (code.includes("SUDDEN") || name.includes("SUDDEN") || name.includes("SICK")) {
+        return employee?.payroll?.suddenLeaves ?? 12;
+      }
+      if (code.includes("MONTHLY") || name.includes("MONTHLY")) {
+        return employee?.payroll?.monthlyLeaves ?? 3;
+      }
+      return 15;
+    };
+
+    const leaveBalances = leaveTypes.map((lt) => {
+      const used = usedMap[lt.id] || 0;
+      const total = getQuota(lt);
+      return {
+        id: lt.id,
+        name: lt.name,
+        code: lt.code,
+        used,
+        total,
+        available: Math.max(0, total - used),
+      };
+    });
+
+    // 🔥 Real-Time Payroll Summary for Specific Logged-in User
+    const latestPayrollRecord = await prisma.payroll.findFirst({
+      where: { employeeId: userId },
+      include: { components: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let payrollSummary = null;
+    if (latestPayrollRecord) {
+      const currency = latestPayrollRecord.currency || employee?.payroll?.currency || "PKR";
+
+      const baseSalary = Number(latestPayrollRecord.rate || latestPayrollRecord.grossSalary || 0);
+
+      const extraEarnings = (latestPayrollRecord.components || [])
+        .filter(c => ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME","INCREMENT","KPIS","BOUNTY","ARREARS"].includes(String(c.type || "").toUpperCase()))
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+      const extraDeductions = (latestPayrollRecord.components || [])
+        .filter(c => ["TAX","LOAN","DEDUCTION","TARDIES","UNPAID","FOOD","CT","GYM","ADVANCE"].includes(String(c.type || "").toUpperCase()))
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+      const computedNet = Math.max(0, baseSalary + extraEarnings - extraDeductions);
+
+      payrollSummary = {
+        id: latestPayrollRecord.id,
+        amount: `${currency} ${computedNet.toLocaleString()}`,
+        month: moment(latestPayrollRecord.periodStart || latestPayrollRecord.month).format("MMMM YYYY"),
+        paidDate: latestPayrollRecord.paidDate
+          ? moment(latestPayrollRecord.paidDate).format("MMM D, YYYY")
+          : "Paid",
+        status: latestPayrollRecord.status || "PAID",
+        hasRecord: true,
+        hasGeneratedPayroll: true,
+      };
+    } else if (employee?.payroll) {
+      const currency = employee.payroll.currency || "PKR";
+      payrollSummary = {
+        amount: `${currency} ${Number(employee.payroll.rate || 0).toLocaleString()}`,
+        month: `Base Salary (${employee.payroll.payoutType || 'monthly'})`,
+        paidDate: "Active Payroll",
+        status: "ACTIVE",
+        hasRecord: true,
+      };
+    } else {
+      payrollSummary = {
+        amount: "No Payroll Record",
+        month: "Pending Setup",
+        paidDate: "Contact Admin",
+        status: "UNSET",
+        hasRecord: false,
+      };
+    }
 
     return res.json({
       taskStats,
       weeklyTasks,
       weeklyAttendance,
+      companyName,
+      leaves,
+      overtimes,
+      leaveBalances,
+      payrollSummary,
+      upcomingHoliday,
+      isTodayOff,
     });
   } catch (error) {
     console.error(error);
@@ -729,6 +1033,7 @@ const getAdminDashboardGraphs = async (req, res) => {
         where: {
           organizationId,
           deletedAt: null,
+          NOT: { role: "ADMIN" },
         },
         select: { id: true },
       });
@@ -922,93 +1227,222 @@ const getStatsDetails = async (req, res) => {
     const organizationId = user.orgId;
     const role = user.role;
 
-    // Date handling
-    const selectedDate = queryDate
-      ? moment(queryDate).startOf("day").toDate()
-      : moment().startOf("day").toDate();
+    // Fetch organization timezone for date handling
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { orgTimeZone: true },
+    });
+    const orgTimeZone = organization?.orgTimeZone || "Asia/Karachi";
+
+    let selectedDateQuery = queryDate
+      ? DateTime.fromISO(queryDate, { zone: orgTimeZone })
+      : DateTime.now().setZone(orgTimeZone);
+
+    if (!selectedDateQuery.isValid) {
+      selectedDateQuery = DateTime.now().setZone(orgTimeZone);
+    }
+
+    const localStartOfDay = selectedDateQuery.startOf("day");
+    const localEndOfDay = localStartOfDay.endOf("day");
+
+    const startOfDayUTC = localStartOfDay.toJSDate();
+    const endOfDayUTC = localEndOfDay.toJSDate();
+
+    const searchStartUTC = localStartOfDay.minus({ days: 1 }).toJSDate();
+    const searchEndUTC = localEndOfDay.plus({ days: 1 }).toJSDate();
+    const targetDateStr = selectedDateQuery.toFormat("yyyy-MM-dd");
 
     // Location filter (companyId)
-    const locationFilter =
-      queryLocation && queryLocation !== "ALL"
-        ? { companyId: Number(queryLocation) }
-        : {};
+    const isLocFiltered = queryLocation && String(queryLocation).toUpperCase() !== "ALL" && !isNaN(Number(queryLocation));
+    const locationFilter = isLocFiltered ? { companyId: Number(queryLocation) } : {};
 
     let list = [];
 
+    // Fetch all employees in org/location along with today's Attendance and approved leaves
+    const allEmployees = await prisma.employee.findMany({
+      where: {
+        organizationId,
+        deletedAt: null,
+        NOT: { role: "ADMIN" },
+        ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
+        ...(role === "USER" ? { id: userId } : {}),
+        ...locationFilter,
+      },
+      include: {
+        department: { select: { title: true } },
+        jobInfo: true,
+        Attendance: {
+          where: {
+            OR: [
+              {
+                date: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+              {
+                checkInTime: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+          include: {
+            activities: {
+              orderBy: { startTime: "asc" },
+            },
+          },
+        },
+      },
+      orderBy: { firstName: "asc" },
+    });
+
+    const empIds = allEmployees.map((e) => e.id);
+
+    const approvedLeaves = await prisma.leaveRequest.findMany({
+      where: {
+        organizationId,
+        status: "APPROVED",
+        startDate: { lte: endOfDayUTC },
+        endDate: { gte: startOfDayUTC },
+        employeeId: { in: empIds },
+      },
+      include: {
+        leaveType: { select: { name: true } },
+      },
+    });
+
+    const leaveMap = new Map(approvedLeaves.map((l) => [l.employeeId, l]));
+
+    // Construct full unified employee attendance status list
+    const unifiedEmployeeList = allEmployees.map((emp) => {
+      const att = emp.Attendance.find((a) => {
+        const keys = new Set();
+        if (a.date) {
+          keys.add(DateTime.fromJSDate(new Date(a.date)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(a.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(a.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        if (a.checkInTime) {
+          keys.add(DateTime.fromJSDate(new Date(a.checkInTime)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        return keys.has(targetDateStr);
+      }) || emp.Attendance[0];
+      const leave = leaveMap.get(emp.id);
+
+      let status = "absent";
+      let clockIn = "—";
+      let clockOut = "—";
+      let isLate = false;
+      let lateMinutes = 0;
+
+      if (leave) {
+        status = "on_leave";
+      } else if (att && att.checkInTime) {
+        clockIn = moment(att.checkInTime).format("hh:mm A");
+        if (att.checkOutTime) {
+          clockOut = moment(att.checkOutTime).format("hh:mm A");
+        }
+        isLate = Boolean(att.isLate || att.status === "LATE");
+        lateMinutes = att.lateMinutes || 0;
+
+        const hasOpenBreak = att.activities?.some(
+          (a) => a.type === "BREAK" && !a.endTime
+        );
+        if (att.status === "BREAK" || hasOpenBreak) {
+          status = "break";
+        } else if (isLate) {
+          status = "late";
+        } else {
+          status = "present";
+        }
+      }
+
+      return {
+        id: emp.id,
+        attendanceId: att?.id,
+        name: `${emp.firstName} ${emp.lastName}`,
+        email: emp.email || "N/A",
+        department: emp.department?.title || "N/A",
+        role: emp.role,
+        status,
+        clockIn,
+        clockOut,
+        isLate,
+        lateMinutes,
+        late: isLate ? `${lateMinutes} min late` : "On time",
+        activities: att?.activities || [],
+        jobInfo: emp.jobInfo || {},
+        leaveType: leave?.leaveType?.name,
+        leaveDates: leave
+          ? `${moment(leave.startDate).format("DD MMM")} - ${moment(leave.endDate).format("DD MMM")}`
+          : null,
+      };
+    });
+
     switch (category) {
       // ────────────────────────────────────────────────
-      // total-employees → same rakh sakte ho
+      // total-employees
       // ────────────────────────────────────────────────
-
       case "total-employees":
-        if (role === "USER") {
-          // User ko sirf apna record dikhana chahiye (optional: ya empty bhi kar sakte ho)
-          list = await prisma.employee.findMany({
-            where: { id: userId, deletedAt: null },
-            include:{
-              jobInfo:true,
-            },
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              role: true,
-            },
-          });
-        } else {
-          list = await prisma.employee.findMany({
-            where: {
-              organizationId,
-              deletedAt: null,
-              ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
-            },
-          
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              role: true,
-              department: { select: { title: true } },
-              jobInfo:true
-            },
-          
-            orderBy: { firstName: "asc" },
-          });
-        }
-        list = list.map((e) => ({
-          id: e.id,
-          name: `${e.firstName} ${e.lastName}`,
-          email: e.email,
-          role: e.role,
-          department: e.department?.title || "N/A",
-          jobInfo:e.jobInfo || {}
-        }));
+        list = unifiedEmployeeList;
         break;
 
       // ────────────────────────────────────────────────
-      // present-today → yeh already sahi kaam kar raha hai
-      // (sirf woh jo check-in kiye hain)
+      // present-today
       // ────────────────────────────────────────────────
       case "present-today":
-        const presentWhere = {
-          date: selectedDate,
-          checkInTime: { not: null },
-          status: { not: "ABSENT" },
+        list = unifiedEmployeeList.filter((e) =>
+          ["present", "late", "break", "working"].includes(e.status)
+        );
+        break;
+
+      // ────────────────────────────────────────────────
+      // absent-today
+      // ────────────────────────────────────────────────
+      case "absent-today":
+        list = unifiedEmployeeList.filter((e) => e.status === "absent");
+        break;
+
+      // ────────────────────────────────────────────────
+      // on-leave
+      // ────────────────────────────────────────────────
+      case "on-leave":
+        list = unifiedEmployeeList.filter((e) => e.status === "on_leave");
+        break;
+
+      // ────────────────────────────────────────────────
+      // late-tardy & late-today
+      // ────────────────────────────────────────────────
+      case "late-tardy":
+      case "late-today":
+        list = unifiedEmployeeList.filter((e) => e.isLate || e.status === "late");
+        break;
+
+      case "overtime-requests":
+      case "overtime":
+        const overtimeWhere = {
+          OR: [
+            { date: { gte: startOfDayUTC, lte: endOfDayUTC } },
+            { createdAt: { gte: startOfDayUTC, lte: endOfDayUTC } },
+          ],
           employee: {
             organizationId,
             deletedAt: null,
+            NOT: { role: "ADMIN" },
             ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
             ...(role === "USER" ? { id: userId } : {}),
             ...locationFilter,
           },
         };
 
-        const presentAttendances = await prisma.attendance.findMany({
-          where: presentWhere,
+        const overtimes = await prisma.overtime.findMany({
+          where: overtimeWhere,
           include: {
-            activities: true,
             employee: {
               select: {
                 id: true,
@@ -1018,159 +1452,20 @@ const getStatsDetails = async (req, res) => {
               },
             },
           },
-          orderBy: { checkInTime: "asc" },
+          orderBy: { createdAt: "desc" },
         });
 
-        list = presentAttendances.map((a) => ({
-          id: a.employee.id,
-          name: `${a.employee.firstName} ${a.employee.lastName}`,
-          email: a.employee.email || "N/A",
-          status: a.status.toLowerCase(),
-          clockIn: a.checkInTime
-            ? moment(a.checkInTime).format("hh:mm A")
-            : null,
-          clockOut: a.checkOutTime
-            ? moment(a.checkOutTime).format("hh:mm A")
-            : null,
-          late: a.isLate ? `${a.lateMinutes} min late` : "On time",
-          activities: a.activities,
+        list = overtimes.map((o) => ({
+          id: o.id,
+          employeeId: o.employeeId,
+          name: `${o.employee.firstName} ${o.employee.lastName}`,
+          email: o.employee.email || "N/A",
+          status: o.status ? o.status.toLowerCase() : "pending",
+          hours: o.hours || 0,
+          date: o.date ? moment(o.date).format("MMM DD, YYYY") : "N/A",
+          reason: o.reason || "N/A",
         }));
         break;
-
-      // ────────────────────────────────────────────────
-      // absent-today → **Yeh important change hai**
-      // ────────────────────────────────────────────────
-      case "absent-today": {
-        // 1. Saare possible employees nikaalo
-        const employees = await prisma.employee.findMany({
-          where: {
-            organizationId,
-            deletedAt: null,
-            ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
-            ...(role === "USER" ? { id: userId } : {}),
-            ...locationFilter,
-          },
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-          orderBy: { firstName: "asc" },
-        });
-
-        if (employees.length === 0) {
-          list = [];
-          break;
-        }
-
-        const employeeIds = employees.map((e) => e.id);
-
-        // 2. Aaj ke saare attendances (jo bane hain)
-        const attendances = await prisma.attendance.findMany({
-          where: {
-            date: selectedDate,
-            employeeId: { in: employeeIds },
-          },
-          select: {
-            employeeId: true,
-            checkInTime: true,
-            checkOutTime: true,
-            status: true,
-            isLate: true,
-            lateMinutes: true,
-          },
-        });
-
-        // 3. Aaj ke approved leaves
-        const leaves = await prisma.leaveRequest.findMany({
-          where: {
-            organizationId,
-            status: "APPROVED",
-            startDate: { lte: selectedDate },
-            endDate: { gte: selectedDate },
-            employeeId: { in: employeeIds },
-          },
-          select: { employeeId: true },
-        });
-
-        const leaveSet = new Set(leaves.map((l) => l.employeeId));
-
-        // 4. Attendance ko Map mein daalo taaki fast lookup ho
-        const attendanceMap = new Map(
-          attendances.map((att) => [att.employeeId, att])
-        );
-
-        // 5. Absent employees filter karo
-        const absentList = employees.filter((emp) => {
-          // Leave par hai? → absent nahi
-          if (leaveSet.has(emp.id)) return false;
-
-          const att = attendanceMap.get(emp.id);
-
-          // No attendance record → absent
-          if (!att) return true;
-
-          // Attendance hai lekin check-in nahi hua → absent
-          if (!att.checkInTime) return true;
-
-          // Check-in hua lekin status ABSENT marked → absent
-          if (att.status === "ABSENT") return true;
-
-          // Baaki sab present ya break etc. maane jayenge
-          return false;
-        });
-
-        // 6. Final formatted list
-        list = absentList.map((emp) => {
-          const att = attendanceMap.get(emp.id);
-
-          return {
-            id: emp.id,
-            name: `${emp.firstName} ${emp.lastName}`,
-            email: emp.email || "N/A",
-            status: "absent",
-            clockIn: null,
-            clockOut: att?.checkOutTime
-              ? moment(att.checkOutTime).format("hh:mm A")
-              : null,
-            late: "N/A",
-            note: att ? "No check-in recorded" : "No attendance record today",
-          };
-        });
-
-        break;
-      }
-
-      // on-leave case same rahega
-           case "on-leave":
-                const leaveWhere = {
-                  organizationId,
-                  status: "APPROVED",
-                  startDate: { lte: today },
-                  endDate: { gte: today },
-                  employee: {
-                    deletedAt: null,
-                    ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
-                    ...(role === "USER" ? { id: userId } : {}),
-                  },
-                };
-                const leaves = await prisma.leaveRequest.findMany({
-                  where: leaveWhere,
-                  include: {
-                    employee: { select: { firstName: true, lastName: true, email: true } },
-                    leaveType: { select: { name: true } },
-                  },
-                });
-                list = leaves.map(l => ({
-                  id: l.employeeId,
-                  name: `${l.employee.firstName} ${l.employee.lastName}`,
-                  email: l.employee.email || "N/A",
-                  leaveType: l.leaveType.name,
-                  dates: `${moment(l.startDate).format("DD MMM")} - ${moment(l.endDate).format("DD MMM")}`,
-                  status: "On Leave",
-                }));
-                break;
               // ── Project Related (sirf admin/supervisor) ──
               case "active-projects":
                 if (role === "USER") {

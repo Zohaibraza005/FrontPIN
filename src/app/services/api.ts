@@ -394,6 +394,55 @@ getAdminDashboard: async (companyId?: number | string) => {
     return apiCall(`/attendance/report${query}`);
   },
   
+  exportExcel: async (params?: Record<string, any>) => {
+    const cleanParams: Record<string, string> = {};
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "" && value !== "all") {
+          cleanParams[key] = value instanceof Date ? value.toISOString() : String(value);
+        }
+      });
+    }
+    const query = new URLSearchParams(cleanParams).toString();
+    const token = localStorage.getItem("authToken");
+    const response = await fetch(`${API_BASE_URL}/attendance/export-excel?${query}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to export Excel file");
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+
+    let fileName = "";
+    const disposition = response.headers.get("Content-Disposition") || response.headers.get("content-disposition");
+    if (disposition && disposition.includes("filename=")) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) {
+        fileName = match[1];
+      }
+    }
+    if (!fileName) {
+      if (params?.filter === "thisWeek" || params?.view === "weekly") {
+        fileName = `Weekly_Attendance_Tracker_${params?.startDate || "week"}.xlsx`;
+      } else {
+        const dateStr = params?.date ? (params.date instanceof Date ? params.date.toISOString() : String(params.date)) : new Date().toISOString();
+        fileName = `Daily_Attendance_Tracker_${dateStr.slice(0, 10)}.xlsx`;
+      }
+    }
+
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 
@@ -435,6 +484,17 @@ export const invoiceCompanyAPI = {
 
   getAll: () =>
     apiCall("/invoice-company"),
+
+  update: (id: number | string, data: FormData) =>
+    apiCall(`/invoice-company/${id}`, {
+      method: "PUT",
+      body: data,
+    }),
+
+  delete: (id: number | string) =>
+    apiCall(`/invoice-company/${id}`, {
+      method: "DELETE",
+    }),
 };
 
 export const projectAPI = {
@@ -548,10 +608,16 @@ export const taskAPI = {
   getTaskById: async (id: string | number) => {
     return apiCall(`/tasks/${id}`);
   },
-  updateTaskStatus: async (id: number, status: string) => {
+  updateTaskStatus: async (id: number | string, status: string) => {
     return apiCall(`/projects/tasks/${id}/status`, {
       method: "PUT",
       body: JSON.stringify({ status }),
+    });
+  },
+  updateTaskAssignees: async (taskId: string | number, assignees: number[]) => {
+    return apiCall(`/projects/tasks/update/${taskId}`, {
+      method: "PUT",
+      body: JSON.stringify({ assignees }),
     });
   },
   getRemarks: async (taskId: string | number) => {
@@ -624,8 +690,12 @@ export const employeeAPI = {
   },
   getDetail: (id: number | string) =>
     apiCall(`/employees/${id}/detail`),
-  
-  
+  addIncrement: async (id: number | string, data: any) => {
+    return apiCall(`/employees/${id}/increment`, {
+      method: 'POST',
+      body: data,
+    });
+  },
 };
 
 
@@ -850,10 +920,15 @@ export const overtimeAPI = {
         method: "POST",
         body: JSON.stringify(data)
       }),
-      delete: (id: number | string) =>
-  apiCall(`/payroll/${id}`, {
-    method: "DELETE",
-  }),
+    update: (id: number | string, data: any) =>
+      apiCall(`/payroll/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number | string) =>
+      apiCall(`/payroll/${id}`, {
+        method: "DELETE",
+      }),
   addComponent: (
     payrollId: number,
     data: {
@@ -865,6 +940,18 @@ export const overtimeAPI = {
     apiCall(`/payroll/${payrollId}/component`, {
       method: "POST",
       body: JSON.stringify(data)
+    }),
+  updateComponent: (
+    componentId: number | string,
+    data: { type?: string; title?: string; amount?: number }
+  ) =>
+    apiCall(`/payroll/component/${componentId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteComponent: (componentId: number | string) =>
+    apiCall(`/payroll/component/${componentId}`, {
+      method: "DELETE",
     }),
     getStats: (params?: { month?: number; year?: number }) => {
       const query = new URLSearchParams(
@@ -1145,8 +1232,8 @@ export const dashboardAPI = {
 
 
   // 🔹 User
-  getUserDashboard: async () => {
-    return apiCall("/dashboard/user");
+  getUserDashboard: async (date?: string) => {
+    return apiCall(`/dashboard/user${date ? `?date=${date}` : ""}`);
   },
 
 // Update in your api service (dashboardAPI)

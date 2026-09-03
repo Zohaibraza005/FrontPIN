@@ -49,6 +49,7 @@ exports.getAdminDashboard = async (req, res) => {
       const employeeFilter = {
         organizationId: req.user.organizationId,
         deletedAt: null,
+        NOT: { role: "ADMIN" },
         ...(department && { departmentId: department }),
         ...(company && { companyId: company }),
         ...(employee && { id: employee }), // 🔥 NEW
@@ -127,9 +128,23 @@ const employee = parseOptionalInt(employeeId);
             organizationId: req.user.organizationId,
             ...(department && { departmentId: department }),
             ...(company && { companyId: company }),
-            ...(employee && { id: employee }), // 🔥 NEW
-
+            ...(employee && { id: employee }),
           },
+        },
+        include: {
+          employee: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              employeeId: true,
+              department: { select: { title: true } },
+              company: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: {
+          date: "desc",
         },
       });
   
@@ -162,6 +177,21 @@ const employee = parseOptionalInt(employeeId);
         if (a.isLate) grouped[label].late += 1;
       });
   
+      const records = attendance.map((a) => ({
+        id: a.id,
+        date: moment(a.date).format("YYYY-MM-DD"),
+        employeeName: `${a.employee?.firstName || ""} ${a.employee?.lastName || ""}`.trim(),
+        employeeCode: a.employee?.employeeId || "N/A",
+        department: a.employee?.department?.title || "N/A",
+        location: a.employee?.company?.name || "N/A",
+        clockIn: a.clockIn ? moment(a.clockIn).format("HH:mm") : "-",
+        clockOut: a.clockOut ? moment(a.clockOut).format("HH:mm") : "-",
+        totalHours: a.totalWorkedMinutes ? (a.totalWorkedMinutes / 60).toFixed(2) : "0.00",
+        overtimeHours: a.overtimeMinutes ? (a.overtimeMinutes / 60).toFixed(2) : "0.00",
+        status: a.status || (a.isLate ? "LATE" : "PRESENT"),
+        isLate: a.isLate ? "Yes" : "No",
+      }));
+
       res.json({
         success: true,
         trend: Object.values(grouped),
@@ -171,6 +201,7 @@ const employee = parseOptionalInt(employeeId);
           late: lateCount,
           overtime: (overtimeMinutes / 60).toFixed(1),
         },
+        records,
       });
     } catch (err) {
       console.error(err);
@@ -236,27 +267,43 @@ const employee = parseOptionalInt(employeeId);
     }
   };
   exports.getTaskAnalytics = async (req, res) => {
-    const employee = parseOptionalInt(req.query.employeeId);
-    console.log()
-
     try {
-      const tasks = await prisma.task.findMany({
-        where: { deletedAt: null },
-        include:{
-            assignees:{
-                where:{
-                    ...(employee && { employeeId: employee }),
-                }
-            }
-        }
-        
+      const { filter = "all", startDate, endDate } = req.query;
+      const { start, end } = getDateRange(filter, startDate, endDate);
+      const department = parseOptionalInt(req.query.departmentId);
+      const company = parseOptionalInt(req.query.companyId);
+      const employee = parseOptionalInt(req.query.employeeId);
 
+      const whereClause = {
+        deletedAt: null,
+      };
+
+      if (filter !== "all") {
+        whereClause.createdAt = { gte: start, lte: end };
+      }
+
+      if (employee || department || company) {
+        whereClause.assignees = {
+          some: {
+            ...(employee && { employeeId: employee }),
+            ...((department || company) && {
+              employee: {
+                ...(department && { departmentId: department }),
+                ...(company && { companyId: company }),
+              },
+            }),
+          },
+        };
+      }
+
+      const tasks = await prisma.task.findMany({
+        where: whereClause,
       });
-  
+
       const completed = tasks.filter((t) => t.status === "COMPLETED").length;
       const inProgress = tasks.filter((t) => t.status === "IN_PROGRESS").length;
       const todo = tasks.filter((t) => t.status === "TODO").length;
-  
+
       res.json({
         success: true,
         distribution: [
@@ -266,6 +313,6 @@ const employee = parseOptionalInt(employeeId);
         ],
       });
     } catch (err) {
-      res.status(500).json({ success: false,error: err.message});
+      res.status(500).json({ success: false, error: err.message });
     }
   };

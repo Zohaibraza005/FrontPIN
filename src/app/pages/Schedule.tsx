@@ -66,6 +66,7 @@ import {
 } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { employeeAPI, departmentAPI, locationAPI, scheduleAPI } from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 
 type ShiftType = "day" | "evening" | "night";
 
@@ -118,11 +119,33 @@ const DAYS_LIST = [
 ];
 
 export const Schedule: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const isAgent = user?.role === 'USER';
+
+  // Get schedule privilege for current user
+  const schedulePriv = (user as any)?.privileges?.find((p: any) => p.module === 'SCHEDULE');
+  const canCreate = isAdmin || (schedulePriv?.canCreate ?? false);
+  const canUpdate = isAdmin || (schedulePriv?.canUpdate ?? false);
+  const canDelete = isAdmin || (schedulePriv?.canDelete ?? false);
+
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterLocation, setFilterLocation] = useState("all");
+  const getInitialScheduleLoc = () => localStorage.getItem("selectedLocation") || "all";
+  const [filterLocation, setFilterLocation] = useState(getInitialScheduleLoc);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
+      setFilterLocation(loc);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
 
   // ── Create Schedule Form State ─────────────────────────────────────
   const [scopeType, setScopeType] = useState<
@@ -232,7 +255,8 @@ export const Schedule: React.FC = () => {
   const fetchEmployees = async () => {
     try {
       const res = await employeeAPI.getActiveEmployees();
-      setEmployees(res.data || []);
+      const nonAdminEmps = (res.data || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin');
+      setEmployees(nonAdminEmps);
     } catch {
       // ignore
     }
@@ -280,6 +304,20 @@ export const Schedule: React.FC = () => {
   useEffect(() => {
     fetchSchedules();
     fetchLocations();
+
+    const handleRealTimeSync = () => {
+      fetchSchedules();
+    };
+
+    window.addEventListener('schedule-updated', handleRealTimeSync);
+    window.addEventListener('employee-updated', handleRealTimeSync);
+    window.addEventListener('focus', handleRealTimeSync);
+
+    return () => {
+      window.removeEventListener('schedule-updated', handleRealTimeSync);
+      window.removeEventListener('employee-updated', handleRealTimeSync);
+      window.removeEventListener('focus', handleRealTimeSync);
+    };
   }, []);
 
   const fetchSchedules = async () => {
@@ -369,8 +407,22 @@ export const Schedule: React.FC = () => {
 
   // Filter schedules based on search and location
   const filteredSchedules = schedules?.filter((schedule) => {
+    if (schedule.employee?.role === 'ADMIN' || schedule.employee?.role === 'admin') return false;
+    
+    // For Agent (USER role): Only show their own schedule
+    if (isAgent && schedule.employeeId !== user?.id && schedule.employee?.id !== user?.id) {
+      return false;
+    }
+
     const empName = `${schedule.employee?.firstName || ''} ${schedule.employee?.lastName || ''}`.toLowerCase();
-    const companyObj = schedule.company || locations.find(l => String(l.id) === String(schedule.companyId));
+    const companyObj =
+      schedule.company ||
+      schedule.employee?.company ||
+      locations.find(
+        (l) =>
+          String(l.id) === String(schedule.companyId) ||
+          String(l.id) === String(schedule.employee?.companyId)
+      );
     const locName = (companyObj?.name || '').toLowerCase();
     const query = searchQuery.toLowerCase().trim();
 
@@ -378,11 +430,19 @@ export const Schedule: React.FC = () => {
       !query ||
       empName.includes(query) ||
       locName.includes(query) ||
-      (Array.isArray(schedule.days) && schedule.days.some((d: string) => d.toLowerCase().includes(query)));
+      (Array.isArray(schedule.days) && schedule.days.some((d: any) => {
+        const dStr = typeof d === 'object' && d !== null ? `${d.day || ''} ${d.dayFull || ''}` : String(d || '');
+        return dStr.toLowerCase().includes(query);
+      }));
 
     const matchesLocation =
+      isAgent ||
       filterLocation === "all" ||
-      String(schedule.companyId || schedule.company?.id) === filterLocation;
+      String(schedule.companyId) === String(filterLocation) ||
+      String(schedule.company?.id) === String(filterLocation) ||
+      String(schedule.employee?.companyId) === String(filterLocation) ||
+      String(schedule.employee?.company?.id) === String(filterLocation) ||
+      String(schedule.employee?.locationId) === String(filterLocation);
 
     return matchesSearch && matchesLocation;
   });
@@ -397,24 +457,36 @@ export const Schedule: React.FC = () => {
     setEditingSchedule(schedule);
     const existingDays = Array.isArray(schedule.days) ? schedule.days : [];
     
-    // Map short or full day names
-    const mappedDays = existingDays.map((d: string) => {
-      const match = DAYS_LIST.find((item) => item.short.toLowerCase() === d.toLowerCase() || item.full.toLowerCase() === d.toLowerCase());
-      return match ? match.full : d;
+    const mappedDays: string[] = [];
+    const initEditDayScheds: Record<string, { startTime: string; endTime: string }> = {};
+
+    existingDays.forEach((d: any) => {
+      let rawName = "";
+      let sTime = schedule.startTime || "09:00";
+      let eTime = schedule.endTime || "18:00";
+
+      if (typeof d === "object" && d !== null) {
+        rawName = d.dayFull || d.day || d.name || d.short || "";
+        if (d.startTime) sTime = d.startTime;
+        if (d.endTime) eTime = d.endTime;
+      } else {
+        rawName = String(d || "");
+      }
+
+      const match = DAYS_LIST.find(
+        (item) => item.short.toLowerCase() === rawName.toLowerCase() || item.full.toLowerCase() === rawName.toLowerCase()
+      );
+      const fullDayName = match ? match.full : rawName;
+
+      if (fullDayName && !mappedDays.includes(fullDayName)) {
+        mappedDays.push(fullDayName);
+        initEditDayScheds[fullDayName] = { startTime: sTime, endTime: eTime };
+      }
     });
 
     setEditDays(mappedDays);
     setEditStartTime(schedule.startTime || "09:00");
     setEditEndTime(schedule.endTime || "18:00");
-    
-    // Set per-day schedules for editing
-    const initEditDayScheds: Record<string, { startTime: string; endTime: string }> = {};
-    mappedDays.forEach((dayFull: string) => {
-      initEditDayScheds[dayFull] = {
-        startTime: schedule.startTime || "09:00",
-        endTime: schedule.endTime || "18:00",
-      };
-    });
     setEditDaySchedules(initEditDayScheds);
 
     setEditLocation(
@@ -486,12 +558,21 @@ export const Schedule: React.FC = () => {
     try {
       setIsUpdating(true);
 
-      // Convert days to short names for backend compatibility
-      const shortDays = editDays.map(d => DAYS_LIST.find(x => x.full === d)?.short || d);
+      const daysPayload = editDays.map((dayFull) => {
+        const shortName = DAYS_LIST.find((x) => x.full === dayFull)?.short || dayFull;
+        const timeObj = editDaySchedules[dayFull] || { startTime: editStartTime, endTime: editEndTime };
+        return {
+          day: shortName,
+          dayFull: dayFull,
+          startTime: timeObj.startTime,
+          endTime: timeObj.endTime,
+        };
+      });
+
       const firstDayTime = editDaySchedules[editDays[0]] || { startTime: editStartTime, endTime: editEndTime };
 
       const payload = {
-        days: shortDays,
+        days: daysPayload,
         startTime: firstDayTime.startTime || editStartTime,
         endTime: firstDayTime.endTime || editEndTime,
         companyId: editLocation ? Number(editLocation) : null,
@@ -536,6 +617,9 @@ export const Schedule: React.FC = () => {
 
       setEditModalOpen(false);
       setEditingSchedule(null);
+      window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { scheduleId: editingSchedule.id, employeeId: editingSchedule.employeeId } }));
+      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: editingSchedule.employeeId } }));
+      window.dispatchEvent(new CustomEvent('schedule-updated'));
       fetchSchedules(); // sync backend
     } catch (err: any) {
       toast.error(err?.data?.message || "Failed to update schedule");
@@ -563,6 +647,7 @@ export const Schedule: React.FC = () => {
 
       setDeleteModalOpen(false);
       setDeletingSchedule(null);
+      window.dispatchEvent(new CustomEvent('schedule-updated'));
       fetchSchedules(); // sync backend
     } catch (err: any) {
       toast.error(err?.data?.message || "Failed to delete schedule");
@@ -589,12 +674,14 @@ export const Schedule: React.FC = () => {
         </div>
 
         <Dialog open={newScheduleOpen} onOpenChange={setNewScheduleOpen}>
-          <DialogTrigger asChild>
-            <Button className="shadow-sm">
-              <Plus className="mr-2 size-4" />
-              Create Schedule
-            </Button>
-          </DialogTrigger>
+          {canCreate && (
+            <DialogTrigger asChild>
+              <Button className="shadow-sm">
+                <Plus className="mr-2 size-4" />
+                Create Schedule
+              </Button>
+            </DialogTrigger>
+          )}
 
           <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
             <DialogHeader>
@@ -1132,16 +1219,23 @@ export const Schedule: React.FC = () => {
                     try {
                       setIsCreating(true);
 
-                      // Map selected days to short names for backend compatibility (e.g., ["Mon", "Tue"])
-                      const shortDays = selectedDays.map(d => DAYS_LIST.find(x => x.full === d)?.short || d);
+                      const daysPayload = selectedDays.map((dayFull) => {
+                        const shortName = DAYS_LIST.find((x) => x.full === dayFull)?.short || dayFull;
+                        const timeObj = daySchedules[dayFull] || { startTime, endTime };
+                        return {
+                          day: shortName,
+                          dayFull: dayFull,
+                          startTime: timeObj.startTime,
+                          endTime: timeObj.endTime,
+                        };
+                      });
 
-                      // Get start/end time from first selected day card or default
                       const firstDayTime = daySchedules[selectedDays[0]] || { startTime, endTime };
 
                       const payload = {
                         scopeType,
                         selectedIds: selectedItems,
-                        days: shortDays,
+                        days: daysPayload,
                         startTime: firstDayTime.startTime || startTime,
                         endTime: firstDayTime.endTime || endTime,
                         companyId: selectedLocation,
@@ -1173,6 +1267,8 @@ export const Schedule: React.FC = () => {
                         const newItems = Array.isArray(res.data) ? res.data : [res.data];
                         setSchedules((prev) => [...newItems, ...prev]);
                       }
+                      window.dispatchEvent(new CustomEvent('schedule-updated'));
+                      window.dispatchEvent(new CustomEvent('employee-updated'));
                       fetchSchedules();
                     } catch (err: any) {
                       if (err.status === 409) {
@@ -1326,13 +1422,18 @@ export const Schedule: React.FC = () => {
                 />
               </div>
 
-              {locations?.length > 0 && (
+              {!isAgent && locations?.length > 0 && (
                 <SearchableSelect
                   className="w-[160px] h-9 text-sm"
                   placeholder="All Locations"
                   searchPlaceholder="Search location..."
                   value={filterLocation}
-                  onValueChange={setFilterLocation}
+                  onValueChange={(val) => {
+                    setFilterLocation(val);
+                    localStorage.setItem("selectedLocation", val);
+                    localStorage.setItem("dashboard-selected-location", val);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                  }}
                   options={[
                     { value: "all", label: "All Locations" },
                     ...locations.map((loc) => ({
@@ -1401,6 +1502,11 @@ export const Schedule: React.FC = () => {
                     const locationName = companyObj?.name || "-";
 
                     const daysArr = Array.isArray(schedule.days) ? schedule.days : [];
+                    const formattedDaysList = daysArr.map((d: any) =>
+                      typeof d === "object" && d !== null
+                        ? d.dayFull || d.day || d.name || d.short || ""
+                        : String(d || "")
+                    ).filter(Boolean);
                     const daysCount = daysArr.length;
 
                     const hasEarlyIn = Boolean(schedule.allowEarlyIn ?? schedule.allow_early_in);
@@ -1471,7 +1577,7 @@ export const Schedule: React.FC = () => {
                                   </span>
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
-                                  <p className="text-xs font-medium">{daysArr.join(", ")}</p>
+                                  <p className="text-xs font-medium">{formattedDaysList.join(", ")}</p>
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
@@ -1559,6 +1665,7 @@ export const Schedule: React.FC = () => {
                             </TooltipProvider>
 
                             {/* Edit Action */}
+                            {canUpdate && (
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1576,8 +1683,10 @@ export const Schedule: React.FC = () => {
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
+                            )}
 
                             {/* Delete Action */}
+                            {canDelete && (
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1595,6 +1704,7 @@ export const Schedule: React.FC = () => {
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1609,7 +1719,7 @@ export const Schedule: React.FC = () => {
 
       {/* ── 1. View Details Modal ────────────────────────────────────── */}
       <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto w-[95vw] sm:w-full">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <Eye className="size-5 text-blue-600" />
@@ -1658,11 +1768,16 @@ export const Schedule: React.FC = () => {
                     Working Days:
                   </span>
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {Array.isArray(viewingSchedule.days) && viewingSchedule.days.map((day: string) => (
-                      <Badge key={day} variant="secondary" className="font-medium bg-white border">
-                        {day}
-                      </Badge>
-                    ))}
+                    {Array.isArray(viewingSchedule.days) && viewingSchedule.days.map((dayItem: any, idx: number) => {
+                      const dayName = typeof dayItem === "object" && dayItem !== null ? (dayItem.dayFull || dayItem.day || "") : String(dayItem || "");
+                      const timeInfo = typeof dayItem === "object" && dayItem !== null && dayItem.startTime && dayItem.endTime ? `${dayItem.startTime} - ${dayItem.endTime}` : "";
+                      return (
+                        <Badge key={idx} variant="secondary" className="font-medium bg-white border flex items-center gap-1.5 px-2.5 py-1">
+                          <span>{dayName}</span>
+                          {timeInfo && <span className="text-[10px] text-gray-500 font-mono">({timeInfo})</span>}
+                        </Badge>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -2079,7 +2194,7 @@ export const Schedule: React.FC = () => {
                             onChange={(e) => {
                               const newDurs = [...editBreakDurations];
                               newDurs[idx] = parseInt(e.target.value) || 0;
-                              setBreakDurations(newDurs);
+                              setEditBreakDurations(newDurs);
                             }}
                             className="w-36 h-8 text-sm"
                           />
@@ -2126,7 +2241,7 @@ export const Schedule: React.FC = () => {
 
               <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-xs text-red-800 space-y-1">
                 <p className="font-semibold">Schedule to be removed:</p>
-                <p>• Days: {Array.isArray(deletingSchedule.days) ? deletingSchedule.days.join(", ") : "-"}</p>
+                <p>• Days: {Array.isArray(deletingSchedule.days) ? deletingSchedule.days.map((d: any) => typeof d === 'object' && d !== null ? (d.dayFull || d.day || '') : String(d || '')).filter(Boolean).join(", ") : "-"}</p>
                 <p>• Hours: {deletingSchedule.startTime} - {deletingSchedule.endTime}</p>
               </div>
 

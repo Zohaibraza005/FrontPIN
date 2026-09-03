@@ -14,9 +14,9 @@ exports.getEmployees = async (req, res) => {
       where: {
         organizationId: orgId,
         deletedAt: null,
-        ...(companyId && { companyId: parseInt(companyId) }),
-        ...(departmentId && { departmentId: parseInt(departmentId) }),
-        ...(role && { role }),
+        ...(companyId && companyId !== "all" && companyId !== "ALL" && !isNaN(parseInt(companyId)) && { companyId: parseInt(companyId) }),
+        ...(departmentId && departmentId !== "all" && departmentId !== "ALL" && !isNaN(parseInt(departmentId)) && { departmentId: parseInt(departmentId) }),
+        ...(role ? { role: role.toUpperCase() } : { NOT: { role: "ADMIN" } }),
       },
       include: {
         company: true,
@@ -227,14 +227,22 @@ exports.createEmployee = async (req, res) => {
           },
 
           privileges: {
-            create: parsedPrivileges.map((p) => ({
-              module: p.module,
-              canCreate: p.canCreate || false,
-              canRead: p.canRead ?? true,
-              canUpdate: p.canUpdate || false,
-              canDelete: p.canDelete || false,
-              ownTeamOnly: p.ownTeamOnly || false,
-            })),
+            create: parsedPrivileges.map((p) => {
+              const mod = typeof p === "string" ? p : p.module;
+              const canRead = typeof p === "string" ? true : (p.canRead ?? true);
+              const canCreate = typeof p === "string" ? false : (p.canCreate || false);
+              const canUpdate = typeof p === "string" ? false : (p.canUpdate || false);
+              const canDelete = typeof p === "string" ? false : (p.canDelete || false);
+              const ownTeamOnly = typeof p === "string" ? false : (p.ownTeamOnly || false);
+              return {
+                module: mod.toUpperCase(),
+                canRead,
+                canCreate,
+                canUpdate,
+                canDelete,
+                ownTeamOnly,
+              };
+            }),
           },
         },
         include: {
@@ -309,6 +317,15 @@ exports.updateEmployee = async (req, res) => {
     if (parsedPersonal.username || req.body.username) updateData.username = parsedPersonal.username || req.body.username;
     if (parsedPersonal.email || req.body.email) updateData.email = parsedPersonal.email || req.body.email;
     if (parsedPersonal.role || req.body.role) updateData.role = (parsedPersonal.role || req.body.role).toUpperCase();
+    if (parsedPersonal.phoneNumber || req.body.phoneNumber) updateData.phoneNumber = parsedPersonal.phoneNumber || req.body.phoneNumber;
+    if (parsedPersonal.nationalId || req.body.nationalId) updateData.nationalId = parsedPersonal.nationalId || req.body.nationalId;
+    if (parsedPersonal.employeeId || req.body.employeeId) updateData.employeeId = parsedPersonal.employeeId || req.body.employeeId;
+    if (parsedPersonal.pin || req.body.pin) updateData.pin = parsedPersonal.pin || req.body.pin;
+    
+    const passwordToUpdate = parsedPersonal.password || req.body.password;
+    if (passwordToUpdate) {
+      updateData.password = await bcrypt.hash(passwordToUpdate, 10);
+    }
 
     if (companyId) updateData.companyId = parseInt(companyId);
     if (departmentId !== undefined) updateData.departmentId = departmentId ? parseInt(departmentId) : null;
@@ -332,11 +349,36 @@ exports.updateEmployee = async (req, res) => {
       };
     }
 
-    if (Object.keys(parsedPayroll).length > 0) {
+    const rawPayroll = parseField(req.body.payroll) || {};
+    const payrollPayload = {
+      ...(rawPayroll.currency || req.body.currency ? { currency: rawPayroll.currency || req.body.currency } : {}),
+      ...((rawPayroll.payoutType || rawPayroll.rateType || req.body.payoutType || req.body.rateType) ? { payoutType: String(rawPayroll.payoutType || rawPayroll.rateType || req.body.payoutType || req.body.rateType) } : {}),
+      ...((rawPayroll.rate !== undefined || req.body.rate !== undefined) ? { rate: parseFloat(rawPayroll.rate ?? req.body.rate ?? 0) } : {}),
+      ...((rawPayroll.overtimeRate !== undefined || req.body.overtimeRate !== undefined) ? { overtimeRate: parseFloat(rawPayroll.overtimeRate ?? req.body.overtimeRate ?? 0) } : {}),
+      ...((rawPayroll.cycleDate !== undefined || req.body.cycleDate !== undefined) ? { cycleDate: parseInt(rawPayroll.cycleDate ?? req.body.cycleDate ?? 1) } : {}),
+      ...((rawPayroll.annualLeaves !== undefined || req.body.annualLeaves !== undefined) ? { annualLeaves: parseInt(rawPayroll.annualLeaves ?? req.body.annualLeaves ?? 0) } : {}),
+      ...((rawPayroll.casualLeaves !== undefined || req.body.casualLeaves !== undefined) ? { casualLeaves: parseInt(rawPayroll.casualLeaves ?? req.body.casualLeaves ?? 0) } : {}),
+      ...((rawPayroll.suddenLeaves !== undefined || req.body.suddenLeaves !== undefined) ? { suddenLeaves: parseInt(rawPayroll.suddenLeaves ?? req.body.suddenLeaves ?? 0) } : {}),
+      ...((rawPayroll.monthlyLeaves !== undefined || req.body.monthlyLeaves !== undefined) ? { monthlyLeaves: parseInt(rawPayroll.monthlyLeaves ?? req.body.monthlyLeaves ?? 0) } : {}),
+    };
+
+    if (Object.keys(payrollPayload).length > 0) {
+      const createData = {
+        currency: payrollPayload.currency || "PKR",
+        payoutType: payrollPayload.payoutType || "monthly",
+        rate: payrollPayload.rate || 0,
+        cycleDate: payrollPayload.cycleDate || 1,
+        overtimeRate: payrollPayload.overtimeRate || 0,
+        annualLeaves: payrollPayload.annualLeaves ?? 17,
+        casualLeaves: payrollPayload.casualLeaves ?? 10,
+        suddenLeaves: payrollPayload.suddenLeaves ?? 12,
+        monthlyLeaves: payrollPayload.monthlyLeaves ?? 3,
+      };
+
       updateData.payroll = {
         upsert: {
-          update: parsedPayroll,
-          create: parsedPayroll,
+          update: payrollPayload,
+          create: createData,
         },
       };
     }
@@ -354,16 +396,31 @@ exports.updateEmployee = async (req, res) => {
       },
     });
 
-    if (Array.isArray(parsedPrivileges) && parsedPrivileges.length > 0) {
+    if (Array.isArray(parsedPrivileges)) {
       await prisma.employeePrivilege.deleteMany({
         where: { employeeId: parseInt(id) },
       });
-      await prisma.employeePrivilege.createMany({
-        data: parsedPrivileges.map((p) => ({
-          employeeId: parseInt(id),
-          privilege: p,
-        })),
-      });
+      if (parsedPrivileges.length > 0) {
+        await prisma.employeePrivilege.createMany({
+          data: parsedPrivileges.map((p) => {
+            const mod = typeof p === "string" ? p : p.module;
+            const canRead = typeof p === "string" ? true : (p.canRead ?? true);
+            const canCreate = typeof p === "string" ? false : (p.canCreate || false);
+            const canUpdate = typeof p === "string" ? false : (p.canUpdate || false);
+            const canDelete = typeof p === "string" ? false : (p.canDelete || false);
+            const ownTeamOnly = typeof p === "string" ? false : (p.ownTeamOnly || false);
+            return {
+              employeeId: parseInt(id),
+              module: mod.toUpperCase(),
+              canRead,
+              canCreate,
+              canUpdate,
+              canDelete,
+              ownTeamOnly
+            };
+          }),
+        });
+      }
     }
 
     return res.status(200).json({
@@ -490,6 +547,7 @@ exports.deleteEmployee = async (req, res) => {
         where: {
           organizationId: orgId,
           deletedAt: null,
+          NOT: { role: "ADMIN" },
         },
         select: {
           id: true,
@@ -737,6 +795,73 @@ exports.registerOrganization = async (req, res) => {
     console.error("Register Organization Error:", error);
     return res.status(500).json({
       message: "Failed to register organization",
+    });
+  }
+};
+
+exports.addIncrement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, value, effectiveDate } = req.body;
+
+    const employeeId = parseInt(id);
+    if (isNaN(employeeId)) {
+      return res.status(400).json({ success: false, message: "Invalid employee ID" });
+    }
+
+    // Fetch current payroll info
+    const payroll = await prisma.employeePayroll.findUnique({
+      where: { employeeId },
+    });
+
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: "Employee payroll record not found" });
+    }
+
+    const previousSalary = payroll.rate;
+    let newSalary = previousSalary;
+
+    const mappedType = type === "amount" ? "flat" : type;
+
+    if (mappedType === "percentage") {
+      newSalary = previousSalary + (previousSalary * (Number(value) / 100));
+    } else if (mappedType === "flat") {
+      newSalary = previousSalary + Number(value);
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid increment type" });
+    }
+
+    // Perform transaction: create increment record and update payroll rate
+    const result = await prisma.$transaction([
+      prisma.employeeIncrement.create({
+        data: {
+          employeeId,
+          type: mappedType,
+          value: Number(value),
+          previousSalary,
+          newSalary,
+          effectiveDate: new Date(effectiveDate),
+        },
+      }),
+      prisma.employeePayroll.update({
+        where: { employeeId },
+        data: {
+          rate: newSalary,
+        },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      message: "Increment applied successfully",
+      data: result[0],
+    });
+  } catch (error) {
+    console.error("Add Increment Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to apply increment",
+      error: error.message,
     });
   }
 };

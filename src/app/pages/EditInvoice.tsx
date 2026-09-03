@@ -374,8 +374,8 @@ export default function EditInvoice() {
       setCompanyLogo(null);
       setCompanyEmail('');
       setCompanyVat('');
-    } catch (err) {
-      toast.error('Failed to create company');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create company');
     }
   };
 

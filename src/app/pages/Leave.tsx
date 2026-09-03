@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { leaveAPI } from "../services/api";
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
+import { leaveAPI, locationAPI } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import {
@@ -32,6 +33,28 @@ export const Leave: React.FC = () => {
   const [leaveTypes, setLeaveTypes] = useState<any[]>([]);
   const [newLeaveOpen, setNewLeaveOpen] = useState(false);
   const [employees, setEmployees] = useState<any[]>([]);
+  const getInitialLeaveLoc = () => localStorage.getItem("selectedLocation") || "all";
+  const [selectedLocation, setSelectedLocation] = useState(getInitialLeaveLoc);
+  const [locations, setLocations] = useState<any[]>([]);
+
+  const [dateFilter, setDateFilter] = useState<string>("all");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
+
+  useEffect(() => {
+    locationAPI.getLocations().then((res) => setLocations(res.data || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
+      setSelectedLocation(loc);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
 const [selectedEmployee, setSelectedEmployee] = useState("");
 const [employeeSummary, setEmployeeSummary] = useState<any>(null);
 const [actionModalOpen, setActionModalOpen] = useState(false);
@@ -136,7 +159,7 @@ const calculateDays = (start: string, end: string) => {
   // 🔹 Load leave types
   const loadLeaveTypes = async () => {
     try {
-      const data = await leaveAPI.getLeaveTypes();
+      const data = await leaveAPI.getLeaveTypes({ all: true });
       setLeaveTypes(data.types);
     } catch (err) {
       console.error(err);
@@ -214,6 +237,42 @@ const calculateDays = (start: string, end: string) => {
       </Badge>
     );
   };
+
+  const filteredLeaves = (leaves || []).filter((leave) => {
+    if (selectedLocation !== "all") {
+      const empCompId = String(leave.employee?.companyId || leave.employee?.company?.id || leave.employee?.locationId || "");
+      if (empCompId !== String(selectedLocation)) return false;
+    }
+
+    if (dateFilter !== "all") {
+      if (!leave.startDate || !leave.endDate) return false;
+      const lStartStr = leave.startDate.slice(0, 10);
+      const lEndStr = leave.endDate.slice(0, 10);
+      const now = new Date();
+
+      let filterStartStr = "";
+      let filterEndStr = "";
+
+      if (dateFilter === "this_week") {
+        filterStartStr = format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        filterEndStr = format(endOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
+      } else if (dateFilter === "this_month") {
+        filterStartStr = format(startOfMonth(now), "yyyy-MM-dd");
+        filterEndStr = format(endOfMonth(now), "yyyy-MM-dd");
+      } else if (dateFilter === "this_year") {
+        filterStartStr = format(startOfYear(now), "yyyy-MM-dd");
+        filterEndStr = format(endOfYear(now), "yyyy-MM-dd");
+      } else if (dateFilter === "custom") {
+        filterStartStr = customStartDate;
+        filterEndStr = customEndDate;
+      }
+
+      if (filterStartStr && lEndStr < filterStartStr) return false;
+      if (filterEndStr && lStartStr > filterEndStr) return false;
+    }
+
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -333,12 +392,70 @@ const calculateDays = (start: string, end: string) => {
               <div className="flex items-center gap-2">
                 <CardTitle className="text-lg font-bold">Leave Requests</CardTitle>
                 <Badge variant="secondary" className="font-semibold text-xs rounded-full px-2.5">
-                  {leaves?.length || 0} Total
+                  {filteredLeaves?.length || 0} Total
                 </Badge>
               </div>
               <p className="text-xs text-gray-500 mt-1">
                 Overview of active employee leave applications, date ranges, and approval status
               </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Select value={dateFilter} onValueChange={setDateFilter}>
+                <SelectTrigger className="w-[165px] min-w-[165px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0">
+                  <div className="flex items-center gap-2 truncate">
+                    <Calendar className="w-4 h-4 text-gray-500 shrink-0" />
+                    <SelectValue placeholder="Filter Date" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Dates</SelectItem>
+                  <SelectItem value="this_week">This Week</SelectItem>
+                  <SelectItem value="this_month">This Month</SelectItem>
+                  <SelectItem value="this_year">This Year</SelectItem>
+                  <SelectItem value="custom">Custom Range</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {dateFilter === "custom" && (
+                <div className="flex items-center gap-2 bg-white dark:bg-gray-950 px-2.5 h-9 border border-gray-200 dark:border-gray-800 rounded-md shadow-xs shrink-0">
+                  <Input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="h-7 w-[125px] text-xs border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-gray-700 dark:text-gray-200"
+                  />
+                  <span className="text-xs text-gray-400 font-medium">to</span>
+                  <Input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="h-7 w-[125px] text-xs border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-gray-700 dark:text-gray-200"
+                  />
+                </div>
+              )}
+
+              {locations.length > 0 && (
+                <SearchableSelect
+                  className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0"
+                  placeholder="Location"
+                  searchPlaceholder="Search location..."
+                  value={selectedLocation}
+                  onValueChange={(val) => {
+                    setSelectedLocation(val);
+                    localStorage.setItem("selectedLocation", val);
+                    localStorage.setItem("dashboard-selected-location", val);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                  }}
+                  options={[
+                    { value: "all", label: "All Locations" },
+                    ...locations.map((loc) => ({
+                      value: String(loc.id),
+                      label: loc.name,
+                    })),
+                  ]}
+                />
+              )}
             </div>
           </div>
         </CardHeader>
@@ -360,7 +477,7 @@ const calculateDays = (start: string, end: string) => {
               </TableHeader>
 
               <TableBody>
-                {leaves?.length === 0 ? (
+                {filteredLeaves?.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="h-32 text-center text-gray-500">
                       <div className="flex flex-col items-center justify-center gap-1">
@@ -370,7 +487,7 @@ const calculateDays = (start: string, end: string) => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  leaves?.map((leave) => (
+                  filteredLeaves?.map((leave) => (
                     <TableRow key={leave.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
                       <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
                         <div className="flex items-center gap-2.5">

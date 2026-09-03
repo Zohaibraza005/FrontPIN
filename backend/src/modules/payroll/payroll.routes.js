@@ -21,9 +21,12 @@ router.get("/run/:id", protect, controller.getSingleRun);
 router.get("/", protect, controller.getPayrolls);
 router.post("/generate-bulk", protect, controller.generateBulkPayroll);
 router.get("/:id", protect, controller.getSinglePayroll);
+router.put("/:id", protect, controller.updatePayroll);
 router.patch("/:id/status", protect, controller.updateStatus);
 router.delete("/:id", protect, controller.deletePayroll);
 router.post("/:id/component", protect, controller.addComponent);
+router.put("/component/:componentId", protect, controller.updateComponent);
+router.delete("/component/:componentId", protect, controller.deleteComponent);
 router.patch("/:id/lock", protect, controller.lockPayroll);
 
 module.exports = router;

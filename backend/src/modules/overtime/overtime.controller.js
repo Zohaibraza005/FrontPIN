@@ -1,7 +1,7 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment");
 
-function isOffDay(schedules, date) {
+function isOffDay(schedules, date, timezone = null) {
   if (!schedules) return false;
   const scheduleList = Array.isArray(schedules) ? schedules : [schedules];
   const activeSchedule = scheduleList.find((s) => s && !s.deletedAt);
@@ -14,12 +14,27 @@ function isOffDay(schedules, date) {
     return false;
   }
 
-  const dateStr = typeof date === "string" ? date.slice(0, 10) : moment(date).format("YYYY-MM-DD");
-  const mDate = moment(dateStr, "YYYY-MM-DD");
+  let mDate;
+  if (typeof date === "string") {
+    const cleanStr = date.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else if (date instanceof Date) {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
   const shortDay = mDate.format("ddd").toLowerCase();
   const fullDay = mDate.format("dddd").toLowerCase();
 
-  const daysArr = activeSchedule.days.map((d) => String(d).trim().toLowerCase());
+  const daysArr = activeSchedule.days.map((d) => {
+    if (typeof d === "object" && d !== null) {
+      return String(d.day || d.name || d.short || "").trim().toLowerCase();
+    }
+    return String(d).trim().toLowerCase();
+  });
 
   const isWorkingDay = daysArr.includes(shortDay) || daysArr.includes(fullDay);
   return !isWorkingDay;
@@ -27,14 +42,12 @@ function isOffDay(schedules, date) {
 
 exports.createOvertime = async (req, res) => {
   try {
-    if (req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Only admin can add overtime" });
-    }
-
+    const role = req.user.role;
     const { employeeId, date, hours, rate, reason } = req.body;
+    const targetEmployeeId = role === "USER" ? req.user.id : Number(employeeId);
 
     const employee = await prisma.employee.findUnique({
-      where: { id: Number(employeeId) },
+      where: { id: Number(targetEmployeeId) },
       include: {
         payroll: true,
         Schedule: { where: { deletedAt: null } }
@@ -46,14 +59,16 @@ exports.createOvertime = async (req, res) => {
     }
 
     if (isOffDay(employee.Schedule, date)) {
+      const formattedDate = moment(date).format("D MMM YYYY");
       return res.status(400).json({
         success: false,
-        message: "This day is off for user, you cannot add any overtime on this day"
+        message: `Overtime cannot be added: ${formattedDate} is an off day for the user`
       });
     }
 
     const baseRate = employee.payroll?.rate || 0;
     const amount = Number(hours) * baseRate * Number(rate);
+    const targetStatus = role === "USER" ? "PENDING" : "APPROVED";
 
     const overtime = await prisma.overtime.create({
       data: {
@@ -62,9 +77,10 @@ exports.createOvertime = async (req, res) => {
         rate: Number(rate),
         amount,
         reason,
+        status: targetStatus,
 
         employee: {
-          connect: { id: Number(employeeId) },
+          connect: { id: Number(targetEmployeeId) },
         },
 
         organization: {
@@ -150,9 +166,10 @@ exports.updateOvertime = async (req, res) => {
 
     const targetDate = date ? date : existing.date;
     if (isOffDay(employee.Schedule, targetDate)) {
+      const formattedDate = moment(targetDate).format("D MMM YYYY");
       return res.status(400).json({
         success: false,
-        message: "This day is off for user, you cannot add any overtime on this day"
+        message: `Overtime cannot be updated: ${formattedDate} is an off day for the user`
       });
     }
 
@@ -221,9 +238,10 @@ exports.updateOvertimeStatus = async (req, res) => {
 
     const targetDate = date ? date : existing.date;
     if (employee && isOffDay(employee.Schedule, targetDate)) {
+      const formattedDate = moment(targetDate).format("D MMM YYYY");
       return res.status(400).json({
         success: false,
-        message: "This day is off for user, you cannot add any overtime on this day"
+        message: `Overtime cannot be approved: ${formattedDate} is an off day for the user`
       });
     }
 

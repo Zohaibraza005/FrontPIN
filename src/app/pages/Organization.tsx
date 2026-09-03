@@ -8,10 +8,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2 } from "lucide-react";
-import { locationAPI, organizationAPI, leaveAPI } from "../services/api";
+import { Pencil, Plus, Trash2, Eye, AlertTriangle } from "lucide-react";
+import { locationAPI, organizationAPI, leaveAPI, invoiceCompanyAPI, API_URL } from "../services/api";
 import ReactSelect from 'react-select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "../components/ui/dialog";
 import { Switch } from "../components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
@@ -24,8 +24,8 @@ export default function Organization() {
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('');
   const [selectedLocation, setSelectedLocation] = useState(null);
-  const [zkLocation,setZkLocation] = useState(null)
-  const [locations,setLocations] = useState([])
+  const [zkLocation, setZkLocation] = useState(null)
+  const [locations, setLocations] = useState([])
 
   // 🔹 Leave Types state
   const [leaveTypes, setLeaveTypes] = useState([]);
@@ -49,6 +49,25 @@ export default function Organization() {
     orgTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, // sensible default
   });
 
+  // 🔹 Invoice Companies state
+  const [companies, setCompanies] = useState([]);
+  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  const [companyModalOpen, setCompanyModalOpen] = useState(false);
+  const [companyForm, setCompanyForm] = useState({
+    name: "",
+    title: "",
+    phone: "",
+    email: "",
+    vat: "",
+  });
+  const [companyLogo, setCompanyLogo] = useState(null);
+  const [editingCompany, setEditingCompany] = useState(null);
+  const [viewingCompany, setViewingCompany] = useState(null);
+  const [viewCompanyModalOpen, setViewCompanyModalOpen] = useState(false);
+  const [companyDeleteModalOpen, setCompanyDeleteModalOpen] = useState(false);
+  const [deletingCompany, setDeletingCompany] = useState(null);
+  const [isDeletingCompany, setIsDeletingCompany] = useState(false);
+
   const loadLeaveTypes = async () => {
     setLoadingLeaveTypes(true);
     try {
@@ -61,12 +80,106 @@ export default function Organization() {
     }
   };
 
+  const loadCompanies = async () => {
+    setLoadingCompanies(true);
+    try {
+      const res = await invoiceCompanyAPI.getAll();
+      setCompanies(res.data || []);
+    } catch (err) {
+      console.error("Failed to load companies:", err);
+    } finally {
+      setLoadingCompanies(false);
+    }
+  };
+
+  const handleOpenEditCompanyModal = (company: any) => {
+    setEditingCompany(company);
+    setCompanyForm({
+      name: company.name,
+      title: company.title,
+      phone: company.phone,
+      email: company.email || "",
+      vat: company.vat || "",
+    });
+    setCompanyLogo(null);
+    setCompanyModalOpen(true);
+  };
+
+  const handleOpenViewCompanyModal = (company: any) => {
+    setViewingCompany(company);
+    setViewCompanyModalOpen(true);
+  };
+
+  const handleDeleteCompany = (company: any) => {
+    setDeletingCompany(company);
+    setCompanyDeleteModalOpen(true);
+  };
+
+  const handleConfirmDeleteCompany = async () => {
+    if (!deletingCompany) return;
+    try {
+      setIsDeletingCompany(true);
+      await invoiceCompanyAPI.delete(deletingCompany.id);
+      toast.success("Company deleted successfully");
+      setCompanyDeleteModalOpen(false);
+      setDeletingCompany(null);
+      loadCompanies();
+    } catch (err) {
+      toast.error("Failed to delete company");
+    } finally {
+      setIsDeletingCompany(false);
+    }
+  };
+
+  const handleSaveCompany = async () => {
+    if (!companyForm.name.trim() || !companyForm.title.trim() || !companyForm.phone.trim()) {
+      toast.error("Please fill in all required fields (*)");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('data', JSON.stringify({
+      name: companyForm.name,
+      title: companyForm.title,
+      phone: companyForm.phone,
+      email: companyForm.email || undefined,
+      vat: companyForm.vat || undefined,
+    }));
+
+    if (companyLogo) formData.append('logo', companyLogo);
+
+    try {
+      if (editingCompany) {
+        await invoiceCompanyAPI.update(editingCompany.id, formData);
+        toast.success('Company updated successfully');
+      } else {
+        await invoiceCompanyAPI.create(formData);
+        toast.success('Company created successfully');
+      }
+      setCompanyModalOpen(false);
+      setEditingCompany(null);
+      loadCompanies();
+
+      // Reset form
+      setCompanyForm({
+        name: "",
+        title: "",
+        phone: "",
+        email: "",
+        vat: "",
+      });
+      setCompanyLogo(null);
+    } catch (err: any) {
+      toast.error(err?.message || (editingCompany ? 'Failed to update company' : 'Failed to create company'));
+    }
+  };
+
   useEffect(() => {
     const loadProfile = async () => {
       const res = await organizationAPI.getProfile();
-      const location =await locationAPI.getLocations();
+      const location = await locationAPI.getLocations();
       setLocations(location.data)
-      
+
       setForm({
         title: res.name,
         phone: res.phone || "",
@@ -80,9 +193,10 @@ export default function Organization() {
 
       setZkConfig(res.integrations?.zkteco || null);
     };
-  
+
     loadProfile();
     loadLeaveTypes();
+    loadCompanies();
   }, []);
 
   const handleOpenCreateModal = () => {
@@ -146,31 +260,31 @@ export default function Organization() {
   };
 
   const organizationCategories = [
-    "IT Services","Software House","Fintech","Healthcare","Hospital","Pharmaceutical",
-    "Construction","Real Estate","Education","University","School","College",
-    "Manufacturing","Textile","Retail","E-commerce","Logistics","Transportation",
-    "Marketing Agency","Digital Marketing","Telecommunications","Energy","Oil & Gas",
-    "Insurance","Banking","Microfinance","Government","NGO","Non-Profit",
-    "Hospitality","Hotel","Restaurant","Travel Agency","Aviation","Automobile",
-    "Media","Entertainment","Publishing","Legal Firm","Consultancy","Architecture",
-    "Engineering","Food & Beverage","Agriculture","Farming","Mining","Security Services",
-    "Event Management","HR Consultancy","Recruitment Agency","Call Center","BPO",
-    "Outsourcing","Fitness","Gym","Beauty Salon","Spa","Interior Design",
-    "Import/Export","Wholesale","Trading","Startup","SaaS","AI Company",
-    "Blockchain","Cybersecurity","Data Analytics","Research","Biotechnology",
-    "Electronics","Hardware","Furniture","Packaging","Printing",
-    "Sports Club","Gaming","Animation Studio","Film Production","Photography",
-    "Music Production","Apparel","Fashion Brand","Jewelry","Handicrafts",
-    "Courier","Warehousing","Marine","Shipping","Environmental Services",
-    "Waste Management","Water Treatment","Power Generation","Solar Company",
-    "Investment Firm","Private Equity","Venture Capital"
+    "IT Services", "Software House", "Fintech", "Healthcare", "Hospital", "Pharmaceutical",
+    "Construction", "Real Estate", "Education", "University", "School", "College",
+    "Manufacturing", "Textile", "Retail", "E-commerce", "Logistics", "Transportation",
+    "Marketing Agency", "Digital Marketing", "Telecommunications", "Energy", "Oil & Gas",
+    "Insurance", "Banking", "Microfinance", "Government", "NGO", "Non-Profit",
+    "Hospitality", "Hotel", "Restaurant", "Travel Agency", "Aviation", "Automobile",
+    "Media", "Entertainment", "Publishing", "Legal Firm", "Consultancy", "Architecture",
+    "Engineering", "Food & Beverage", "Agriculture", "Farming", "Mining", "Security Services",
+    "Event Management", "HR Consultancy", "Recruitment Agency", "Call Center", "BPO",
+    "Outsourcing", "Fitness", "Gym", "Beauty Salon", "Spa", "Interior Design",
+    "Import/Export", "Wholesale", "Trading", "Startup", "SaaS", "AI Company",
+    "Blockchain", "Cybersecurity", "Data Analytics", "Research", "Biotechnology",
+    "Electronics", "Hardware", "Furniture", "Packaging", "Printing",
+    "Sports Club", "Gaming", "Animation Studio", "Film Production", "Photography",
+    "Music Production", "Apparel", "Fashion Brand", "Jewelry", "Handicrafts",
+    "Courier", "Warehousing", "Marine", "Shipping", "Environmental Services",
+    "Waste Management", "Water Treatment", "Power Generation", "Solar Company",
+    "Investment Firm", "Private Equity", "Venture Capital"
   ];
 
   const categoryOptions = React.useMemo(
     () => organizationCategories.map((cat) => ({ label: cat, value: cat })),
     []
   );
-  
+
   const timezoneOptions = React.useMemo(
     () =>
       ALL_TIMEZONES.map((tz) => ({
@@ -199,40 +313,56 @@ export default function Organization() {
         category: form.category,
         timeZone: form.orgTimeZone,
       });
-  
+
       toast.success("Organization profile updated successfully!");
       setEditMode(false);
-  
+
     } catch (error) {
       toast.error("Failed to update organization profile");
     }
   };
 
   const handleTestConnect = async () => {
-    if (!ip || !port || !selectedLocation) {
+    if (!ip || !port || !zkLocation) {
       toast.error("Please fill all fields");
       return;
     }
 
     try {
-      const testRes = await organizationAPI.testZKTecoConnection({ ip, port });
-      if (testRes.status === 'ok') {
+      const testRes = await organizationAPI.testZKTecoConnection({
+        ip,
+        port: Number(port),
+      });
+
+      if (testRes.status === "ok") {
         await organizationAPI.bindZKTeco({
           ip,
-          port,
-          location: selectedLocation.value,
+          port: Number(port),
+          locationId: Number(zkLocation),
         });
-        setZkConfig({ ip, port, location: selectedLocation.value });
-        toast.success("Connection successful and bound to organization!");
+
+        setZkConfig({
+          ip,
+          port: Number(port),
+          locationId: Number(zkLocation),
+        });
+
+        toast.success("ZKTeco connected successfully!");
+
         setOpen(false);
-        setIp('');
-        setPort('');
-        setSelectedLocation(null);
+        setIp("");
+        setPort("");
+        setZkLocation(null);
       } else {
-        toast.error("Connection test failed");
+        toast.error(testRes.message || "Connection test failed");
       }
     } catch (error) {
-      toast.error("Failed to connect or bind");
+      console.error(error);
+      toast.error(
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to connect ZKTeco"
+      );
     }
   };
 
@@ -248,6 +378,7 @@ export default function Organization() {
           <TabsTrigger value="leave-types">Leave Types</TabsTrigger>
           <TabsTrigger value="pricing">Pricing</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          <TabsTrigger value="companies">Companies</TabsTrigger>
         </TabsList>
 
         {/* ================= PROFILE TAB ================= */}
@@ -322,166 +453,166 @@ export default function Organization() {
                     onChange={(e) => setForm({ ...form, employees: e.target.value })}
                   />
                 </div>
-                
-                
-<div className="space-y-2">
-  <Label>Category</Label>
-  <ReactSelect
-    isSearchable
-    isClearable
-    isDisabled={!editMode}
-    options={organizationCategories.map(cat => ({ label: cat, value: cat }))}
-    value={form.category ? { label: form.category, value: form.category } : null}
-    onChange={(selectedOption) => {
-      setForm(prev => ({
-        ...prev,
-        category: selectedOption ? selectedOption.value : ""
-      }));
-    }}
-    placeholder="Search or select category..."
-    className="react-select-container"
-    classNamePrefix="react-select"
-    styles={{
-      control: (base) => ({
-        ...base,
-        borderColor: 'hsl(var(--input))',
-        backgroundColor: '#f3f3f5',
-        borderRadius: 'var(--radius)',
-        minHeight: '40px',
-        boxShadow: 'none',
-        '&:hover': { borderColor: 'hsl(var(--input))' },
-        border:0,
-      }),
-      valueContainer: (base) => ({
-        ...base,
-        padding: '0 8px',
-        fontSize: '0.875rem',
-      }),
-      input: (base) => ({
-        ...base,
-        margin: 0,
-        padding: 0,
-      }),
-      indicatorSeparator: () => ({ display: 'none' }),
-      dropdownIndicator: (base) => ({
-        ...base,
-        padding: '0 8px',
-        color: 'hsl(var(--muted-foreground))',
-      }),
-      menu: (base) => ({
-        ...base,
-        backgroundColor: 'white',
-        border: '1px solid hsl(var(--border))',
-        borderRadius: 'var(--radius)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-        marginTop: 4,
-        zIndex: 50,
 
-      }),
-      menuList: (base) => ({
-        ...base,
-        padding: '4px',
-        maxHeight: '300px',
-        fontSize:14
-      }),
-      option: (base, state) => ({
-        ...base,
-        backgroundColor: state.isSelected 
-          ? 'hsl(var(--accent))' 
-          : state.isFocused 
-            ? 'hsl(var(--accent)/0.5)' 
-            : 'transparent',
-        color: state.isSelected 
-          ? 'hsl(var(--accent-foreground))' 
-          : 'hsl(var(--foreground))',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        cursor: 'default',
-      }),
-    }}
-  />
-</div>
 
-<div className="space-y-2">
-  <Label>Timezone {form.orgTimeZone ? `(${form.orgTimeZone})` : ""}</Label>
-  <ReactSelect
-    isSearchable
-    isClearable
-    isDisabled={!editMode}
-    options={ALL_TIMEZONES.map(tz => ({ label: tz, value: tz }))}
-    value={form.orgTimeZone ? { label: form.orgTimeZone, value: form.orgTimeZone } : null}
-    onChange={(selectedOption) => {
-      setForm(prev => ({
-        ...prev,
-        orgTimeZone: selectedOption ? selectedOption.value : ""
-      }));
-    }}
-    placeholder="Search timezone (e.g. Asia/Karachi)..."
-    className="react-select-container"
-    classNamePrefix="react-select"
-    // Same styles object as above – copy paste kar dena
-    styles={{
-      control: (base) => ({
-        ...base,
-        borderColor: 'hsl(var(--input))',
-        backgroundColor: '#f3f3f5',
-        borderRadius: 'var(--radius)',
-        minHeight: '40px',
-        boxShadow: 'none',
-        '&:hover': { borderColor: 'hsl(var(--input))' },
-        border:0,
-      }),
-      valueContainer: (base) => ({
-        ...base,
-        padding: '0 8px',
-        fontSize: '0.875rem',
-        
-      }),
-      input: (base) => ({
-        ...base,
-        margin: 0,
-        padding: 0,
-        // borderWidth:0,
-        
-      }),
-      indicatorSeparator: () => ({ display: 'none' }),
-      dropdownIndicator: (base) => ({
-        ...base,
-        padding: '0 8px',
-        color: 'hsl(var(--muted-foreground))',
-      }),
-      menu: (base) => ({
-        ...base,
-        backgroundColor: 'white',
-        border: '1px solid hsl(var(--border))',
-        borderRadius: 'var(--radius)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-        marginTop: 4,
-        zIndex: 50,
-      }),
-      menuList: (base) => ({
-        ...base,
-        padding: '4px',
-        maxHeight: '300px',
-        fontSize:14
-      }),
-      option: (base, state) => ({
-        ...base,
-        backgroundColor: state.isSelected 
-          ? 'hsl(var(--accent))' 
-          : state.isFocused 
-            ? 'hsl(var(--accent)/0.5)' 
-            : 'transparent',
-        color: state.isSelected 
-          ? 'hsl(var(--accent-foreground))' 
-          : 'hsl(var(--foreground))',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        cursor: 'default',
-      }),
-    }}
-  />
-</div>
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <ReactSelect
+                    isSearchable
+                    isClearable
+                    isDisabled={!editMode}
+                    options={organizationCategories.map(cat => ({ label: cat, value: cat }))}
+                    value={form.category ? { label: form.category, value: form.category } : null}
+                    onChange={(selectedOption) => {
+                      setForm(prev => ({
+                        ...prev,
+                        category: selectedOption ? selectedOption.value : ""
+                      }));
+                    }}
+                    placeholder="Search or select category..."
+                    className="react-select-container"
+                    classNamePrefix="react-select"
+                    styles={{
+                      control: (base) => ({
+                        ...base,
+                        borderColor: 'hsl(var(--input))',
+                        backgroundColor: '#f3f3f5',
+                        borderRadius: 'var(--radius)',
+                        minHeight: '40px',
+                        boxShadow: 'none',
+                        '&:hover': { borderColor: 'hsl(var(--input))' },
+                        border: 0,
+                      }),
+                      valueContainer: (base) => ({
+                        ...base,
+                        padding: '0 8px',
+                        fontSize: '0.875rem',
+                      }),
+                      input: (base) => ({
+                        ...base,
+                        margin: 0,
+                        padding: 0,
+                      }),
+                      indicatorSeparator: () => ({ display: 'none' }),
+                      dropdownIndicator: (base) => ({
+                        ...base,
+                        padding: '0 8px',
+                        color: 'hsl(var(--muted-foreground))',
+                      }),
+                      menu: (base) => ({
+                        ...base,
+                        backgroundColor: 'white',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: 'var(--radius)',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                        marginTop: 4,
+                        zIndex: 50,
+
+                      }),
+                      menuList: (base) => ({
+                        ...base,
+                        padding: '4px',
+                        maxHeight: '300px',
+                        fontSize: 14
+                      }),
+                      option: (base, state) => ({
+                        ...base,
+                        backgroundColor: state.isSelected
+                          ? 'hsl(var(--accent))'
+                          : state.isFocused
+                            ? 'hsl(var(--accent)/0.5)'
+                            : 'transparent',
+                        color: state.isSelected
+                          ? 'hsl(var(--accent-foreground))'
+                          : 'hsl(var(--foreground))',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        cursor: 'default',
+                      }),
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Timezone {form.orgTimeZone ? `(${form.orgTimeZone})` : ""}</Label>
+                  <ReactSelect
+                    isSearchable
+                    isClearable
+                    isDisabled={!editMode}
+                    options={ALL_TIMEZONES.map(tz => ({ label: tz, value: tz }))}
+                    value={form.orgTimeZone ? { label: form.orgTimeZone, value: form.orgTimeZone } : null}
+                    onChange={(selectedOption) => {
+                      setForm(prev => ({
+                        ...prev,
+                        orgTimeZone: selectedOption ? selectedOption.value : ""
+                      }));
+                    }}
+                    placeholder="Search timezone (e.g. Asia/Karachi)..."
+                    className="react-select-container"
+                    classNamePrefix="react-select"
+                    // Same styles object as above – copy paste kar dena
+                    styles={{
+                      control: (base) => ({
+                        ...base,
+                        borderColor: 'hsl(var(--input))',
+                        backgroundColor: '#f3f3f5',
+                        borderRadius: 'var(--radius)',
+                        minHeight: '40px',
+                        boxShadow: 'none',
+                        '&:hover': { borderColor: 'hsl(var(--input))' },
+                        border: 0,
+                      }),
+                      valueContainer: (base) => ({
+                        ...base,
+                        padding: '0 8px',
+                        fontSize: '0.875rem',
+
+                      }),
+                      input: (base) => ({
+                        ...base,
+                        margin: 0,
+                        padding: 0,
+                        // borderWidth:0,
+
+                      }),
+                      indicatorSeparator: () => ({ display: 'none' }),
+                      dropdownIndicator: (base) => ({
+                        ...base,
+                        padding: '0 8px',
+                        color: 'hsl(var(--muted-foreground))',
+                      }),
+                      menu: (base) => ({
+                        ...base,
+                        backgroundColor: 'white',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: 'var(--radius)',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                        marginTop: 4,
+                        zIndex: 50,
+                      }),
+                      menuList: (base) => ({
+                        ...base,
+                        padding: '4px',
+                        maxHeight: '300px',
+                        fontSize: 14
+                      }),
+                      option: (base, state) => ({
+                        ...base,
+                        backgroundColor: state.isSelected
+                          ? 'hsl(var(--accent))'
+                          : state.isFocused
+                            ? 'hsl(var(--accent)/0.5)'
+                            : 'transparent',
+                        color: state.isSelected
+                          ? 'hsl(var(--accent-foreground))'
+                          : 'hsl(var(--foreground))',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        cursor: 'default',
+                      }),
+                    }}
+                  />
+                </div>
 
               </div>
 
@@ -600,18 +731,20 @@ export default function Organization() {
                       </div>
                       <div className="space-y-2">
                         <Label>Location</Label>
-                        <Select onValueChange={setZkLocation}>
-                      <SelectTrigger >
-                        <SelectValue placeholder="Locations" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {locations.map(d => (
-                          <SelectItem key={d.id} value={String(d.id)}>
-                            {d.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                        {/* <Select onValueChange={setZkLocation}> */}
+
+                        <Select value={zkLocation || ""} onValueChange={setZkLocation}>
+                          <SelectTrigger >
+                            <SelectValue placeholder="Locations" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {locations.map(d => (
+                              <SelectItem key={d.id} value={String(d.id)}>
+                                {d.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <Button onClick={handleTestConnect}>Test Connection</Button>
                     </div>
@@ -707,6 +840,99 @@ export default function Organization() {
           </Card>
         </TabsContent>
 
+        {/* ================= COMPANIES TAB ================= */}
+        <TabsContent value="companies">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Companies</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Manage companies for your invoices. These companies will be linked to the invoice section.
+                </p>
+              </div>
+              <Button onClick={() => setCompanyModalOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Company
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {loadingCompanies ? (
+                <p className="text-center py-6 text-muted-foreground">Loading companies...</p>
+              ) : companies.length === 0 ? (
+                <div className="text-center py-10 border border-dashed rounded-lg space-y-3">
+                  <p className="text-muted-foreground">No companies created yet.</p>
+                  <Button onClick={() => setCompanyModalOpen(true)} variant="outline" size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create First Company
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Logo</TableHead>
+                      <TableHead>Company Name</TableHead>
+                      <TableHead>Title/Tagline</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>VAT/Tax ID</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {companies.map((company) => (
+                      <TableRow key={company.id}>
+                        <TableCell>
+                          {company.logoUrl ? (
+                            <img
+                              src={`${API_URL}${company.logoUrl}`}
+                              alt={company.name}
+                              className="w-10 h-10 rounded object-cover border"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 border">
+                              {company.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-semibold">{company.name}</TableCell>
+                        <TableCell>{company.title || "—"}</TableCell>
+                        <TableCell>{company.phone || "—"}</TableCell>
+                        <TableCell>{company.email || "—"}</TableCell>
+                        <TableCell>{company.vat || "—"}</TableCell>
+                        <TableCell className="text-right space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenViewCompanyModal(company)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenEditCompanyModal(company)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-800 hover:bg-red-50"
+                            onClick={() => handleDeleteCompany(company)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
 
       {/* ================= LEAVE TYPE CREATE / EDIT DIALOG ================= */}
@@ -763,6 +989,177 @@ export default function Organization() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= COMPANY CREATE/EDIT DIALOG ================= */}
+      <Dialog open={companyModalOpen} onOpenChange={(open) => {
+        setCompanyModalOpen(open);
+        if (!open) {
+          setEditingCompany(null);
+          setCompanyForm({
+            name: "",
+            title: "",
+            phone: "",
+            email: "",
+            vat: "",
+          });
+          setCompanyLogo(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingCompany ? "Edit Company" : "Add New Company"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Company Name *</Label>
+              <Input
+                value={companyForm.name}
+                onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Title / Tagline *</Label>
+              <Input
+                value={companyForm.title}
+                onChange={(e) => setCompanyForm({ ...companyForm, title: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Phone *</Label>
+              <Input
+                value={companyForm.phone}
+                onChange={(e) => setCompanyForm({ ...companyForm, phone: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Logo Image</Label>
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setCompanyLogo(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email (optional)</Label>
+              <Input
+                value={companyForm.email}
+                onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>VAT / Tax ID (optional)</Label>
+              <Input
+                value={companyForm.vat}
+                onChange={(e) => setCompanyForm({ ...companyForm, vat: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-3 pt-4">
+            <Button variant="outline" onClick={() => setCompanyModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveCompany}>
+              {editingCompany ? "Update Company" : "Save Company"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= COMPANY VIEW DIALOG ================= */}
+      <Dialog open={viewCompanyModalOpen} onOpenChange={setViewCompanyModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Company Details</DialogTitle>
+          </DialogHeader>
+          {viewingCompany && (
+            <div className="space-y-4 py-4">
+              <div className="flex justify-center pb-2">
+                {viewingCompany.logoUrl ? (
+                  <img
+                    src={`${API_URL}${viewingCompany.logoUrl}`}
+                    alt={viewingCompany.name}
+                    className="w-24 h-24 rounded object-cover border shadow-sm"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded bg-gray-100 flex items-center justify-center text-2xl font-bold text-gray-500 border shadow-sm">
+                    {viewingCompany.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-gray-400 text-xs">Company Name</Label>
+                  <p className="font-semibold text-sm">{viewingCompany.name}</p>
+                </div>
+                <div>
+                  <Label className="text-gray-400 text-xs">Title / Tagline</Label>
+                  <p className="font-semibold text-sm">{viewingCompany.title || "—"}</p>
+                </div>
+                <div>
+                  <Label className="text-gray-400 text-xs">Phone</Label>
+                  <p className="font-semibold text-sm">{viewingCompany.phone || "—"}</p>
+                </div>
+                <div>
+                  <Label className="text-gray-400 text-xs">Email</Label>
+                  <p className="font-semibold text-sm">{viewingCompany.email || "—"}</p>
+                </div>
+                <div>
+                  <Label className="text-gray-400 text-xs">VAT / Tax ID</Label>
+                  <p className="font-semibold text-sm">{viewingCompany.vat || "—"}</p>
+                </div>
+                <div>
+                  <Label className="text-gray-400 text-xs">Status</Label>
+                  <p className="font-semibold text-sm">
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                      {viewingCompany.status}
+                    </Badge>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setViewCompanyModalOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= COMPANY DELETE DIALOG ================= */}
+      <Dialog open={companyDeleteModalOpen} onOpenChange={setCompanyDeleteModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2 text-red-600">
+              <AlertTriangle className="size-5" />
+              Delete Company
+            </DialogTitle>
+          </DialogHeader>
+
+          {deletingCompany && (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-gray-600">
+                Are you sure you want to delete the company{" "}
+                <span className="font-bold text-gray-900">
+                  {deletingCompany.name}
+                </span>
+                ? This action cannot be undone.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setCompanyDeleteModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={isDeletingCompany}
+                  onClick={handleConfirmDeleteCompany}
+                >
+                  {isDeletingCompany ? "Deleting..." : "Delete Company"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

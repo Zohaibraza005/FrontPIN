@@ -14,6 +14,7 @@ router.get(
     protect,
     controller.getAttendanceReport
   );
+router.get("/export-excel", protect, controller.exportAttendanceExcel);
   router.post("/", protect, controller.createAttendance);
   router.get(
     "/admin/dashboard",

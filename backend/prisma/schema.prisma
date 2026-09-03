@@ -148,6 +148,7 @@ model Employee {
   pin          String?
   profileImage String?
   employeeId   String? @unique
+  biometricId  String? @unique
   phoneNumber  String?
   nationalId   String?
 
@@ -285,7 +286,10 @@ model EmployeePayroll {
 
   overtimeRate Float?
 
-  annualLeaves Int @default(0)
+  annualLeaves  Int @default(17)
+  casualLeaves  Int @default(10)
+  suddenLeaves  Int @default(12)
+  monthlyLeaves Int @default(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -320,6 +324,7 @@ enum PrivilegeModule {
   REPORT
   OVERTIME
   ENABLE_GPS
+  SCHEDULE
 }
 
 model EmployeePrivilege {
@@ -1230,3 +1235,33 @@ model Candidate {
   @@index([jobId])
   @@index([status])
 }
+
+////////////////////////////////////////////////
+//////////////// BIOMETRIC DEVICES /////////////
+////////////////////////////////////////////////
+
+enum DeviceBrand {
+  HIKVISION
+  ZKTECO
+}
+
+model BiometricDevice {
+  id           Int         @id @default(autoincrement())
+  name         String
+  brand        DeviceBrand @default(HIKVISION)
+  ipAddress    String      @unique
+  port         Int         @default(4370)
+  username     String?
+  password     String?
+  companyId    Int?
+  status       String      @default("OFFLINE") // ONLINE | OFFLINE
+  lastSyncedAt DateTime?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+
+  @@index([brand])
+  @@index([status])
+}
+

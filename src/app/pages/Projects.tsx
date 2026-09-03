@@ -51,7 +51,11 @@ import {
   Briefcase,
   Layers,
   ArrowUpRight,
-  Sparkles
+  Sparkles,
+  AlertTriangle,
+  AlertOctagon,
+  XCircle,
+  PauseCircle
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -95,6 +99,16 @@ const formatDate = (dateString: string | null | undefined) => {
     day: "2-digit",
     month: "short",
     year: "numeric",
+  });
+};
+
+const formatShortDate = (dateString: string | null | undefined) => {
+  if (!dateString) return "";
+  const d = new Date(dateString);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
   });
 };
 
@@ -161,70 +175,84 @@ const ProjectCard: React.FC<{
   return (
     <div
       ref={drag}
-      className={`bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200/80 dark:border-gray-800 shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing transition-all ${
+      className={`bg-white dark:bg-gray-950 p-4 rounded-2xl border border-gray-200/90 dark:border-gray-800 shadow-2xs hover:shadow-md cursor-grab active:cursor-grabbing transition-all ${
         statusCfg.border
       } border-t-4 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-2">
+      {/* Title */}
+      <div className="mb-1.5">
+        <h4
+          className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-1 hover:text-sky-600 cursor-pointer transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction("view", project);
+          }}
+          title={project.title}
+        >
           {project.title}
         </h4>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 -mr-1">
-              <MoreVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40 z-50">
-            <DropdownMenuItem onSelect={() => onAction("view", project)} className="cursor-pointer gap-2">
-              <Eye className="w-4 h-4 text-gray-500" />
-              <span>View Details</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onAction("edit", project)} className="cursor-pointer gap-2">
-              <Pencil className="w-4 h-4 text-blue-600" />
-              <span>Edit Project</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
-              onSelect={() => onAction("delete", project)}
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Delete Project</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3.5 line-clamp-2 leading-relaxed">
+      {/* Description */}
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2 leading-snug">
         {project.description || "No description provided"}
       </p>
 
-      <div className="space-y-2 text-xs">
-        <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-          <span className="flex items-center gap-1 text-[11px] text-gray-400">
-            <User className="w-3.5 h-3.5" /> Client
+      {/* Details List */}
+      <div className="space-y-2.5 text-xs pt-2 border-t border-gray-100 dark:border-gray-900">
+        {/* Client & Budget */}
+        <div className="flex items-center justify-between gap-1 text-gray-600 dark:text-gray-400">
+          <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium truncate">
+            <User className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <span className="truncate">{project.client?.name || "No Client"}</span>
           </span>
-          <span className="font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[120px]">
-            {project.client?.name || "—"}
-          </span>
+          {project.budget ? (
+            <span className="font-semibold text-[11px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-900/60 shrink-0">
+              ${project.budget.toLocaleString()}
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex justify-between items-center text-gray-600 dark:text-gray-400">
-          <span className="flex items-center gap-1 text-[11px] text-gray-400">
-            <Clock className="w-3.5 h-3.5" /> Timeline
-          </span>
-          <span className="font-mono text-[11px]">
+        {/* Timeline: Title on Line 1, Full Date Range on Line 2! */}
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">
+            <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <span>Timeline</span>
+          </div>
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 font-mono tracking-tight pl-5">
             {formatDate(project.startDate)} – {formatDate(project.endDate)}
-          </span>
+          </p>
         </div>
 
-        <div className="pt-1">
-          <div className="flex justify-between text-[11px] text-gray-500 mb-1 font-medium">
+        {/* Progress Bar */}
+        <div className="space-y-1 pt-0.5">
+          <div className="flex justify-between items-center text-[11px] text-gray-500 font-medium">
             <span>Progress</span>
             <span className="font-bold text-gray-800 dark:text-gray-200">{Math.round(project.progress || 0)}%</span>
           </div>
           <Progress value={project.progress || 0} className="h-1.5 rounded-full" />
         </div>
+
+        {/* Status Reason Badges */}
+        {project.status === "ON_HOLD" && (
+          <div className="mt-2 text-[11px] bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 p-2 rounded-xl border border-amber-200/60 dark:border-amber-900/60 flex items-center justify-between">
+            <span className="font-semibold flex items-center gap-1">
+              <AlertTriangle className="size-3.5 shrink-0 text-amber-600" />
+              On Hold
+            </span>
+            <span className="text-[10px] text-amber-600 dark:text-amber-400 italic font-normal">Reason saved</span>
+          </div>
+        )}
+
+        {project.status === "CANCELLED" && (
+          <div className="mt-2 text-[11px] bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 p-2 rounded-xl border border-rose-200/60 dark:border-rose-900/60 flex items-center justify-between">
+            <span className="font-semibold flex items-center gap-1">
+              <AlertOctagon className="size-3.5 shrink-0 text-rose-600" />
+              Cancelled
+            </span>
+            <span className="text-[10px] text-rose-600 dark:text-rose-400 italic font-normal">Reason saved</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -328,6 +356,17 @@ export const Projects: React.FC = () => {
   // Delete confirmation
   const [deleteProjectId, setDeleteProjectId] = useState<number | null>(null);
 
+  // Status Change Reason Dialog State
+  const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
+  const [pendingStatusTarget, setPendingStatusTarget] = useState<{
+    projectId: number;
+    newStatus: string;
+    projectTitle: string;
+  } | null>(null);
+  const [statusReason, setStatusReason] = useState("");
+  const [statusReasonError, setStatusReasonError] = useState("");
+  const [isSubmittingReason, setIsSubmittingReason] = useState(false);
+
   const filteredProjects = projects.filter((project) => {
     const matchesSearch = searchQuery
       ? project.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -363,6 +402,28 @@ export const Projects: React.FC = () => {
   };
 
   const handleDrop = async (projectId: number, newStatus: string) => {
+    const targetProj = projects.find((p) => p.id === projectId);
+    if (!targetProj) return;
+
+    if (targetProj.status === newStatus) return;
+
+    // If newStatus is ON_HOLD or CANCELLED, open reason dialog modal!
+    if (newStatus === "ON_HOLD" || newStatus === "CANCELLED") {
+      setPendingStatusTarget({
+        projectId,
+        newStatus,
+        projectTitle: targetProj.title || `Project #${projectId}`,
+      });
+      setStatusReason("");
+      setStatusReasonError("");
+      setReasonDialogOpen(true);
+      return;
+    }
+
+    executeStatusUpdate(projectId, newStatus);
+  };
+
+  const executeStatusUpdate = async (projectId: number, newStatus: string, reason?: string) => {
     const oldProjects = [...projects];
 
     // Optimistic UI update
@@ -373,12 +434,40 @@ export const Projects: React.FC = () => {
     );
 
     try {
-      await projectAPI.updateProjectStatus(projectId, { status: newStatus });
-      toast.success("Project status updated");
+      setIsSubmittingReason(true);
+      await projectAPI.updateProjectStatus(projectId, { status: newStatus, reason });
+      const statusLabel =
+        newStatus === "ON_HOLD"
+          ? "placed On Hold"
+          : newStatus === "CANCELLED"
+          ? "Cancelled"
+          : "updated";
+      toast.success(`Project ${statusLabel} successfully`);
+      fetchData();
     } catch (err) {
       setProjects(oldProjects);
       toast.error("Failed to update project status");
+    } finally {
+      setIsSubmittingReason(false);
+      setReasonDialogOpen(false);
+      setPendingStatusTarget(null);
+      setStatusReason("");
+      setStatusReasonError("");
     }
+  };
+
+  const handleConfirmStatusReason = () => {
+    if (!statusReason.trim()) {
+      setStatusReasonError("Please state a reason before proceeding.");
+      return;
+    }
+    if (!pendingStatusTarget) return;
+
+    executeStatusUpdate(
+      pendingStatusTarget.projectId,
+      pendingStatusTarget.newStatus,
+      statusReason.trim()
+    );
   };
 
   const handleDeleteConfirm = async () => {
@@ -410,6 +499,23 @@ export const Projects: React.FC = () => {
   const handleUpdateProject = async () => {
     if (!editingProject || !editTitle) {
       toast.error("Project title is required");
+      return;
+    }
+
+    // Intercept if status changed to ON_HOLD or CANCELLED
+    if (
+      editingProject.status !== editStatus &&
+      (editStatus === "ON_HOLD" || editStatus === "CANCELLED")
+    ) {
+      setPendingStatusTarget({
+        projectId: editingProject.id,
+        newStatus: editStatus,
+        projectTitle: editTitle || editingProject.title,
+      });
+      setStatusReason("");
+      setStatusReasonError("");
+      setEditProjectOpen(false);
+      setReasonDialogOpen(true);
       return;
     }
 
@@ -1314,6 +1420,110 @@ export const Projects: React.FC = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* ── STATUS CHANGE REASON DIALOG ───────────────────────── */}
+        <Dialog
+          open={reasonDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setReasonDialogOpen(false);
+              setPendingStatusTarget(null);
+              setStatusReason("");
+              setStatusReasonError("");
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-lg rounded-2xl p-6 border-gray-200 dark:border-gray-800 shadow-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold flex items-center gap-2.5">
+                {pendingStatusTarget?.newStatus === "ON_HOLD" ? (
+                  <>
+                    <div className="size-9 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 flex items-center justify-center border border-amber-200 dark:border-amber-800 shrink-0">
+                      <AlertTriangle className="size-5" />
+                    </div>
+                    <span className="text-amber-900 dark:text-amber-200">Put Project On Hold</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="size-9 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 flex items-center justify-center border border-rose-200 dark:border-rose-800 shrink-0">
+                      <AlertOctagon className="size-5" />
+                    </div>
+                    <span className="text-rose-900 dark:text-rose-200">Cancel Project</span>
+                  </>
+                )}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="bg-gray-50 dark:bg-gray-900/60 p-3.5 rounded-xl border border-gray-200/80 dark:border-gray-800">
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Target Project:</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5">
+                  {pendingStatusTarget?.projectTitle}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                  {pendingStatusTarget?.newStatus === "ON_HOLD"
+                    ? "Reason for putting on hold *"
+                    : "Reason for cancellation *"}
+                </Label>
+                <Textarea
+                  value={statusReason}
+                  onChange={(e) => {
+                    setStatusReason(e.target.value);
+                    if (e.target.value.trim()) setStatusReasonError("");
+                  }}
+                  placeholder={
+                    pendingStatusTarget?.newStatus === "ON_HOLD"
+                      ? "Explain why this project is being moved to On Hold (e.g. client budget delay, waiting for approval)..."
+                      : "Explain why this project is being cancelled (e.g. scope change, client request)..."
+                  }
+                  rows={4}
+                  className="rounded-xl bg-white dark:bg-gray-950 text-sm border-gray-200 dark:border-gray-800 focus:ring-2 focus:ring-sky-500"
+                />
+                {statusReasonError && (
+                  <p className="text-xs font-semibold text-rose-600 flex items-center gap-1">
+                    <XCircle className="size-3.5" />
+                    {statusReasonError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2.5 justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => {
+                    setReasonDialogOpen(false);
+                    setPendingStatusTarget(null);
+                    setStatusReason("");
+                    setStatusReasonError("");
+                  }}
+                  className="rounded-xl border-gray-200 dark:border-gray-800 text-xs font-semibold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isSubmittingReason}
+                  onClick={handleConfirmStatusReason}
+                  className={`rounded-xl text-xs font-bold px-4 text-white shadow-sm transition-all ${
+                    pendingStatusTarget?.newStatus === "ON_HOLD"
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-rose-600 hover:bg-rose-700"
+                  }`}
+                >
+                  {isSubmittingReason
+                    ? "Saving..."
+                    : pendingStatusTarget?.newStatus === "ON_HOLD"
+                    ? "Confirm On Hold"
+                    : "Confirm Cancellation"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
       </div>
     </DndProvider>

@@ -22,7 +22,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function isOffDay(schedules, date) {
+function isOffDay(schedules, date, timezone = null) {
   if (!schedules) return false;
   const scheduleList = Array.isArray(schedules) ? schedules : [schedules];
   const activeSchedule = scheduleList.find((s) => s && !s.deletedAt);
@@ -35,14 +35,69 @@ function isOffDay(schedules, date) {
     return false;
   }
 
-  const mDate = typeof date === "string" ? moment(date, "YYYY-MM-DD") : moment(date);
+  let mDate;
+  if (typeof date === "string") {
+    const cleanStr = date.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else if (date instanceof Date) {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
   const shortDay = mDate.format("ddd").toLowerCase();
   const fullDay = mDate.format("dddd").toLowerCase();
 
-  const daysArr = activeSchedule.days.map((d) => String(d).trim().toLowerCase());
+  const daysArr = activeSchedule.days.map((d) => {
+    if (typeof d === "object" && d !== null) {
+      return String(d.day || d.name || d.short || "").trim().toLowerCase();
+    }
+    return String(d).trim().toLowerCase();
+  });
 
   const isWorkingDay = daysArr.includes(shortDay) || daysArr.includes(fullDay);
   return !isWorkingDay;
+}
+
+function getScheduleShiftForDay(schedule, date, timezone = null) {
+  let startTime = schedule?.startTime || "09:00";
+  let endTime = schedule?.endTime || "18:00";
+
+  if (!schedule || !schedule.days || !Array.isArray(schedule.days)) {
+    return { startTime, endTime };
+  }
+
+  let mDate;
+  if (typeof date === "string") {
+    const cleanStr = date.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else if (date instanceof Date) {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
+  const shortDay = mDate.format("ddd").toLowerCase();
+  const fullDay = mDate.format("dddd").toLowerCase();
+
+  const dayObj = schedule.days.find((d) => {
+    if (typeof d === "object" && d !== null) {
+      const name = String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+      return name === shortDay || name === fullDay;
+    }
+    return false;
+  });
+
+  if (dayObj && typeof dayObj === "object") {
+    if (dayObj.startTime) startTime = dayObj.startTime;
+    if (dayObj.endTime) endTime = dayObj.endTime;
+  }
+
+  return { startTime, endTime };
 }
 
 
@@ -175,6 +230,15 @@ function getBreakStats(schedules, attendanceActivities) {
 
 exports.getTodayStatus = async (req, res) => {
   try {
+    if (req.user.role === "ADMIN") {
+      return res.json({
+        success: true,
+        clockedIn: false,
+        clockedOut: false,
+        isAdmin: true,
+      });
+    }
+
     const employeeId = req.user.id;
 
     // 1️⃣ Get employee with company timezone and schedule
@@ -199,7 +263,8 @@ exports.getTodayStatus = async (req, res) => {
       .utc()
       .toDate();
 
-    const isTodayOff = isOffDay(employee.Schedule, todayStart);
+    const todayDateString = moment().tz(timezone).format("YYYY-MM-DD");
+    const isTodayOff = isOffDay(employee.Schedule, todayDateString, timezone);
 
     // 3️⃣ Fetch attendance
     const attendance = await prisma.attendance.findUnique({
@@ -296,6 +361,9 @@ exports.verifyPin = async (req, res) => {
 
 exports.clockOut = async (req, res) => {
   try {
+    if (req.user.role === "ADMIN") {
+      return res.status(400).json({ success: false, message: "Super Admin accounts do not record attendance." });
+    }
     const { summary, lat, lng } = req.body;
     const employeeId = req.user.id;
 
@@ -349,6 +417,9 @@ exports.clockOut = async (req, res) => {
 };
 exports.clockIn = async (req, res) => {
   try {
+    if (req.user.role === "ADMIN") {
+      return res.status(400).json({ success: false, message: "Super Admin accounts do not record attendance." });
+    }
     const employeeId = req.user.id;
     const { lat, lng, activityType, taskId } = req.body;
 
@@ -404,13 +475,20 @@ exports.clockIn = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    if (isOffDay(fullEmployee.Schedule, todayStart)) {
+    if (isOffDay(fullEmployee.Schedule, todayDateString, timezone)) {
       return res.status(400).json({ message: "This is an Off Day. There is no schedule for this day." });
     }
 
-    const schedule = fullEmployee.Schedule.find(
+    const rawSchedule = fullEmployee.Schedule.find(
       (s) => !s.deletedAt
     ) || { startTime: "09:00", endTime: "18:00" };
+
+    const dayShift = getScheduleShiftForDay(rawSchedule, todayDateString, timezone);
+    const schedule = {
+      ...rawSchedule,
+      startTime: dayShift.startTime,
+      endTime: dayShift.endTime
+    };
 
     /////////////////////////////////////////////////////////
     // 4️⃣ GEOFENCING CHECK
@@ -578,6 +656,12 @@ exports.startBreak = async (req, res) => {
       },
     });
 
+    // Update attendance record status to BREAK in database
+    await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { status: "BREAK" },
+    });
+
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       include: { Schedule: { where: { deletedAt: null } } },
@@ -655,9 +739,14 @@ exports.endBreak = async (req, res) => {
         return sum + (b.durationMinutes || 0);
       }, 0);
 
+      const restoredStatus = attendance.isLate ? "LATE" : "PRESENT";
+
       await prisma.attendance.update({
         where: { id: attendance.id },
-        data: { totalBreakMinutes: totalBreakMins },
+        data: {
+          totalBreakMinutes: totalBreakMins,
+          status: restoredStatus,
+        },
       });
     }
 
@@ -758,6 +847,7 @@ exports.getAttendanceReport = async (req, res) => {
       date,
       departmentId,
       companyId,
+      locationId,
       employeeId
     } = req.query;
 
@@ -781,9 +871,10 @@ exports.getAttendanceReport = async (req, res) => {
       endDate = baseDate.clone().endOf("month").toDate();
     }
 
-    /* ðŸ”Ž Employee Filtering */
+    /* 🔍 Employee Filtering */
     let employeeWhere = {
-      deletedAt: null
+      deletedAt: null,
+      NOT: { role: "ADMIN" }
     };
 
     if (user.role === "USER") {
@@ -798,21 +889,38 @@ exports.getAttendanceReport = async (req, res) => {
     }
 
     if (user.role === "ADMIN") {
-      if (employeeId) employeeWhere.id = Number(employeeId);
-      if (departmentId) employeeWhere.departmentId = Number(departmentId);
-      if (companyId) employeeWhere.companyId = Number(companyId);
+      if (employeeId && String(employeeId).toLowerCase() !== "all") {
+        employeeWhere.id = Number(employeeId);
+      }
+      if (departmentId && String(departmentId).toLowerCase() !== "all") {
+        employeeWhere.departmentId = Number(departmentId);
+      }
+      const targetLoc = companyId || locationId;
+      if (targetLoc && String(targetLoc).toLowerCase() !== "all") {
+        employeeWhere.companyId = Number(targetLoc);
+      }
     }
 
-    /* ðŸ‘¥ Employees */
+    const queryStartDate = moment(startDate).subtract(1, "day").startOf("day").toDate();
+    const queryEndDate = moment(endDate).add(1, "day").endOf("day").toDate();
+
+    /* 👥 Employees */
     const employees = await prisma.employee.findMany({
       where: employeeWhere,
       include: {
+        department: { select: { title: true } },
+        supervisor: { select: { firstName: true, lastName: true } },
+        jobInfo: true,
+        company: true,
         Schedule: {
           where: { deletedAt: null }
         },
         Attendance: {
           where: {
-            date: { gte: startDate, lte: endDate },
+            OR: [
+              { date: { gte: queryStartDate, lte: queryEndDate } },
+              { checkInTime: { gte: queryStartDate, lte: queryEndDate } }
+            ],
             deletedAt: null
           },
           include: {
@@ -822,7 +930,7 @@ exports.getAttendanceReport = async (req, res) => {
       }
     });
 
-    /* ðŸ”¥ Approved Overtimes */
+    /* 🔥 Approved Overtimes */
     const approvedOvertimes = await prisma.overtime.findMany({
       where: {
         status: "APPROVED",
@@ -834,7 +942,7 @@ exports.getAttendanceReport = async (req, res) => {
       }
     });
 
-    /* ðŸ”¥ Approved Leaves */
+    /* 🔥 Approved Leaves */
     const approvedLeaves = await prisma.leaveRequest.findMany({
       where: {
         status: "APPROVED",
@@ -862,7 +970,7 @@ exports.getAttendanceReport = async (req, res) => {
       overtimeMap[keyStart] = otVal;
     });
 
-    /* ðŸŸ¡ Leave Map */
+    /* 🟡 Leave Map */
     const leaveMap = {};
     approvedLeaves.forEach(lv => {
       let cursor = moment(lv.startDate).startOf("day");
@@ -875,7 +983,7 @@ exports.getAttendanceReport = async (req, res) => {
       }
     });
 
-    /* ðŸ“… Generate All Dates */
+    /* 📅 Generate All Dates */
     const allDates = [];
     let cursor = moment(startDate).startOf("day");
     const endCursor = moment(endDate).startOf("day");
@@ -887,15 +995,31 @@ exports.getAttendanceReport = async (req, res) => {
 
     const now = new Date();
 
-    /* ðŸ§  Final Formatting */
+    /* 🧠 Final Formatting */
     const formattedEmployees = employees.map(emp => {
 
       const attendanceMap = {};
       emp.Attendance.forEach(att => {
-        const dLocal = moment(att.date).format("YYYY-MM-DD");
-        const dUtc = moment.utc(att.date).format("YYYY-MM-DD");
-        attendanceMap[dLocal] = att;
-        attendanceMap[dUtc] = att;
+        const keys = new Set();
+        if (att.date) {
+          keys.add(moment(att.date).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.date).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.date).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        if (att.checkInTime) {
+          keys.add(moment(att.checkInTime).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.checkInTime).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.checkInTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        keys.forEach(k => {
+          if (!attendanceMap[k]) {
+            attendanceMap[k] = att;
+          }
+        });
       });
 
       const fullAttendance = allDates.map(dateStr => {
@@ -1307,43 +1431,48 @@ exports.getAttendanceReport = async (req, res) => {
     }
   };
 
-// ðŸ”¥ ADMIN ATTENDANCE DASHBOARD (TODAY)
+// 🔥 ADMIN ATTENDANCE DASHBOARD (TODAY)
 exports.getAdminAttendanceDashboard = async (req, res) => {
   try {
     const { companyId } = req.query;
     const organizationId = req.user.organizationId;
 
-    const todayStart = moment().startOf("day").toDate();
-    const todayEnd = moment().endOf("day").toDate();
+    const queryStartDate = moment().subtract(1, "day").startOf("day").toDate();
+    const queryEndDate = moment().add(1, "day").endOf("day").toDate();
+    const todayStr = moment().format("YYYY-MM-DD");
 
-    // ðŸ”Ž Employees filter (Org + Optional Company)
+    // 🔍 Employees filter (Org + Optional Company)
     const employeeWhere = {
       organizationId,
       deletedAt: null,
+      NOT: { role: "ADMIN" },
     };
 
     if (companyId) {
       employeeWhere.companyId = Number(companyId);
     }
 
-    // ðŸ‘¥ Get Employees
+    // 👥 Get Employees
     const employees = await prisma.employee.findMany({
       where: employeeWhere,
       include: {
         company: true,
         Attendance: {
           where: {
-            date: {
-              gte: todayStart,
-              lte: todayEnd,
-            },
+            OR: [
+              { date: { gte: queryStartDate, lte: queryEndDate } },
+              { checkInTime: { gte: queryStartDate, lte: queryEndDate } }
+            ],
             deletedAt: null,
           },
+          orderBy: { createdAt: "desc" },
         },
       },
     });
 
-    // ðŸŸ¡ Approved Leaves Today
+    // 🟡 Approved Leaves Today
+    const todayStart = moment().startOf("day").toDate();
+    const todayEnd = moment().endOf("day").toDate();
     const approvedLeaves = await prisma.leaveRequest.findMany({
       where: {
         organizationId,
@@ -1358,13 +1487,30 @@ exports.getAdminAttendanceDashboard = async (req, res) => {
       leaveMap[leave.employeeId] = leave;
     });
 
-    // ðŸ“Š Prepare Response
+    // 📊 Prepare Response
     let present = [];
     let absent = [];
     let onLeave = [];
 
     employees.forEach((emp) => {
-      const attendance = emp.Attendance[0];
+      const attendance = emp.Attendance.find((att) => {
+        const keys = new Set();
+        if (att.date) {
+          keys.add(moment(att.date).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.date).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.date).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        if (att.checkInTime) {
+          keys.add(moment(att.checkInTime).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.checkInTime).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.checkInTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        return keys.has(todayStr);
+      }) || emp.Attendance[0];
 
       // ðŸŸ¡ On Leave
       if (leaveMap[emp.id]) {
@@ -1422,5 +1568,414 @@ exports.getAdminAttendanceDashboard = async (req, res) => {
     return res.status(500).json({ success: false });
   }
 };
+
+exports.exportAttendanceExcel = async (req, res) => {
+  try {
+    const user = req.user;
+    const {
+      date,
+      departmentId,
+      companyId,
+      locationId,
+      employeeId,
+      filter,
+      view,
+      startDate: qStartDate,
+      endDate: qEndDate,
+      from,
+      to,
+    } = req.query;
+
+    const baseDate = moment(date || new Date());
+
+    let startDate;
+    let endDate;
+
+    const startQuery = qStartDate || from;
+    const endQuery = qEndDate || to;
+
+    if (startQuery && endQuery) {
+      startDate = moment(startQuery).startOf("day").toDate();
+      endDate = moment(endQuery).endOf("day").toDate();
+    } else if (view === "weekly" || filter === "thisWeek") {
+      startDate = baseDate.clone().startOf("isoWeek").toDate();
+      endDate = baseDate.clone().endOf("isoWeek").toDate();
+    } else if (view === "yearly" || filter === "thisYear") {
+      startDate = baseDate.clone().startOf("year").toDate();
+      endDate = baseDate.clone().endOf("year").toDate();
+    } else {
+      startDate = baseDate.clone().startOf("month").toDate();
+      endDate = baseDate.clone().endOf("month").toDate();
+    }
+
+    let titleText = `Daily Attendance Tracker ${moment(startDate).format("MMMM YYYY")}`;
+    if (view === "weekly" || filter === "thisWeek") {
+      titleText = `Weekly Attendance Tracker (${moment(startDate).format("DD MMM YYYY")} - ${moment(endDate).format("DD MMM YYYY")})`;
+    } else if (view === "yearly" || filter === "thisYear") {
+      titleText = `Annual Attendance Tracker ${moment(startDate).format("YYYY")}`;
+    } else if (startQuery && endQuery) {
+      titleText = `Attendance Tracker (${moment(startDate).format("DD MMM YYYY")} - ${moment(endDate).format("DD MMM YYYY")})`;
+    }
+
+    let employeeWhere = { deletedAt: null, NOT: { role: "ADMIN" } };
+
+    if (user.role === "USER") {
+      employeeWhere.id = user.id;
+    } else if (user.role === "SUPERVISOR") {
+      employeeWhere.OR = [{ id: user.id }, { supervisorId: user.id }];
+    } else if (user.role === "ADMIN") {
+      if (employeeId && String(employeeId).toLowerCase() !== "all") {
+        employeeWhere.id = Number(employeeId);
+      }
+      if (departmentId && String(departmentId).toLowerCase() !== "all") {
+        employeeWhere.departmentId = Number(departmentId);
+      }
+      const targetLoc = companyId || locationId;
+      if (targetLoc && String(targetLoc).toLowerCase() !== "all") {
+        employeeWhere.companyId = Number(targetLoc);
+      }
+    }
+
+    const excelQueryStart = moment(startDate).subtract(1, "day").startOf("day").toDate();
+    const excelQueryEnd = moment(endDate).add(1, "day").endOf("day").toDate();
+
+    const employees = await prisma.employee.findMany({
+      where: employeeWhere,
+      include: {
+        department: { select: { title: true } },
+        supervisor: { select: { firstName: true, lastName: true } },
+        jobInfo: true,
+        company: true,
+        Schedule: { where: { deletedAt: null } },
+        Attendance: {
+          where: {
+            OR: [
+              { date: { gte: excelQueryStart, lte: excelQueryEnd } },
+              { checkInTime: { gte: excelQueryStart, lte: excelQueryEnd } }
+            ],
+            deletedAt: null,
+          },
+          include: { activities: true },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
+
+    const approvedLeaves = await prisma.leaveRequest.findMany({
+      where: {
+        status: "APPROVED",
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+        employee: { deletedAt: null },
+      },
+      include: { leaveType: true },
+    });
+
+    const leaveMap = {};
+    approvedLeaves.forEach((lv) => {
+      let cursor = moment(lv.startDate).startOf("day");
+      const end = moment(lv.endDate).startOf("day");
+      while (cursor.isSameOrBefore(end)) {
+        const key = `${lv.employeeId}_${cursor.format("YYYY-MM-DD")}`;
+        leaveMap[key] = lv;
+        cursor.add(1, "day");
+      }
+    });
+
+    const dateStrings = [];
+    const dateMoments = [];
+    let currentDay = moment(startDate).startOf("day");
+    const lastDay = moment(endDate).startOf("day");
+    while (currentDay.isSameOrBefore(lastDay)) {
+      dateStrings.push(currentDay.format("YYYY-MM-DD"));
+      dateMoments.push(currentDay.clone());
+      currentDay.add(1, "day");
+    }
+    const daysCount = dateStrings.length;
+
+    const ExcelJS = require("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Attendance Tracker");
+
+    const totalCols = 20 + daysCount;
+
+    // 1. Red Banner Title Row
+    worksheet.mergeCells(1, 1, 1, totalCols);
+    const titleCell = worksheet.getCell(1, 1);
+    titleCell.value = titleText;
+    titleCell.font = { name: "Arial", size: 16, bold: true, color: { argb: "FFFFFFFF" } };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC00000" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    worksheet.getRow(1).height = 38;
+
+    // 2. Table Headers
+    const headers = [
+      "Emp IDs",
+      "Agent / Employee Name",
+      "Departments",
+      "Sup Names",
+      "Designation",
+      "Status",
+      "Total No. Of Days",
+      "Schedule",
+      "Present",
+      "Annual Leaves",
+      "Off Days",
+      "Post-Acquired Leaves",
+      "Paid Leaves (SL/Abs/CL)",
+      "Early Leave",
+      "Pre-Acquired Leaves",
+      "Unpaid Days",
+      "T",
+      "MU",
+      "ML",
+      "Overall Leave",
+    ];
+
+    dateMoments.forEach((m) => {
+      headers.push(m.format("dddd, MMMM D, YYYY"));
+    });
+
+    worksheet.getRow(2).values = headers;
+    worksheet.getRow(2).height = 65;
+
+    // Style Header Row (Row 2)
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = worksheet.getCell(2, c);
+      cell.font = { name: "Arial", size: 9, bold: true };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FF002060" } },
+        left: { style: "thin", color: { argb: "FF002060" } },
+        bottom: { style: "thin", color: { argb: "FF002060" } },
+        right: { style: "thin", color: { argb: "FF002060" } },
+      };
+
+      if (c === 10 || c === 13 || c === 20) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; // Yellow header
+        cell.font.color = { argb: "FF000000" };
+      } else if (c > 20) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } }; // Dark Navy
+        cell.font.color = { argb: "FFFFFFFF" };
+        cell.alignment.textRotation = 90;
+      } else {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAFA" } };
+        cell.font.color = { argb: "FF002060" };
+      }
+    }
+
+    // 3. Employee Data Rows - ONE CLEAN ROW PER EMPLOYEE
+    employees.forEach((emp, empIdx) => {
+      const rowIndex = 3 + empIdx;
+      const row = worksheet.getRow(rowIndex);
+
+      const attendanceMap = {};
+      emp.Attendance.forEach((att) => {
+        const keys = new Set();
+        if (att.date) {
+          keys.add(moment(att.date).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.date).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.date).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        if (att.checkInTime) {
+          keys.add(moment(att.checkInTime).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.checkInTime).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.checkInTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+          }
+        }
+        keys.forEach(k => {
+          if (!attendanceMap[k]) {
+            attendanceMap[k] = att;
+          }
+        });
+      });
+
+      let presentCount = 0;
+      let tardyCount = 0;
+      let offDaysCount = 0;
+      let annualLeavesCount = 0;
+      let paidLeavesCount = 0;
+      let unpaidDaysCount = 0;
+      let missingPunchCount = 0;
+      let medicalLeaveCount = 0;
+      let scheduledWorkDays = 0;
+
+      const dailyStatuses = dateStrings.map((dateStr) => {
+        const leaveKey = `${emp.id}_${dateStr}`;
+        const leave = leaveMap[leaveKey];
+
+        const dayOff = isOffDay(emp.Schedule, dateStr);
+        const isFutureDay = moment(dateStr, "YYYY-MM-DD").isAfter(moment().startOf("day"));
+
+        if (!dayOff) {
+          scheduledWorkDays++;
+        } else {
+          offDaysCount++;
+        }
+
+        if (leave) {
+          const lType = (leave.leaveType?.name || "").toLowerCase();
+          if (lType.includes("annual")) annualLeavesCount++;
+          else if (lType.includes("unpaid")) unpaidDaysCount++;
+          else if (lType.includes("medical") || lType.includes("sick")) medicalLeaveCount++;
+          else paidLeavesCount++;
+          return { code: "L", type: "LEAVE" };
+        }
+
+        const existing = attendanceMap[dateStr];
+        if (!existing) {
+          if (dayOff) return { code: "OFF", type: "OFF_DAY" };
+          if (isFutureDay) return { code: "", type: "FUTURE" };
+          unpaidDaysCount++;
+          return { code: "A", type: "ABSENT" };
+        }
+
+        let st = (existing.status || "").toUpperCase();
+        if (dayOff && st !== "PRESENT" && st !== "LATE" && st !== "TARDY") {
+          return { code: "OFF", type: "OFF_DAY" };
+        }
+
+        if (st === "PRESENT") {
+          presentCount++;
+          return { code: "P", type: "PRESENT" };
+        } else if (st === "LATE" || st === "TARDY") {
+          presentCount++;
+          tardyCount++;
+          return { code: "T", type: "TARDY" };
+        } else if (st === "LEAVE") {
+          paidLeavesCount++;
+          return { code: "L", type: "LEAVE" };
+        } else if (st === "OFF_DAY" || st === "OFF") {
+          return { code: "OFF", type: "OFF_DAY" };
+        } else {
+          unpaidDaysCount++;
+          return { code: "A", type: "ABSENT" };
+        }
+      });
+
+      const totalLeaves = annualLeavesCount + paidLeavesCount + unpaidDaysCount + medicalLeaveCount;
+      const empCode = emp.employeeId || "NULL";
+      const fullName = `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || "NULL";
+      const deptTitle = emp.department?.title || "NULL";
+      const supName = emp.supervisor
+        ? `${emp.supervisor.firstName || ""} ${emp.supervisor.lastName || ""}`.trim() || "NULL"
+        : "NULL";
+      const desig = emp.jobInfo?.designation || "NULL";
+      const statusStr = emp.jobInfo?.employmentStatus || "NULL";
+
+      const rowValues = [
+        empCode,
+        fullName,
+        deptTitle,
+        supName,
+        desig,
+        statusStr,
+        daysCount,
+        scheduledWorkDays,
+        presentCount,
+        annualLeavesCount,
+        offDaysCount,
+        0,
+        paidLeavesCount,
+        0,
+        0,
+        unpaidDaysCount,
+        tardyCount,
+        missingPunchCount,
+        medicalLeaveCount,
+        totalLeaves,
+        ...dailyStatuses.map((s) => s.code),
+      ];
+
+      row.values = rowValues;
+      row.height = 22;
+
+      for (let c = 1; c <= totalCols; c++) {
+        const cell = worksheet.getCell(rowIndex, c);
+        cell.font = { name: "Arial", size: 9 };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FF002060" } },
+          left: { style: "thin", color: { argb: "FF002060" } },
+          bottom: { style: "thin", color: { argb: "FF002060" } },
+          right: { style: "thin", color: { argb: "FF002060" } },
+        };
+
+        if (c === 2 || c === 5) {
+          cell.alignment = { horizontal: "left", vertical: "middle" };
+        }
+
+        if (c > 20) {
+          const st = dailyStatuses[c - 21];
+          if (st.code === "OFF" || st.type === "FUTURE") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF000000" } };
+            cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+          } else if (st.code === "P") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF8DC" } };
+            cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF000000" } };
+          } else if (st.code === "T" || st.code === "UT") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDBA74" } };
+            cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF9A3412" } };
+          } else if (st.code === "A") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFECDD3" } };
+            cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF991B1B" } };
+          } else if (st.code === "L") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFBAE6FD" } };
+            cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF075985" } };
+          }
+        }
+      }
+    });
+
+    // Column Widths
+    worksheet.getColumn(1).width = 14;
+    worksheet.getColumn(2).width = 25;
+    worksheet.getColumn(3).width = 16;
+    worksheet.getColumn(4).width = 20;
+    worksheet.getColumn(5).width = 28;
+    worksheet.getColumn(6).width = 8;
+    worksheet.getColumn(7).width = 10;
+    worksheet.getColumn(8).width = 10;
+    worksheet.getColumn(9).width = 10;
+    worksheet.getColumn(10).width = 12;
+    worksheet.getColumn(11).width = 10;
+    worksheet.getColumn(12).width = 12;
+    worksheet.getColumn(13).width = 14;
+    worksheet.getColumn(14).width = 10;
+    worksheet.getColumn(15).width = 12;
+    worksheet.getColumn(16).width = 10;
+    worksheet.getColumn(17).width = 6;
+    worksheet.getColumn(18).width = 6;
+    worksheet.getColumn(19).width = 6;
+    worksheet.getColumn(20).width = 12;
+
+    for (let c = 21; c <= totalCols; c++) {
+      worksheet.getColumn(c).width = 5;
+    }
+
+    const exportFileName = (view === "weekly" || filter === "thisWeek")
+      ? `Weekly_Attendance_Tracker_${moment(startDate).format("YYYY-MM-DD")}_to_${moment(endDate).format("YYYY-MM-DD")}.xlsx`
+      : `Attendance_Tracker_${moment(startDate).format("YYYY-MM-DD")}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${exportFileName}"`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Export Attendance Excel error:", error);
+    res.status(500).json({ success: false, message: "Failed to export Excel report" });
+  }
+};
+
 
 

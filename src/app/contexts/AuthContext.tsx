@@ -11,17 +11,18 @@ interface User {
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: any;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
   hasRole: (roles: string[]) => boolean;
+  updateUser: (updatedData: any) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(getCurrentUser());
+  const [user, setUser] = useState<any>(getCurrentUser());
   const navigate = useNavigate();
 
   const login = async (email: string, password: string) => {
@@ -47,6 +48,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     navigate('/login');
   };
 
+  const updateUser = (updatedData: any) => {
+    const newUser = { ...user, ...updatedData };
+    setCurrentUser(newUser);
+    setUser(newUser);
+  };
+
   const hasRole = (roles: string[]) => {
     return user ? roles.includes(user.role) : false;
   };
@@ -59,6 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         isAuthenticated: !!user,
         hasRole,
+        updateUser,
       }}
     >
       {children}

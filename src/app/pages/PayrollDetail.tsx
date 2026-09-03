@@ -35,196 +35,455 @@ import {
   Download,
   FileText,
   Briefcase,
+  History,
   Edit,
+  Pencil,
+  Trash2,
   Plus,
   ArrowLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_URL, payrollAPI } from '../services/api';
+
+const EARNINGS_TITLES = [
+  "KPIs",
+  "PPC Bounty",
+  "Monthly Bounty",
+  "Special Bounty",
+  "Current Month Commission",
+  "Minus One Month Commission",
+  "Minus Two Month Commission",
+  "Overtime",
+  "Allowance",
+  "Arrears",
+  "Bonus",
+  "Other Earning",
+];
+
+const DEDUCTIONS_TITLES = [
+  "Tardies",
+  "Unpaid Days",
+  "Tax",
+  "Advance",
+  "Food Deduction",
+  "CT Deduction",
+  "GYM Deduction",
+  "Late Deduction",
+  "Other Deduction",
+];
 import {
   Document,
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   PDFDownloadLink,
 } from '@react-pdf/renderer';
+import { UNISOFTWARES_LOGO } from '../utils/logoBase64';
 
 // ────────────────────────────────────────────────
-// PDF Styles for Payroll Slip
+// PDF Styles for Payroll Slip (Matching UNISOFTWARES Design)
 // ────────────────────────────────────────────────
 const pdfStyles = StyleSheet.create({
   page: {
-    padding: 40,
-    fontSize: 12,
+    padding: 30,
+    fontSize: 9,
     fontFamily: 'Helvetica',
+    color: '#000000',
+    backgroundColor: '#ffffff',
   },
-  header: {
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  section: {
-    marginBottom: 15,
-  },
-  row: {
+  // Top Header Area
+  headerContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
-  bold: {
+  logoImage: {
+    width: 220,
+    height: 48,
+    objectFit: 'contain',
+  },
+  headerRight: {
+    alignItems: 'flex-end',
+  },
+  salarySlipTitle: {
+    fontSize: 16,
     fontWeight: 'bold',
+    color: '#000000',
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
-  hr: {
-    borderBottomWidth: 1,
-    borderColor: '#ddd',
-    marginVertical: 10,
+  headerAddress: {
+    fontSize: 8,
+    color: '#333333',
   },
-  earningsTable: {
-    marginTop: 10,
+  headerPhone: {
+    fontSize: 8,
+    color: '#333333',
+    marginTop: 2,
   },
-  tableHeader: {
+  headerRedLine: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#a81d24',
+    marginBottom: 20,
+  },
+
+  // Employee Information Grid
+  infoGrid: {
+    marginBottom: 25,
+  },
+  infoRow: {
     flexDirection: 'row',
-    backgroundColor: '#f8f9fa',
-    padding: 8,
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  infoCell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '46%',
+  },
+  infoLabel: {
+    width: '38%',
+    fontSize: 9,
     fontWeight: 'bold',
+    color: '#000000',
   },
-  tableRow: {
-    flexDirection: 'row',
-    padding: 8,
+  infoValueContainer: {
+    width: '62%',
+    borderBottomWidth: 0.8,
+    borderBottomColor: '#666666',
+    paddingBottom: 2,
+    alignItems: 'center',
+  },
+  infoValueText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#000000',
+    textAlign: 'center',
+  },
+
+  // Earnings & Deductions Table
+  tableContainer: {
+    borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#eee',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#000000',
+    marginBottom: 25,
   },
-  col1: { width: '60%' },
-  col2: { width: '40%', textAlign: 'right' },
+  tableHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#a81d24',
+  },
+  tableHeaderCol: {
+    width: '50%',
+    padding: 5,
+    alignItems: 'center',
+  },
+  tableHeaderTitle: {
+    fontSize: 9.5,
+    fontWeight: 'bold',
+    color: '#a81d24',
+    textAlign: 'center',
+  },
+  verticalDivider: {
+    borderRightWidth: 1,
+    borderRightColor: '#000000',
+  },
+  tableBodyRow: {
+    flexDirection: 'row',
+  },
+  tableColHalf: {
+    width: '50%',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3.5,
+    paddingHorizontal: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#333333',
+  },
+  itemTitle: {
+    fontSize: 8.5,
+    color: '#000000',
+  },
+  itemAmount: {
+    fontSize: 8.5,
+    color: '#000000',
+    textAlign: 'right',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#000000',
+  },
+  totalTitle: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  totalAmount: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#000000',
+    textAlign: 'right',
+  },
+
+  // Footer & Net Payable
+  footerContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    marginTop: 5,
+  },
+  netPayableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  netPayableLabel: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginRight: 15,
+  },
+  netPayableValueContainer: {
+    width: 170,
+    borderBottomWidth: 1,
+    borderBottomColor: '#666666',
+    paddingBottom: 2,
+    alignItems: 'center',
+  },
+  netPayableValueText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  websiteBanner: {
+    backgroundColor: '#a81d24',
+    paddingVertical: 5,
+    paddingHorizontal: 25,
+    borderRadius: 1,
+  },
+  websiteBannerText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
 });
 
 // PDF Slip Component
-const PayrollSlipPDF = ({ payroll }: { payroll: any }) => (
-  <Document>
-    <Page size="A4" style={pdfStyles.page}>
-      <View style={pdfStyles.header}>
-        <Text style={pdfStyles.title}>Pay Slip - {moment(payroll.periodStart).format('MMM YYYY')}</Text>
-        <Text style={pdfStyles.subtitle}>
-          {payroll.employee.firstName} {payroll.employee.lastName} • {payroll.employee.designation || 'Employee'}
-        </Text>
-      </View>
+export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
+  const periodMoment = moment(payroll?.periodStart || payroll?.createdAt || new Date());
+  const salaryMonth = periodMoment.format("MMMM");
+  const salaryYear = periodMoment.format("YYYY");
+  const empName = `${payroll?.employee?.firstName || ""} ${payroll?.employee?.lastName || ""}`.trim() || "Employee";
+  const empDesignation = payroll?.employee?.designation || payroll?.employee?.jobInfo?.jobTitle || "Employee";
 
-      <View style={pdfStyles.section}>
-        <Text style={pdfStyles.bold}>Employee Details</Text>
-        <View style={pdfStyles.row}>
-          <Text>Emp ID:</Text>
-          <Text>{payroll.employee.id || '—'}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          
-          <Text>Hiring Date:</Text>
-          <Text>{moment(payroll.employee.jobInfo.hiringDate).format('DD MMM YYYY') || '—'}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          <Text>Location:</Text>
-          <Text>{payroll.employee.location?.name || '—'}</Text>
-        </View>
-      </View>
+  const basicSalary = Number(payroll?.rate || 0);
+  const extraComponents = payroll?.components || [];
 
-      <View style={pdfStyles.hr} />
+  const formatAmt = (val: number) => {
+    return val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
-      <View style={pdfStyles.section}>
-        <Text style={pdfStyles.bold}>Attendance Summary</Text>
-        <View style={pdfStyles.row}>
-          <Text>Total Working Days:</Text>
-          <Text>{payroll.workingDays || 0}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          <Text>Present Days:</Text>
-          <Text>{payroll.presentDays || 0}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          <Text>Absent Days:</Text>
-          <Text>{payroll.absentDays || 0}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          <Text>Leave Days:</Text>
-          <Text>{payroll.leaveDays || 0}</Text>
-        </View>
-        <View style={pdfStyles.row}>
-          <Text>Overtime Hours:</Text>
-          <Text>{payroll.overtimeHours || 0}</Text>
-        </View>
-      </View>
+  // Dynamic + standard Earnings matching Image 1
+  const customEarnings = extraComponents.filter((c: any) =>
+    ["INCREMENT", "BONUS", "ALLOWANCE", "COMMISSION", "OVERTIME", "KPIS", "BOUNTY", "ARREARS"].includes(String(c.type || "").toUpperCase())
+  );
 
-      <View style={pdfStyles.hr} />
+  const earningsList: { title: string; amount: number }[] = [
+    { title: "Basic Salary", amount: basicSalary },
+  ];
 
-      <View style={pdfStyles.section}>
-        <Text style={pdfStyles.bold}>Earnings</Text>
-        <View style={pdfStyles.earningsTable}>
-          <View style={pdfStyles.tableHeader}>
-            <Text style={pdfStyles.col1}>Description</Text>
-            <Text style={pdfStyles.col2}>Amount</Text>
+  const defaultEarningsTitles = [
+    "KPIs",
+    "PPC Bounty",
+    "Monthly Bounty",
+    "Special Bounty",
+    "Current Month Commission",
+    "Minus One Month Commission",
+    "Minus Two Month Commission",
+    "Overtime",
+    "Allowance",
+    "Arrears",
+  ];
+
+  defaultEarningsTitles.forEach((t) => {
+    const existing = customEarnings.find((c: any) => String(c.title || "").toLowerCase() === t.toLowerCase());
+    earningsList.push({
+      title: t,
+      amount: existing ? Number(existing.amount || 0) : 0,
+    });
+  });
+
+  customEarnings.forEach((c: any) => {
+    if (!earningsList.some((e) => e.title.toLowerCase() === String(c.title || "").toLowerCase())) {
+      earningsList.push({ title: c.title, amount: Number(c.amount || 0) });
+    }
+  });
+
+  // Dynamic + standard Deductions matching Image 1
+  const customDeductions = extraComponents.filter((c: any) =>
+    ["DEDUCTION", "TAX", "LOAN", "TARDIES", "UNPAID", "FOOD", "CT", "GYM", "ADVANCE"].includes(String(c.type || "").toUpperCase())
+  );
+
+  const deductionsList: { title: string; amount: number }[] = [];
+
+  const defaultDeductionsTitles = [
+    "Tardies",
+    "Unpaid Days",
+    "Tax",
+    "Advance",
+    "Food Deduction",
+    "CT Deduction",
+    "GYM Deduction",
+  ];
+
+  defaultDeductionsTitles.forEach((t) => {
+    const existing = customDeductions.find((c: any) => String(c.title || "").toLowerCase() === t.toLowerCase());
+    deductionsList.push({
+      title: t,
+      amount: existing ? Number(existing.amount || 0) : 0,
+    });
+  });
+
+  customDeductions.forEach((c: any) => {
+    if (!deductionsList.some((d) => d.title.toLowerCase() === String(c.title || "").toLowerCase())) {
+      deductionsList.push({ title: c.title, amount: Number(c.amount || 0) });
+    }
+  });
+
+  const totalEarnings = payroll?.grossEarnings || earningsList.reduce((sum, item) => sum + item.amount, 0);
+  const totalDeductions = payroll?.grossDeductions || deductionsList.reduce((sum, item) => sum + item.amount, 0);
+  const netPayable = payroll?.netSalary || payroll?.netPay || Math.max(0, totalEarnings - totalDeductions);
+
+  return (
+    <Document>
+      <Page size="A4" style={pdfStyles.page}>
+        {/* Header Section */}
+        <View style={pdfStyles.headerContainer}>
+          <Image src={UNISOFTWARES_LOGO} style={pdfStyles.logoImage} />
+          <View style={pdfStyles.headerRight}>
+            <Text style={pdfStyles.salarySlipTitle}>SALARY SLIP</Text>
+            <Text style={pdfStyles.headerAddress}>454 – G4, Phase II, Johar Town, Lahore</Text>
+            <Text style={pdfStyles.headerPhone}>+92 301 9069 539</Text>
           </View>
+        </View>
 
-          <View style={pdfStyles.tableRow}>
-            <Text style={pdfStyles.col1}>Basic Salary</Text>
-            <Text style={pdfStyles.col2}>PKR {payroll.rate?.toLocaleString() || '0'}</Text>
-          </View>
+        {/* Red Line Divider */}
+        <View style={pdfStyles.headerRedLine} />
 
-          {payroll.components
-            ?.filter((a: any) => a.type === 'INCREMENT')
-            .map((a: any) => (
-              <View key={a.id} style={pdfStyles.tableRow}>
-                <Text style={pdfStyles.col1}>{a.title}</Text>
-                <Text style={pdfStyles.col2}>PKR {a.amount.toLocaleString()}</Text>
+        {/* Employee Info Grid */}
+        <View style={pdfStyles.infoGrid}>
+          {/* Row 1 */}
+          <View style={pdfStyles.infoRow}>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Employee Name:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>{empName}</Text>
               </View>
-            ))}
-
-          <View style={[pdfStyles.tableRow, { fontWeight: 'bold' }]}>
-            <Text style={pdfStyles.col1}>Gross Earnings</Text>
-            <Text style={pdfStyles.col2}>PKR {payroll.grossEarnings?.toLocaleString() || '0'}</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={pdfStyles.section}>
-        <Text style={pdfStyles.bold}>Deductions</Text>
-        <View style={pdfStyles.earningsTable}>
-          <View style={pdfStyles.tableHeader}>
-            <Text style={pdfStyles.col1}>Description</Text>
-            <Text style={pdfStyles.col2}>Amount</Text>
-          </View>
-
-          {payroll.components
-            ?.filter((a: any) => a.type === 'DEDUCTION')
-            .map((a: any) => (
-              <View key={a.id} style={pdfStyles.tableRow}>
-                <Text style={pdfStyles.col1}>{a.title}</Text>
-                <Text style={pdfStyles.col2}>PKR {a.amount.toLocaleString()}</Text>
+            </View>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Salary Month:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>{salaryMonth}</Text>
               </View>
-            ))}
+            </View>
+          </View>
 
-          <View style={[pdfStyles.tableRow, { fontWeight: 'bold' }]}>
-            <Text style={pdfStyles.col1}>Gross Deductions</Text>
-            <Text style={pdfStyles.col2}>PKR {payroll.grossDeductions?.toLocaleString() || '0'}</Text>
+          {/* Row 2 */}
+          <View style={pdfStyles.infoRow}>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Designation:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>{empDesignation}</Text>
+              </View>
+            </View>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Year:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>{salaryYear}</Text>
+              </View>
+            </View>
           </View>
         </View>
-      </View>
 
-      <View style={pdfStyles.hr} />
+        {/* Earnings & Deductions Table */}
+        <View style={pdfStyles.tableContainer}>
+          {/* Table Header */}
+          <View style={pdfStyles.tableHeaderRow}>
+            <View style={[pdfStyles.tableHeaderCol, pdfStyles.verticalDivider]}>
+              <Text style={pdfStyles.tableHeaderTitle}>EARNINGS</Text>
+            </View>
+            <View style={pdfStyles.tableHeaderCol}>
+              <Text style={pdfStyles.tableHeaderTitle}>DEDUCTIONS</Text>
+            </View>
+          </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', fontSize: 16, fontWeight: 'bold' }}>
-        <Text>Net Pay</Text>
-        <Text>PKR {payroll.netSalary?.toLocaleString() || '0'}</Text>
-      </View>
-    </Page>
-  </Document>
-);
+          {/* Table Body */}
+          <View style={pdfStyles.tableBodyRow}>
+            {/* Earnings Column */}
+            <View style={[pdfStyles.tableColHalf, pdfStyles.verticalDivider]}>
+              {earningsList.map((item, idx) => (
+                <View key={idx} style={pdfStyles.itemRow}>
+                  <Text style={pdfStyles.itemTitle}>{item.title}</Text>
+                  <Text style={pdfStyles.itemAmount}>{formatAmt(item.amount)}</Text>
+                </View>
+              ))}
+              <View style={pdfStyles.totalRow}>
+                <Text style={pdfStyles.totalTitle}>Total Earnings</Text>
+                <Text style={pdfStyles.totalAmount}>{formatAmt(totalEarnings)}</Text>
+              </View>
+            </View>
+
+            {/* Deductions Column */}
+            <View style={pdfStyles.tableColHalf}>
+              {deductionsList.map((item, idx) => (
+                <View key={idx} style={pdfStyles.itemRow}>
+                  <Text style={pdfStyles.itemTitle}>{item.title}</Text>
+                  <Text style={pdfStyles.itemAmount}>{formatAmt(item.amount)}</Text>
+                </View>
+              ))}
+              {/* Spacer rows so Deductions total aligns horizontally with Earnings total */}
+              {Array.from({ length: Math.max(0, earningsList.length - deductionsList.length) }).map((_, i) => (
+                <View key={`spacer-${i}`} style={pdfStyles.itemRow}>
+                  <Text style={pdfStyles.itemTitle}> </Text>
+                  <Text style={pdfStyles.itemAmount}> </Text>
+                </View>
+              ))}
+              <View style={pdfStyles.totalRow}>
+                <Text style={pdfStyles.totalTitle}>Total Deductions</Text>
+                <Text style={pdfStyles.totalAmount}>{formatAmt(totalDeductions)}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Footer & Net Payable */}
+        <View style={pdfStyles.footerContainer}>
+          <View style={pdfStyles.netPayableRow}>
+            <Text style={pdfStyles.netPayableLabel}>Net Payable:</Text>
+            <View style={pdfStyles.netPayableValueContainer}>
+              <Text style={pdfStyles.netPayableValueText}>{formatAmt(netPayable)}</Text>
+            </View>
+          </View>
+
+          <View style={pdfStyles.websiteBanner}>
+            <Text style={pdfStyles.websiteBannerText}>www.unisoftwares.com</Text>
+          </View>
+        </View>
+      </Page>
+    </Document>
+  );
+};
 
 export const PayrollDetail = () => {
   const { id } = useParams();
@@ -232,9 +491,56 @@ export const PayrollDetail = () => {
   const [payroll, setPayroll] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [openAdjust, setOpenAdjust] = useState(false);
+  const [editingComponentId, setEditingComponentId] = useState<number | null>(null);
   const [adjustType, setAdjustType] = useState<'INCREMENT' | 'DEDUCTION'>('INCREMENT');
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(EARNINGS_TITLES[0]);
+  const [customTitle, setCustomTitle] = useState('');
   const [amount, setAmount] = useState('');
+
+  const handleTypeChange = (newType: 'INCREMENT' | 'DEDUCTION') => {
+    setAdjustType(newType);
+    const defaultTitle = newType === 'INCREMENT' ? EARNINGS_TITLES[0] : DEDUCTIONS_TITLES[0];
+    setTitle(defaultTitle);
+    setCustomTitle('');
+  };
+
+  const handleOpenAddModal = () => {
+    setEditingComponentId(null);
+    setAdjustType('INCREMENT');
+    setTitle(EARNINGS_TITLES[0]);
+    setCustomTitle('');
+    setAmount('');
+    setOpenAdjust(true);
+  };
+
+  const handleOpenEditModal = (comp: any) => {
+    setEditingComponentId(comp.id);
+    const isDeduction = ["DEDUCTION", "TAX", "LOAN", "TARDIES", "UNPAID", "FOOD", "CT", "GYM", "ADVANCE"].includes(String(comp.type || "").toUpperCase());
+    const typeVal = isDeduction ? 'DEDUCTION' : 'INCREMENT';
+    setAdjustType(typeVal);
+
+    const titlesList = isDeduction ? DEDUCTIONS_TITLES : EARNINGS_TITLES;
+    if (titlesList.includes(comp.title)) {
+      setTitle(comp.title);
+      setCustomTitle('');
+    } else {
+      setTitle(isDeduction ? "Other Deduction" : "Other Earning");
+      setCustomTitle(comp.title);
+    }
+    setAmount(String(comp.amount));
+    setOpenAdjust(true);
+  };
+
+  const handleDeleteComponent = async (componentId: number) => {
+    if (!window.confirm("Are you sure you want to delete this adjustment?")) return;
+    try {
+      await payrollAPI.deleteComponent(componentId);
+      toast.success("Adjustment deleted");
+      loadPayroll();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to delete adjustment");
+    }
+  };
 
   const loadPayroll = async () => {
     try {
@@ -253,20 +559,37 @@ export const PayrollDetail = () => {
   }, [id]);
 
   const handleAddAdjustment = async () => {
-    if (!title.trim() || !amount || Number(amount) <= 0) {
+    const finalTitle = (title === "Other Earning" || title === "Other Deduction")
+      ? (customTitle.trim() || title)
+      : (title || (adjustType === "INCREMENT" ? EARNINGS_TITLES[0] : DEDUCTIONS_TITLES[0]));
+
+    if (!finalTitle.trim() || !amount || Number(amount) <= 0) {
       toast.error('Title and positive amount required');
       return;
     }
 
     try {
-      await payrollAPI.addComponent(payroll.id, {
-        type: adjustType === "INCREMENT" ? "BONUS" : "DEDUCTION",
-        title,
-        amount: Number(amount),
-      });
-      toast.success('Adjustment added');
+      const payloadType = adjustType === "INCREMENT" ? "BONUS" : "DEDUCTION";
+      if (editingComponentId) {
+        await payrollAPI.updateComponent(editingComponentId, {
+          type: payloadType,
+          title: finalTitle,
+          amount: Number(amount),
+        });
+        toast.success('Adjustment updated successfully');
+      } else {
+        await payrollAPI.addComponent(payroll.id, {
+          type: payloadType,
+          title: finalTitle,
+          amount: Number(amount),
+        });
+        toast.success('Adjustment added successfully');
+      }
+
       setOpenAdjust(false);
-      setTitle('');
+      setEditingComponentId(null);
+      setTitle(EARNINGS_TITLES[0]);
+      setCustomTitle('');
       setAmount('');
       loadPayroll(); // Reload updated payroll
     } catch {
@@ -355,40 +678,51 @@ export const PayrollDetail = () => {
               <div className="w-28 h-28 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
                 {/* Replace with real image if available */}
                 {/* <User className="w-12 h-12 text-gray-400" /> */}
-                <img src={API_URL+payroll.employee.profileImage} style={{
-                    objectFit:'contain',
-                    aspectRatio:3/3
-                }}/>
+                {payroll.employee?.profileImage ? (
+                  <img
+                    src={API_URL + payroll.employee.profileImage}
+                    alt="Employee"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <User className="w-12 h-12 text-gray-400" />
+                )}
               </div>
 
               <div className="flex-1 space-y-3">
                 <div>
                   <h3 className="text-xl font-semibold">
-                    {payroll.employee.firstName} {payroll.employee.lastName}
+                    {payroll.employee?.firstName || ''} {payroll.employee?.lastName || ''}
                   </h3>
                   <p className="text-gray-600 flex items-center gap-2">
                     <Briefcase className="w-4 h-4" />
-                    {payroll.employee.designation || 'Graphic Designer (Manager)'}
+                    {payroll.employee?.designation || payroll.employee?.jobInfo?.jobTitle || 'Staff'}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-gray-500">Hiring Date</p>
-                    
-                    <p>{moment(payroll.employee.jobInfo.hiringDate).format('DD MMM YYYY') || '—'}</p>
+                    <p>
+                      {(payroll.employee?.hiringDate || payroll.employee?.jobInfo?.hiringDate)
+                        ? moment(payroll.employee?.hiringDate || payroll.employee?.jobInfo?.hiringDate).format('DD MMM YYYY')
+                        : '—'}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-500">Payroll Cycle</p>
-                    <p>10th to 10th</p>
+                    <p>1st to 30th (Monthly)</p>
                   </div>
                   <div>
                     <p className="text-gray-500">Location</p>
-                    <p>{payroll.employee.location?.name || 'Block G4, Lahore'}</p>
+                    <p>{payroll.employee?.company?.name || payroll.employee?.location?.name || 'Main Office'}</p>
                   </div>
                   <div>
                     <p className="text-gray-500">Department</p>
-                    <p>{payroll.employee.department?.title || 'Tech'}</p>
+                    <p>{payroll.employee?.department?.title || 'General'}</p>
                   </div>
                 </div>
               </div>
@@ -449,169 +783,333 @@ export const PayrollDetail = () => {
         </Card>
 
         {/* Earnings & Deductions Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Pay Slip Information - {moment(payroll.periodStart).format('MMM YYYY')}</CardTitle>
-          </CardHeader>
-          <CardContent >
-            <div className="overflow-x-auto">
-              <Table className='px-3'>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40%]">Description</TableHead>
-                    <TableHead className="text-right">Earnings (PKR)</TableHead>
-                    <TableHead className="text-right">Deductions (PKR)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {/* Earnings */}
-                  <TableRow className="bg-blue-50">
-                    <TableCell className="font-medium">Basic Salary</TableCell>
-                    <TableCell className="text-right">{payroll?.rate?.toLocaleString()}</TableCell>
-                    <TableCell className="text-right"></TableCell>
-                  </TableRow>
+        {(() => {
+          const baseSalary = Number(payroll?.rate || payroll?.grossSalary || 0);
+          const extraComponents = payroll?.components || [];
 
-                  {payroll.components
-                      ?.filter((c: any) =>
-                        ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type)
-                      )
-                      .map((c: any) => (
-                        <TableRow key={c.id}>
-                          <TableCell>{c.title}</TableCell>
-                          <TableCell className="text-right text-green-600">
-                            +{c.amount.toLocaleString()}
+          const customEarnings = extraComponents.filter((c: any) =>
+            ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME", "INCREMENT", "KPIS", "BOUNTY", "ARREARS"].includes(String(c.type || "").toUpperCase())
+          );
+
+          const customDeductions = extraComponents.filter((c: any) =>
+            ["DEDUCTION", "TAX", "LOAN", "TARDIES", "UNPAID", "FOOD", "CT", "GYM", "ADVANCE"].includes(String(c.type || "").toUpperCase())
+          );
+
+          const calcGrossEarnings = baseSalary + customEarnings.reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
+          const calcGrossDeductions = customDeductions.reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
+          const calcNetPayable = Math.max(0, calcGrossEarnings - calcGrossDeductions);
+
+          return (
+            <Card>
+              <CardHeader>
+                <CardTitle>Pay Slip Information - {moment(payroll.periodStart).format('MMM YYYY')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table className='px-3'>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[45%]">Description</TableHead>
+                        <TableHead className="text-right">Earnings (PKR)</TableHead>
+                        <TableHead className="text-right">Deductions (PKR)</TableHead>
+                        {!payroll.locked && payroll.status !== 'PAID' && (
+                          <TableHead className="w-[90px] text-center">Actions</TableHead>
+                        )}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {/* Basic Salary */}
+                      <TableRow className="bg-blue-50/80 font-medium">
+                        <TableCell className="font-semibold text-gray-900">Basic Salary</TableCell>
+                        <TableCell className="text-right font-bold">{baseSalary.toLocaleString()}</TableCell>
+                        <TableCell className="text-right"></TableCell>
+                        {!payroll.locked && payroll.status !== 'PAID' && <TableCell />}
+                      </TableRow>
+
+                      {/* Extra Earnings */}
+                      {customEarnings.map((c: any) => (
+                        <TableRow key={c.id} className="hover:bg-gray-50/70 transition-colors">
+                          <TableCell className="font-semibold text-gray-800 flex items-center gap-2">
+                            <span>{c.title}</span>
+                          </TableCell>
+                          <TableCell className="text-right text-emerald-600 font-bold">
+                            +{Number(c.amount).toLocaleString()}
                           </TableCell>
                           <TableCell />
+                          {!payroll.locked && payroll.status !== 'PAID' && (
+                            <TableCell className="text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(c)}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                  title="Edit Adjustment"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteComponent(c.id)}
+                                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                                  title="Delete Adjustment"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </TableCell>
+                          )}
                         </TableRow>
-                    ))}
-                          {payroll.components
-                            ?.filter((c: any) =>
-                              ["TAX", "LOAN", "DEDUCTION"].includes(c.type)
-                            )
-                            .map((c: any) => (
-                              <TableRow key={c.id}>
-                                <TableCell>{c.title}</TableCell>
-                                <TableCell />
-                                <TableCell className="text-right text-red-600">
-                                  -{c.amount.toLocaleString()}
-                                </TableCell>
-                              </TableRow>
-                          ))}
-                  <TableRow className="font-bold border-t">
-                    <TableCell>Gross Earnings</TableCell>
-                    <TableCell className="text-right">{payroll.grossEarnings?.toLocaleString() || '0'}</TableCell>
-                    <TableCell></TableCell>
-                  </TableRow>
+                      ))}
 
-                  {/* Deductions */}
-                  {payroll.components
-                    ?.filter((a: any) => a.type === 'DEDUCTION')
-                    .map((a: any) => (
-                      <TableRow key={a.id}>
-                        <TableCell>{a.title}</TableCell>
+                      <TableRow className="font-bold border-t bg-emerald-50/30">
+                        <TableCell>Gross Earnings</TableCell>
+                        <TableCell className="text-right text-emerald-700">{calcGrossEarnings.toLocaleString()}</TableCell>
                         <TableCell></TableCell>
-                        <TableCell className="text-right text-red-600">-{a.amount.toLocaleString()}</TableCell>
+                        {!payroll.locked && payroll.status !== 'PAID' && <TableCell />}
                       </TableRow>
-                    ))}
 
-                  <TableRow className="font-bold border-t">
-                    <TableCell>Gross Deductions</TableCell>
-                    <TableCell></TableCell>
-                    <TableCell className="text-right">{payroll.grossDeductions?.toLocaleString() || '0'}</TableCell>
-                  </TableRow>
+                      {/* Extra Deductions */}
+                      {customDeductions.map((c: any) => (
+                        <TableRow key={c.id} className="hover:bg-gray-50/70 transition-colors">
+                          <TableCell className="font-semibold text-gray-800">{c.title}</TableCell>
+                          <TableCell></TableCell>
+                          <TableCell className="text-right text-rose-600 font-bold">
+                            -{Number(c.amount).toLocaleString()}
+                          </TableCell>
+                          {!payroll.locked && payroll.status !== 'PAID' && (
+                            <TableCell className="text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(c)}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                  title="Edit Adjustment"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteComponent(c.id)}
+                                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                                  title="Delete Adjustment"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      ))}
 
-                  {/* Net Pay */}
-                  <TableRow className="bg-gray-50 font-bold">
-                    <TableCell>Net Pay</TableCell>
-                    <TableCell className="text-right text-xl text-green-700">
-                      PKR {payroll.netSalary?.toLocaleString()}
-                    </TableCell>
-                    <TableCell></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+                      <TableRow className="font-bold border-t bg-rose-50/30">
+                        <TableCell>Gross Deductions</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-right text-rose-700">{calcGrossDeductions.toLocaleString()}</TableCell>
+                        {!payroll.locked && payroll.status !== 'PAID' && <TableCell />}
+                      </TableRow>
+
+                      {/* Net Pay */}
+                      <TableRow className="bg-gray-100/80 font-bold">
+                        <TableCell className="text-gray-900 font-bold">Net Pay</TableCell>
+                        <TableCell className="text-right text-xl text-emerald-700">
+                          PKR {calcNetPayable.toLocaleString()}
+                        </TableCell>
+                        <TableCell></TableCell>
+                        {!payroll.locked && payroll.status !== 'PAID' && <TableCell />}
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Add Adjustment Dialog */}
         <Dialog open={openAdjust} onOpenChange={setOpenAdjust}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Add Adjustment</DialogTitle>
+              <DialogTitle className="text-base font-bold">
+                {editingComponentId ? 'Edit Adjustment' : 'Add Adjustment'}
+              </DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={adjustType} onValueChange={(v: 'INCREMENT' | 'DEDUCTION') => setAdjustType(v)}>
-                  <SelectTrigger>
+            <div className="space-y-4 pt-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-700">Type</Label>
+                <Select value={adjustType} onValueChange={(v: 'INCREMENT' | 'DEDUCTION') => handleTypeChange(v)}>
+                  <SelectTrigger className="bg-white border-gray-300 h-10 text-xs font-medium">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="INCREMENT">Increment</SelectItem>
-                    <SelectItem value="DEDUCTION">Deduction</SelectItem>
+                    <SelectItem value="INCREMENT" className="text-xs font-semibold text-emerald-700">EARNINGS</SelectItem>
+                    <SelectItem value="DEDUCTION" className="text-xs font-semibold text-rose-700">DEDUCTIONS</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Title (Bonus, Loan, Tax, etc.)</Label>
-                <Input
-                  placeholder="e.g. Performance Bonus"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-700">
+                  {adjustType === 'INCREMENT' ? 'Earnings Title' : 'Deductions Title'}
+                </Label>
+                <Select value={title} onValueChange={(v) => setTitle(v)}>
+                  <SelectTrigger className="bg-white border-gray-300 h-10 text-xs font-medium">
+                    <SelectValue placeholder="Select Title..." />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60 overflow-y-auto">
+                    {(adjustType === 'INCREMENT' ? EARNINGS_TITLES : DEDUCTIONS_TITLES).map((t) => (
+                      <SelectItem key={t} value={t} className="text-xs">
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Amount (PKR)</Label>
+              {(title === "Other Earning" || title === "Other Deduction") && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-gray-700">Custom Title</Label>
+                  <Input
+                    placeholder="Enter custom title"
+                    value={customTitle}
+                    onChange={(e) => setCustomTitle(e.target.value)}
+                    className="bg-white border-gray-300 h-10 text-xs"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-700">Amount (PKR)</Label>
                 <Input
                   type="number"
-                  placeholder="Enter amount"
+                  placeholder="Enter amount (e.g. 5000)"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
+                  className="bg-white border-gray-300 h-10 text-xs"
                 />
               </div>
             </div>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setOpenAdjust(false)}>
+            <DialogFooter className="pt-2">
+              <Button variant="outline" size="sm" onClick={() => setOpenAdjust(false)} className="text-xs font-semibold">
                 Cancel
               </Button>
-              <Button onClick={handleAddAdjustment}>Add Adjustment</Button>
+              <Button size="sm" onClick={handleAddAdjustment} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
+                Add Adjustment
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Card>
-  <CardHeader>
-    <CardTitle>Payroll Activity Log</CardTitle>
-  </CardHeader>
-  <CardContent>
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Action</TableHead>
-          <TableHead>By</TableHead>
-          <TableHead>Date</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {payroll.auditLogs?.map((log: any) => (
-          <TableRow key={log.id}>
-            <TableCell>{log.action}</TableCell>
-            <TableCell>
-              {log.performedBy?.firstName} {log.performedBy?.lastName}
-            </TableCell>
-            <TableCell>
-              {moment(log.createdAt).format("DD MMM YYYY HH:mm")}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </CardContent>
-</Card>
+        <Card className="border border-gray-200/80 shadow-2xs rounded-2xl overflow-hidden bg-white">
+          <CardHeader className="bg-gray-50/60 px-6 py-4 border-b border-gray-100 flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="size-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <History className="w-4 h-4" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-bold text-gray-900">Payroll Activity Log & Audit Trail</CardTitle>
+                <p className="text-[11px] text-gray-500 mt-0.5">Real-time log of status changes and salary adjustments.</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="bg-white text-gray-600 border-gray-200 text-[11px] font-semibold">
+              {payroll.auditLogs?.length || 0} Events Logged
+            </Badge>
+          </CardHeader>
+          <CardContent className="p-0">
+            {(!payroll.auditLogs || payroll.auditLogs.length === 0) ? (
+              <div className="p-8 text-center text-xs text-gray-400 italic">
+                No activity records found for this payroll slip.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50/40 hover:bg-gray-50/40">
+                      <TableHead className="text-xs font-bold text-gray-700 w-[45%]">Action Event</TableHead>
+                      <TableHead className="text-xs font-bold text-gray-700">Performed By</TableHead>
+                      <TableHead className="text-xs font-bold text-gray-700 text-right">Timestamp</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {payroll.auditLogs.map((log: any) => {
+                      const actionStr = String(log.action || "").toUpperCase();
+                      let actionBadge = (
+                        <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 font-semibold text-xs px-2.5 py-1">
+                          {log.action}
+                        </Badge>
+                      );
+
+                      if (actionStr === "PAID") {
+                        actionBadge = (
+                          <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs px-2.5 py-1 flex items-center gap-1.5 w-fit">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Payment Processed (PAID)</span>
+                          </Badge>
+                        );
+                      } else if (actionStr === "GENERATED") {
+                        actionBadge = (
+                          <Badge className="bg-blue-50 text-blue-700 border border-blue-200 font-bold text-xs px-2.5 py-1 flex items-center gap-1.5 w-fit">
+                            <FileText className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Payslip Generated</span>
+                          </Badge>
+                        );
+                      } else if (actionStr.startsWith("COMPONENT_ADDED")) {
+                        const compName = actionStr.replace("COMPONENT_ADDED", "").replace(/[()]/g, "").trim();
+                        actionBadge = (
+                          <Badge className="bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold text-xs px-2.5 py-1 flex items-center gap-1.5 w-fit">
+                            <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Adjustment Added {compName ? `(${compName})` : ""}</span>
+                          </Badge>
+                        );
+                      } else if (actionStr.startsWith("COMPONENT_UPDATED")) {
+                        actionBadge = (
+                          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 font-bold text-xs px-2.5 py-1 flex items-center gap-1.5 w-fit">
+                            <Pencil className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Adjustment Updated</span>
+                          </Badge>
+                        );
+                      } else if (actionStr.startsWith("COMPONENT_DELETED")) {
+                        actionBadge = (
+                          <Badge className="bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs px-2.5 py-1 flex items-center gap-1.5 w-fit">
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Adjustment Deleted</span>
+                          </Badge>
+                        );
+                      }
+
+                      const firstName = log.performedBy?.firstName || "Admin";
+                      const lastName = log.performedBy?.lastName || "User";
+
+                      return (
+                        <TableRow key={log.id} className="hover:bg-gray-50/70 transition-colors">
+                          <TableCell className="py-3">
+                            {actionBadge}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="size-7 rounded-full bg-blue-100 text-blue-700 font-bold text-[11px] flex items-center justify-center shrink-0 border border-blue-200">
+                                {firstName.charAt(0)}{lastName.charAt(0)}
+                              </div>
+                              <span className="text-xs font-semibold text-gray-800">
+                                {firstName} {lastName}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5 text-xs text-gray-600 font-medium">
+                              <Clock className="w-3.5 h-3.5 text-gray-400" />
+                              <span>{moment(log.createdAt).format("DD MMM YYYY, hh:mm A")}</span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

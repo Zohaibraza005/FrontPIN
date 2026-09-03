@@ -313,7 +313,7 @@ export default function CreateInvoice() {
       toast.success('Company created');
       setAddCompanyOpen(false);
 
-      const fresh = await companyAPI.getCompanies();
+      const fresh = await invoiceCompanyAPI.getAll();
       setCompanies(fresh.data || []);
       setSelectedCompanyId(res.data.id.toString());
 
@@ -323,8 +323,8 @@ export default function CreateInvoice() {
       setCompanyLogo(null);
       setCompanyEmail('');
       setCompanyVat('');
-    } catch (err) {
-      toast.error('Failed to create company');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create company');
     }
   };
 

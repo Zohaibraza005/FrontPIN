@@ -1,7 +1,7 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment");
 
-function isOffDay(schedules, date) {
+function isOffDay(schedules, date, timezone = null) {
   if (!schedules) return false;
   const scheduleList = Array.isArray(schedules) ? schedules : [schedules];
   const activeSchedule = scheduleList.find((s) => s && !s.deletedAt);
@@ -14,28 +14,48 @@ function isOffDay(schedules, date) {
     return false;
   }
 
-  const dateStr = typeof date === "string" ? date.slice(0, 10) : moment(date).format("YYYY-MM-DD");
-  const mDate = moment(dateStr, "YYYY-MM-DD");
+  let mDate;
+  if (typeof date === "string") {
+    const cleanStr = date.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else if (date instanceof Date) {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
   const shortDay = mDate.format("ddd").toLowerCase();
   const fullDay = mDate.format("dddd").toLowerCase();
 
-  const daysArr = activeSchedule.days.map((d) => String(d).trim().toLowerCase());
+  const daysArr = activeSchedule.days.map((d) => {
+    if (typeof d === "object" && d !== null) {
+      return String(d.day || d.name || d.short || "").trim().toLowerCase();
+    }
+    return String(d).trim().toLowerCase();
+  });
 
   const isWorkingDay = daysArr.includes(shortDay) || daysArr.includes(fullDay);
   return !isWorkingDay;
 }
 
-function hasOffDayInRange(schedules, startDate, endDate) {
+function getOffDaysInRange(schedules, startDate, endDate) {
   let cursor = moment(startDate).startOf("day");
   const end = moment(endDate).startOf("day");
+  const offDays = [];
 
   while (cursor.isSameOrBefore(end)) {
     if (isOffDay(schedules, cursor.format("YYYY-MM-DD"))) {
-      return true;
+      offDays.push(cursor.format("D MMM YYYY"));
     }
     cursor.add(1, "day");
   }
-  return false;
+  return offDays;
+}
+
+function hasOffDayInRange(schedules, startDate, endDate) {
+  return getOffDaysInRange(schedules, startDate, endDate).length > 0;
 }
 
 const toStartOfDay = (d) => {
@@ -382,9 +402,11 @@ exports.createLeave = async (req, res) => {
       include: { Schedule: { where: { deletedAt: null } } }
     });
 
-    if (targetEmp && hasOffDayInRange(targetEmp.Schedule, s, e)) {
+    const offDays = getOffDaysInRange(targetEmp?.Schedule, s, e);
+    if (offDays.length > 0) {
+      const daysText = offDays.join(", ");
       return res.status(400).json({
-        message: "This day is off for user, leave cannot be created on an off day"
+        message: `Leave cannot be created: ${daysText} ${offDays.length > 1 ? "are off days" : "is an off day"} for the user`
       });
     }
 
@@ -469,9 +491,11 @@ exports.updateLeaveStatus = async (req, res) => {
         include: { Schedule: { where: { deletedAt: null } } }
       });
 
-      if (targetEmp && hasOffDayInRange(targetEmp.Schedule, leave.startDate, leave.endDate)) {
+      const offDays = getOffDaysInRange(targetEmp?.Schedule, leave.startDate, leave.endDate);
+      if (offDays.length > 0) {
+        const daysText = offDays.join(", ");
         return res.status(400).json({
-          message: "This day is off for user, leave cannot be approved on an off day"
+          message: `Leave cannot be approved: ${daysText} ${offDays.length > 1 ? "are off days" : "is an off day"} for the user`
         });
       }
     }
@@ -642,9 +666,11 @@ exports.getEmployeeLeaveSummary = async (req, res) => {
         include: { Schedule: { where: { deletedAt: null } } }
       });
 
-      if (targetEmp && hasOffDayInRange(targetEmp.Schedule, newStart, newEnd)) {
+      const offDays = getOffDaysInRange(targetEmp?.Schedule, newStart, newEnd);
+      if (offDays.length > 0) {
+        const daysText = offDays.join(", ");
         return res.status(400).json({
-          message: "This day is off for user, leave cannot be created or updated on an off day"
+          message: `Leave cannot be updated: ${daysText} ${offDays.length > 1 ? "are off days" : "is an off day"} for the user`
         });
       }
 

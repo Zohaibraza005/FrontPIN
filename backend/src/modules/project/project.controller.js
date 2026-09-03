@@ -305,17 +305,49 @@ exports.getClients = async (req, res) => {
 exports.updateProjectStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, reason } = req.body;
+
+    const projectId = parseInt(id);
+    const existingProject = await prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    if (!existingProject) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
 
     const project = await prisma.project.update({
-      where: { id: parseInt(id) },
+      where: { id: projectId },
       data: { status },
     });
 
+    if (req.user && req.user.id) {
+      const statusLabel =
+        status === "ON_HOLD"
+          ? "On Hold"
+          : status === "CANCELLED"
+          ? "Cancelled"
+          : status.replace("_", " ");
+
+      const logDescription = reason
+        ? `Status changed from ${existingProject.status} to ${status}. Reason: ${reason}`
+        : `Status changed from ${existingProject.status} to ${status}`;
+
+      await createProjectLog({
+        projectId: project.id,
+        userId: req.user.id,
+        action: "STATUS_CHANGED",
+        title: `Project Moved to ${statusLabel}`,
+        description: logDescription,
+        oldValue: existingProject.status,
+        newValue: status,
+      });
+    }
+
     res.json({ success: true, data: project });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false });
+    console.error("Update project status error:", error);
+    res.status(500).json({ success: false, message: error.message || "Failed to update project status" });
   }
 };
 
@@ -650,7 +682,6 @@ exports.updateTaskStatus = async (req, res) => {
     const { id } = req.params; // taskId
     const { status } = req.body;
     const userId = req.user.id;
-    const role = req.user.role;
 
     const taskId = parseInt(id);
 
@@ -663,74 +694,41 @@ exports.updateTaskStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Task not found" });
     }
 
-    // 🔹 USER & SUPERVISOR → update own assignee record only
-    if (role === "USER" || role === "SUPERVISOR") {
-      const assignee = await prisma.taskAssignee.findFirst({
-        where: {
-          taskId,
-          employeeId: userId,
-        },
-      });
-
-      if (!assignee) {
-        return res.status(403).json({
-          success: false,
-          message: "Not assigned to this task",
-        });
-      }
-
-      await prisma.taskAssignee.update({
-        where: { id: assignee.id },
-        data: {
-          status,
-          startedAt:
-            status === "IN_PROGRESS" && !assignee.startedAt
-              ? new Date()
-              : assignee.startedAt,
-          completedAt: status === "COMPLETED" ? new Date() : null,
-        },
-      });
-    }
-
-    // 🔥 Recalculate Task Status
-    const updatedAssignees = await prisma.taskAssignee.findMany({
-      where: { taskId },
-    });
-
-    const statuses = updatedAssignees.map((a) => a.status);
-
-    let newTaskStatus = "TODO";
-
-    if (statuses.every((s) => s === "COMPLETED")) {
-      newTaskStatus = "COMPLETED";
-    } else if (statuses.includes("IN_PROGRESS")) {
-      newTaskStatus = "IN_PROGRESS";
-    } else if (statuses.every((s) => s === "TODO")) {
-      newTaskStatus = "TODO";
-    }
-
-    // ❌ BLOCKED will NOT block whole task
-
+    // Direct update of main Task status
     const updatedTask = await prisma.task.update({
       where: { id: taskId },
-      data: { status: newTaskStatus },
+      data: { status },
+      include: {
+        assignees: { include: { employee: true } },
+        project: true,
+      },
     });
 
-    // 🔥 Log
+    // Sync all TaskAssignee status records with main task status
+    await prisma.taskAssignee.updateMany({
+      where: { taskId },
+      data: {
+        status,
+        ...(status === "IN_PROGRESS" ? { startedAt: new Date() } : {}),
+        ...(status === "COMPLETED" ? { completedAt: new Date() } : {}),
+      },
+    });
+
+    // Log action
     await prisma.taskLog.create({
       data: {
         taskId,
         userId,
         action: "STATUS_CHANGED",
-        title: "Task Status Auto Updated",
-        description: `Task recalculated to ${newTaskStatus}`,
+        title: "Task Status Updated",
+        description: `Task status changed to ${status}`,
       },
     });
 
     res.json({ success: true, data: updatedTask });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    console.error("Update task status error:", err);
+    res.status(500).json({ success: false, message: "Failed to update task status" });
   }
 };
 exports.updateTask = async (req, res) => {

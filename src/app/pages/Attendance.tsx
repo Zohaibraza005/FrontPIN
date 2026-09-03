@@ -182,15 +182,42 @@ const formatMinutes = (mins: number) => {
 
 const getFormattedDateStr = (d: any) => {
   if (!d) return "";
-  if (typeof d === "string") {
-    return d.slice(0, 10);
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return "";
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const day = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  } catch (e) {
+    if (typeof d === "string") return d.slice(0, 10);
+    return "";
   }
-  return format(new Date(d), "yyyy-MM-dd");
+};
+
+const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
+  if (!Array.isArray(attendanceList) || attendanceList.length === 0) return undefined;
+
+  return attendanceList.find((a: any) => {
+    if (!a) return false;
+    if (a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr) return true;
+    if (a.date && getFormattedDateStr(a.date) === targetDateStr) return true;
+    if (a.checkInTime && typeof a.checkInTime === "string" && a.checkInTime.slice(0, 10) === targetDateStr) return true;
+    if (a.date && typeof a.date === "string" && a.date.slice(0, 10) === targetDateStr) return true;
+    return false;
+  });
 };
 
 export const Attendance: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('daily');
+  const [activeTab, setActiveTab] = useState(user?.role === 'USER' ? 'monthly' : 'daily');
+
+  useEffect(() => {
+    if (user?.role === 'USER') {
+      setActiveTab('monthly');
+    }
+  }, [user]);
+
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('all');
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
@@ -200,11 +227,41 @@ export const Attendance: React.FC = () => {
 
   const [report, setReport] = useState<any[]>([]);
   const [departmentId, setDepartmentId] = useState<string>();
-  const [locationId, setLocationId] = useState<string>();
+  const [locationId, setLocationId] = useState<string>(() => localStorage.getItem("selectedLocation") || "all");
   const [companyId, setCompanyId] = useState<string>();
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
+      setLocationId(loc);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
+
+  const handleExportExcel = async () => {
+    try {
+      setExporting(true);
+      toast.loading("Generating Excel sheet...", { id: "export-excel" });
+      await attendanceAPI.exportExcel({
+        date: selectedDate,
+        departmentId,
+        locationId,
+        employeeId: selectedEmployeeId !== "all" ? selectedEmployeeId : undefined,
+      });
+      toast.success("Excel exported successfully!", { id: "export-excel" });
+    } catch (err: any) {
+      toast.error("Failed to export Excel report", { id: "export-excel" });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const openViewPanel = (record) => {
     setViewRecord(record);
@@ -301,55 +358,87 @@ export const Attendance: React.FC = () => {
     const status = finalRecord.status?.toUpperCase();
     const isOff = status === "OFF_DAY" || status === "OFF" || isEmpDayOff;
     const isUpcoming = (isFutureDay || status === "UPCOMING_DAY" || status === "UPCOMING") && !isOff;
+    const isLeave = status === "LEAVE";
+    const isAbsent = status === "ABSENT";
+
+    // Disable tooltip and lock interactions for OFF (O), LEAVE (L), ABSENT (A), and UPCOMING (U) days
+    const isTooltipDisabled = isOff || isLeave || isAbsent || isUpcoming;
+
     const config = STATUS_CONFIG[isOff ? "OFF_DAY" : (isUpcoming ? "UPCOMING_DAY" : status)] || STATUS_CONFIG["ABSENT"];
+    const isUserMonthly = activeTab === "monthly" && user?.role === "USER";
+
+    const cellElement = (
+      <div
+        onClick={() => {
+          if (isTooltipDisabled) {
+            return;
+          }
+          setSelectedRecord(finalRecord);
+          setEditModalOpen(true);
+        }}
+        className={`${isTooltipDisabled ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.05] hover:shadow-md"} ${
+          isUserMonthly
+            ? "w-8 h-8 rounded-lg flex items-center justify-center mx-auto"
+            : "rounded-md p-1"
+        } ${config.cell}`}
+      >
+        {isUserMonthly ? (
+          <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
+            {status === "PRESENT"
+              ? "P"
+              : status === "ABSENT"
+              ? "A"
+              : (status === "LATE" || status === "TARDY")
+              ? "T"
+              : status === "LEAVE"
+              ? "L"
+              : isOff
+              ? "O"
+              : isUpcoming
+              ? "U"
+              : status ? status.charAt(0) : "A"}
+          </span>
+        ) : (
+          <div className="flex flex-col items-center justify-center min-h-[34px] px-1">
+            {activeTab !== "monthly" ? (
+              <span className="font-semibold tracking-tight">
+                {isUpcoming
+                  ? "Upcoming"
+                  : isOff
+                  ? "Off Day"
+                  : formatMinutes(finalRecord.totalWorkedMinutes)}
+              </span>
+            ) : (
+              <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
+                {status === "PRESENT"
+                  ? "P"
+                  : status === "ABSENT"
+                  ? "A"
+                  : (status === "LATE" || status === "TARDY")
+                  ? "T"
+                  : status === "LEAVE"
+                  ? "L"
+                  : isOff
+                  ? "O"
+                  : isUpcoming
+                  ? "U"
+                  : status ? status.charAt(0) : "A"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+
+    if (isTooltipDisabled) {
+      return cellElement;
+    }
 
     return (
       <TooltipProvider>
         <Tooltip delayDuration={150}>
           <TooltipTrigger asChild>
-            <div
-              onClick={() => {
-                if (isOff) {
-                  toast.error("This is an Off Day. Attendance cannot be marked for this day.");
-                  return;
-                }
-                if (isUpcoming) {
-                  toast.error("There is no schedule for this day yet.");
-                  return;
-                }
-                setSelectedRecord(finalRecord);
-                setEditModalOpen(true);
-              }}
-              className={`cursor-pointer rounded-md p-1 text-xs transition-all hover:scale-[1.02] hover:shadow-md ${config.cell}`}
-            >
-              <div className="flex flex-col items-center justify-center min-h-[34px] px-1">
-                {activeTab !== "monthly" ? (
-                  <span className="font-semibold tracking-tight">
-                    {isUpcoming
-                      ? "Upcoming"
-                      : isOff
-                      ? "Off Day"
-                      : formatMinutes(finalRecord.totalWorkedMinutes)}
-                  </span>
-                ) : (
-                  <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
-                    {status === "PRESENT"
-                      ? "P"
-                      : status === "ABSENT"
-                      ? "A"
-                      : (status === "LATE" || status === "TARDY")
-                      ? "T"
-                      : status === "LEAVE"
-                      ? "L"
-                      : isOff
-                      ? "O"
-                      : isUpcoming
-                      ? "U"
-                      : status ? status.charAt(0) : "A"}
-                  </span>
-                )}
-              </div>
-            </div>
+            {cellElement}
           </TooltipTrigger>
 
           <TooltipContent
@@ -464,7 +553,7 @@ export const Attendance: React.FC = () => {
   
       setDepartments(dept.data || []);
       setLocations(loc.data || []);
-      setEmployees(emp.data || []);
+      setEmployees((emp.data || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin'));
     }
   };
   
@@ -484,8 +573,23 @@ export const Attendance: React.FC = () => {
           : undefined
     });
     
-    setReport(res.employees || []);
+    setReport((res.employees || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin'));
   };
+
+  const isNextDisabled = useMemo(() => {
+    const today = startOfDay(new Date());
+    const sel = startOfDay(selectedDate);
+    if (activeTab === "daily") {
+      return sel >= today;
+    } else if (activeTab === "weekly") {
+      const currentWeekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 });
+      return currentWeekEnd >= today;
+    } else if (activeTab === "monthly") {
+      const currentMonthEnd = endOfMonth(selectedDate);
+      return currentMonthEnd >= today;
+    }
+    return sel >= today;
+  }, [selectedDate, activeTab]);
 
   // Date Navigation step handlers
   const handlePrevDate = () => {
@@ -499,8 +603,12 @@ export const Attendance: React.FC = () => {
   };
 
   const handleNextDate = () => {
+    if (isNextDisabled) return;
     if (activeTab === "daily") {
-      setSelectedDate(prev => addDays(prev, 1));
+      setSelectedDate(prev => {
+        const next = addDays(prev, 1);
+        return isAfter(startOfDay(next), startOfDay(new Date())) ? new Date() : next;
+      });
     } else if (activeTab === "weekly") {
       setSelectedDate(prev => addWeeks(prev, 1));
     } else if (activeTab === "monthly") {
@@ -522,7 +630,7 @@ export const Attendance: React.FC = () => {
     let leave = 0;
 
     report.forEach(emp => {
-      const rec = emp.Attendance?.find(a => getFormattedDateStr(a.date) === format(selectedDate, "yyyy-MM-dd"));
+      const rec = findAttendanceRecord(emp.Attendance, format(selectedDate, "yyyy-MM-dd"));
       const st = rec?.status?.toUpperCase() || "ABSENT";
       if (st === "PRESENT") present++;
       else if (st === "LATE" || st === "TARDY") tardy++;
@@ -537,6 +645,93 @@ export const Attendance: React.FC = () => {
     const days = eachDayOfInterval({ start, end });
     const isMonthly = activeTab === 'monthly';
     
+    if (user?.role === 'USER') {
+      const emp = report[0];
+      if (!emp) {
+        return (
+          <div className="py-12 text-center text-gray-500 flex flex-col items-center justify-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm">
+            <AlertCircle className="w-8 h-8 text-gray-400" />
+            <p className="font-medium text-base">No attendance records found for this period</p>
+          </div>
+        );
+      }
+
+      let totalMinutes = 0;
+      totalMinutes = days.reduce((sum: number, day: Date) => {
+        const dayStr = format(day, "yyyy-MM-dd");
+        const record = findAttendanceRecord(emp.Attendance, dayStr);
+
+        const cellDate = new Date(`${dayStr}T00:00:00`);
+        const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
+
+        let isEmpDayOff = false;
+        if (emp?.Schedule) {
+          const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
+          const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
+          if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
+            const dStr = format(cellDate, "EEE").toLowerCase();
+            const dFull = format(cellDate, "EEEE").toLowerCase();
+            const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
+            isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
+          }
+        }
+
+        let rawStatus = record?.status?.toUpperCase();
+        if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
+          rawStatus = "OFF_DAY";
+        } else if (isFutureDay && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE" && rawStatus !== "OFF_DAY") {
+          rawStatus = "UPCOMING_DAY";
+        }
+
+        const isWorkingStatus = rawStatus === "PRESENT" || rawStatus === "LATE" || rawStatus === "TARDY";
+        const workedMins = isWorkingStatus ? (Number(record?.totalWorkedMinutes) || 0) : 0;
+        const otHours = Number(record?.overtimeHours) || 0;
+        const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
+
+        return sum + workedMins + otMins;
+      }, 0);
+
+      return (
+        <div className="space-y-4 w-full">
+          {/* Header Stats Info Box */}
+          <div className="flex items-center justify-between p-4 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40 rounded-xl">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Monthly Summary:</span>
+              <Badge className="bg-blue-600 text-white font-mono text-xs">
+                Total Worked: {formatMinutes(totalMinutes)}
+              </Badge>
+            </div>
+          </div>
+
+          {/* Simple Row of Small Boxes (Flex-wrap) */}
+          <div className="flex flex-wrap gap-2.5 p-4 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm justify-start">
+            {days.map((day) => {
+              const dayStr = format(day, "yyyy-MM-dd");
+              const record = findAttendanceRecord(emp.Attendance, dayStr);
+
+              return (
+                <div 
+                  key={day.toISOString()} 
+                  className="flex flex-col items-center justify-between p-2.5 rounded-xl border border-gray-100 dark:border-gray-850 bg-gray-50/40 dark:bg-gray-900/40 w-[54px] min-h-[85px] transition-all hover:shadow-xs"
+                >
+                  <span className="text-[10px] font-bold uppercase text-gray-400">
+                    {format(day, "EEE")}
+                  </span>
+                  <span className="text-xs font-extrabold text-gray-600 dark:text-gray-400 mt-0.5">
+                    {format(day, "d")}
+                  </span>
+                  <div className="mt-1.5">
+                    {renderAttendanceCell(record, day, emp)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950" style={{ width: "1000px" }}>
         {/* Scrollable container with sticky headers and sticky employee column */}
@@ -565,7 +760,9 @@ export const Attendance: React.FC = () => {
                       key={day.toISOString()}
                       scope="col"
                       className={`px-1 py-2.5 text-center text-xs font-medium border-r border-gray-200 dark:border-gray-800 ${
-                        isMonthly ? 'min-w-[68px] sm:min-w-[72px]' : 'min-w-[75px] md:min-w-[85px]'
+                        isMonthly 
+                          ? (user?.role === 'USER' ? 'min-w-[42px]' : 'min-w-[68px] sm:min-w-[72px]') 
+                          : 'min-w-[75px] md:min-w-[85px]'
                       } transition-colors ${
                         isToday 
                           ? 'bg-blue-50/80 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' 
@@ -602,9 +799,7 @@ export const Attendance: React.FC = () => {
               {report.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
-                  const record = emp.Attendance?.find((a: any) =>
-                    getFormattedDateStr(a.date) === dayStr
-                  );
+                  const record = findAttendanceRecord(emp.Attendance, dayStr);
 
                   const cellDate = new Date(`${dayStr}T00:00:00`);
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
@@ -657,9 +852,7 @@ export const Attendance: React.FC = () => {
   
                     {/* Date cells */}
                     {days.map((day) => {
-                      const record = emp.Attendance?.find((a: any) =>
-                        getFormattedDateStr(a.date) === format(day, "yyyy-MM-dd")
-                      );
+                      const record = findAttendanceRecord(emp.Attendance, format(day, "yyyy-MM-dd"));
   
                       return (
                         <td
@@ -712,7 +905,7 @@ export const Attendance: React.FC = () => {
       {/* Main Filter & Content Card */}
       <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
         <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 pb-4 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             
             {/* Left Controls: Date Nav Step Buttons + DatePicker */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -728,17 +921,10 @@ export const Attendance: React.FC = () => {
                 </Button>
                 <Button 
                   variant="ghost" 
-                  size="sm" 
-                  className="h-8 px-2.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
-                  onClick={handleToday}
-                >
-                  Today
-                </Button>
-                <Button 
-                  variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400"
+                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed"
                   onClick={handleNextDate}
+                  disabled={isNextDisabled}
                   title="Next Period"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -749,8 +935,10 @@ export const Attendance: React.FC = () => {
               <div className="relative min-w-[200px]">
                 <DatePicker
                   selected={selectedDate}
+                  maxDate={new Date()}
                   onChange={(date: Date) => {
                     if (!date) return;
+                    if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
                     setSelectedDate(date);
                     if (activeTab === "weekly") setWeekOffset(0);
                     if (activeTab === "monthly") setMonthOffset(0);
@@ -781,11 +969,11 @@ export const Attendance: React.FC = () => {
             </div>
 
             {/* Right Admin Filters */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap lg:flex-nowrap items-center gap-2.5 sm:gap-3">
               {user?.role === "ADMIN" && (
                 <>
                   <SearchableSelect
-                    className="w-44"
+                    className="w-36 sm:w-40"
                     icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
                     placeholder="Department"
                     searchPlaceholder="Search department..."
@@ -801,12 +989,17 @@ export const Attendance: React.FC = () => {
                   />
 
                   <SearchableSelect
-                    className="w-44"
+                    className="w-36 sm:w-40"
                     icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                     placeholder="Location"
                     searchPlaceholder="Search location..."
                     value={locationId}
-                    onValueChange={setLocationId}
+                    onValueChange={(val) => {
+                      setLocationId(val);
+                      localStorage.setItem("selectedLocation", val);
+                      localStorage.setItem("dashboard-selected-location", val);
+                      window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                    }}
                     options={[
                       { value: "all", label: "All Locations" },
                       ...locations.map((l) => ({
@@ -817,7 +1010,7 @@ export const Attendance: React.FC = () => {
                   />
 
                   <SearchableSelect
-                    className="w-[200px]"
+                    className="w-40 sm:w-44 lg:w-48"
                     icon={<User className="w-3.5 h-3.5 text-gray-400" />}
                     placeholder="All Employees"
                     searchPlaceholder="Search employee..."
@@ -833,34 +1026,46 @@ export const Attendance: React.FC = () => {
                   />
                 </>
               )}
+              <Button
+                variant="default"
+                size="sm"
+                disabled={exporting}
+                onClick={handleExportExcel}
+                className="shrink-0 h-9 px-3 text-xs font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all whitespace-nowrap"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Export Excel</span>
+              </Button>
             </div>
           </div>
         </CardHeader>
 
         <CardContent className="p-3 sm:p-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900 p-1 rounded-xl">
-                <TabsTrigger 
-                  value="daily" 
-                  className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
-                >
-                  Daily View
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="weekly" 
-                  className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
-                >
-                  Weekly View
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="monthly" 
-                  className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
-                >
-                  Monthly View
-                </TabsTrigger>
-              </TabsList>
-            </div>
+            {user?.role !== 'USER' && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900 p-1 rounded-xl">
+                  <TabsTrigger 
+                    value="daily" 
+                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                  >
+                    Daily View
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="weekly" 
+                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                  >
+                    Weekly View
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="monthly" 
+                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                  >
+                    Monthly View
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+            )}
 
             {/* Legend - Only show in Weekly and Monthly views, positioned in the next row */}
             {activeTab !== 'daily' && (
@@ -912,9 +1117,7 @@ export const Attendance: React.FC = () => {
 
                   <TableBody>
                     {report.map(emp => {
-                      const record = emp.Attendance?.find(a =>
-                        getFormattedDateStr(a.date) === format(selectedDate, "yyyy-MM-dd")
-                      );
+                      const record = findAttendanceRecord(emp.Attendance, format(selectedDate, "yyyy-MM-dd"));
 
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);

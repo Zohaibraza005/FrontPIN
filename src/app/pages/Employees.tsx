@@ -31,10 +31,16 @@ import {
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
-import { Link } from 'react-router';
+import { Link, Navigate } from 'react-router';
+import { useAuth } from '../contexts/AuthContext';
 import { API_URL, departmentAPI, employeeAPI, locationAPI } from '../services/api';
 
 export const Employees: React.FC = () => {
+  const { user } = useAuth();
+  if (user?.role !== "ADMIN") {
+    return <Navigate to="/" replace />;
+  }
+
   const [employees, setEmployees] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -44,8 +50,20 @@ export const Employees: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
-  const [filterLocation, setFilterLocation] = useState('all');
+  const getInitialEmpLoc = () => localStorage.getItem("selectedLocation") || 'all';
+  const [filterLocation, setFilterLocation] = useState<string>(getInitialEmpLoc);
   const [filterLogin, setFilterLogin] = useState('all');
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const loc = e.detail || localStorage.getItem("selectedLocation") || 'all';
+      setFilterLocation(loc);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
 
   // Layout state: 'table' or 'grid'
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
@@ -64,17 +82,37 @@ export const Employees: React.FC = () => {
     fetchEmployees();
     fetchLocations();
     fetchDepartments();
+
+    // 🔄 Real-time polling every 5 seconds for live employee updates from DB
+    const pollInterval = setInterval(() => {
+      fetchEmployees(true);
+      fetchLocations();
+      fetchDepartments();
+    }, 5000);
+
+    const handleUpdate = () => {
+      fetchEmployees(true);
+    };
+
+    window.addEventListener("employee-updated", handleUpdate);
+    window.addEventListener("focus", handleUpdate);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener("employee-updated", handleUpdate);
+      window.removeEventListener("focus", handleUpdate);
+    };
   }, []);
 
-  const fetchEmployees = async () => {
+  const fetchEmployees = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await employeeAPI.getEmployees();
       setEmployees(res.data || []);
     } catch (err) {
-      toast.error('Failed to load employees');
+      if (!silent) toast.error('Failed to load employees');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -145,6 +183,7 @@ export const Employees: React.FC = () => {
 
   // Filter employees logic
   const filteredEmployees = employees.filter((emp) => {
+    if (emp.role === 'ADMIN' || emp.role === 'admin') return false;
     const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || '';
     const email = emp.email || '';
     const designation = emp.jobInfo?.designation || emp.designation || '';
@@ -174,7 +213,11 @@ export const Employees: React.FC = () => {
     const matchesRole = filterRole === 'all' || emp.role === filterRole;
 
     const empCompId = String(emp.companyId || emp.company?.id || emp.locationId || '');
-    const matchesLocation = filterLocation === 'all' || empCompId === filterLocation;
+    const matchesLocation =
+      filterLocation === 'all' ||
+      filterLocation === 'ALL' ||
+      !filterLocation ||
+      empCompId === String(filterLocation);
 
     const matchesLogin =
       filterLogin === 'all' ||
@@ -231,7 +274,6 @@ export const Employees: React.FC = () => {
 
   const roleOptions = [
     { value: 'all', label: 'All Roles' },
-    { value: 'admin', label: 'Admin' },
     { value: 'supervisor', label: 'Supervisor' },
     { value: 'user', label: 'User' },
   ];
@@ -281,7 +323,7 @@ export const Employees: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <h2 className="text-2xl font-bold tracking-tight text-gray-900">Employee Management</h2>
             <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 font-semibold px-2.5 py-0.5 text-xs">
-              {employees.length} Staff
+              {filteredEmployees.length} {filteredEmployees.length === employees.length ? 'Staff' : `of ${employees.length} Staff`}
             </Badge>
           </div>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
@@ -342,7 +384,12 @@ export const Employees: React.FC = () => {
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={filterLocation}
-                  onValueChange={setFilterLocation}
+                  onValueChange={(val) => {
+                    setFilterLocation(val);
+                    localStorage.setItem("selectedLocation", val);
+                    localStorage.setItem("dashboard-selected-location", val);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                  }}
                   options={locationOptions}
                 />
               )}
@@ -432,7 +479,6 @@ export const Employees: React.FC = () => {
                     <TableHead className="font-semibold text-gray-700 py-3.5 pl-6">Employee</TableHead>
                     <TableHead className="font-semibold text-gray-700 py-3.5">Department & Location</TableHead>
                     <TableHead className="font-semibold text-gray-700 py-3.5">Position</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5">Role</TableHead>
                     <TableHead className="font-semibold text-gray-700 py-3.5">Join Date</TableHead>
                     <TableHead className="font-semibold text-gray-700 py-3.5">Login Access</TableHead>
                     <TableHead className="font-semibold text-gray-700 py-3.5 text-right pr-6">Actions</TableHead>
@@ -442,7 +488,7 @@ export const Employees: React.FC = () => {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-40 text-center text-gray-500">
+                      <TableCell colSpan={6} className="h-40 text-center text-gray-500">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <RefreshCw className="size-6 animate-spin text-sky-500" />
                           <span className="text-sm font-medium">Loading employee records...</span>
@@ -451,7 +497,7 @@ export const Employees: React.FC = () => {
                     </TableRow>
                   ) : filteredEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-40 text-center text-gray-500">
+                      <TableCell colSpan={6} className="h-40 text-center text-gray-500">
                         <div className="flex flex-col items-center justify-center gap-1.5">
                           <Users className="size-9 text-gray-300 mb-1" />
                           <p className="text-sm font-semibold text-gray-700">No employees found</p>
@@ -542,9 +588,6 @@ export const Employees: React.FC = () => {
                               {position}
                             </span>
                           </TableCell>
-
-                          {/* Role */}
-                          <TableCell className="py-3">{getRoleBadge(emp.role)}</TableCell>
 
                           {/* Join Date */}
                           <TableCell className="py-3">

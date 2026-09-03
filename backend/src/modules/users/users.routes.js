@@ -12,6 +12,7 @@ router.get("/supervisors", protect, controller.getSupervisorsByLocation);
 router.delete("/:id", protect, controller.deleteEmployee);
 router.get("/active", protect, controller.getActiveEmployees);
 router.get("/:id/detail", protect, controller.getEmployeeDetail);
+router.post("/:id/increment", protect, controller.addIncrement);
 router.put(
   "/update/organization/profile",
   protect,

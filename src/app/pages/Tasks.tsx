@@ -67,7 +67,10 @@ import {
   AlertCircle,
   FolderKanban,
   CheckCircle2,
-  Hourglass
+  Hourglass,
+  RotateCcw,
+  Kanban as KanbanIcon,
+  Table as TableIcon
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
@@ -140,10 +143,10 @@ const PRIORITY_CONFIG: Record<string, { badge: string; label: string }> = {
   urgent: { badge: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800", label: "Urgent" },
 };
 
-const STATUS_CONFIG: Record<string, { badge: string; dot: string; label: string }> = {
-  TODO: { badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800", dot: "bg-slate-400", label: "To Do" },
-  IN_PROGRESS: { badge: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800", dot: "bg-blue-500", label: "In Progress" },
-  COMPLETED: { badge: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800", dot: "bg-emerald-500", label: "Completed" },
+const STATUS_CONFIG: Record<string, { badge: string; border: string; dot: string; label: string }> = {
+  TODO: { badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800", border: "border-t-slate-400", dot: "bg-slate-400", label: "To Do" },
+  IN_PROGRESS: { badge: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800", border: "border-t-blue-500", dot: "bg-blue-500", label: "In Progress" },
+  COMPLETED: { badge: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800", border: "border-t-emerald-500", dot: "bg-emerald-500", label: "Completed" },
 };
 
 const TaskCard: React.FC<{
@@ -163,29 +166,43 @@ const TaskCard: React.FC<{
 
   const priorityKey = (task.priority || "medium").toLowerCase();
   const priorityCfg = PRIORITY_CONFIG[priorityKey] || PRIORITY_CONFIG.medium;
+  const statusCfg = STATUS_CONFIG[task.status] || STATUS_CONFIG.TODO;
 
   return (
     <div
       ref={(node) => drag(preview(node))}
-      onClick={() => onAction("view", task)}
-      className={`bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200/80 dark:border-gray-800 shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing transition-all ${
-        isDragging ? "opacity-30 scale-95" : ""
-      }`}
+      className={`bg-white dark:bg-gray-950 p-4 rounded-2xl border border-gray-200/90 dark:border-gray-800 shadow-2xs hover:shadow-md cursor-grab active:cursor-grabbing transition-all ${
+        statusCfg.border || "border-t-slate-400"
+      } border-t-4 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 flex-1 line-clamp-2">
+      {/* Header row: Title & Priority */}
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <h4
+          className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-1 hover:text-sky-600 cursor-pointer transition-colors"
+          onClick={() => onAction("view", task)}
+          title={task.title}
+        >
           {task.title}
         </h4>
-        <Badge className={`text-[10px] font-semibold uppercase px-2 py-0.5 border ${priorityCfg.badge}`}>
+        <Badge className={`text-[10px] font-semibold uppercase px-2 py-0.5 border shrink-0 ${priorityCfg.badge}`}>
           {priorityCfg.label}
         </Badge>
       </div>
 
       {/* Description */}
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3.5 line-clamp-2 leading-relaxed">
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2 leading-snug">
         {task.description || "No description provided."}
       </p>
+
+      {/* Project Tag if attached */}
+      {task.project && (
+        <div className="mb-2.5">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/60 truncate max-w-full">
+            <FolderKanban className="w-3 h-3 text-indigo-500 shrink-0" />
+            <span className="truncate">{task.project.title}</span>
+          </span>
+        </div>
+      )}
 
       {/* Assignees + Add button */}
       <TooltipProvider>
@@ -202,7 +219,7 @@ const TaskCard: React.FC<{
                     alt=""
                   />
                 ) : (
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shadow-sm border border-white dark:border-gray-900">
+                  <div className="w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shadow-sm border border-white dark:border-gray-900">
                     {a.employee.firstName?.charAt(0)}{a.employee.lastName?.charAt(0)}
                   </div>
                 )}
@@ -225,7 +242,7 @@ const TaskCard: React.FC<{
                 e.stopPropagation();
                 onManageAssignees(task);
               }}
-              className="w-6 h-6 rounded-full border border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors"
+              className="w-6 h-6 rounded-full border border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors ml-auto"
               title="Manage assignees"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -234,42 +251,15 @@ const TaskCard: React.FC<{
         </div>
       </TooltipProvider>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between text-xs text-gray-400 pt-2 border-t border-gray-100 dark:border-gray-900">
-        <span className="flex items-center gap-1 font-mono text-[11px]">
-          <Clock className="w-3 h-3 text-gray-400" />
+      {/* Due Date: Label on Line 1, Date on Line 2 */}
+      <div className="pt-2 border-t border-gray-100 dark:border-gray-900 space-y-0.5">
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">
+          <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          <span>Due Date</span>
+        </div>
+        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 font-mono tracking-tight pl-5">
           {formatDate(task.deadline)}
-        </span>
-
-        {user?.role !== "USER" && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-900 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40 z-50">
-              <DropdownMenuItem onSelect={() => onAction("view", task)} className="cursor-pointer gap-2">
-                <Eye className="w-4 h-4 text-gray-500" />
-                <span>View Task</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onAction("edit", task)} className="cursor-pointer gap-2">
-                <Pencil className="w-4 h-4 text-blue-600" />
-                <span>Edit Task</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
-                onSelect={() => onAction("delete", task)}
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>Delete Task</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        </p>
       </div>
     </div>
   );
@@ -342,11 +332,12 @@ export const Tasks: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
 
-  // Filters
+  // Filters & View Mode
   const [searchQuery, setSearchQuery] = useState("");
   const [filterProject, setFilterProject] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterAssignee, setFilterAssignee] = useState("all");
+  const [viewMode, setViewMode] = useState<"kanban" | "grid" | "table">("kanban");
 
   // New Task Dialog
   const [newTaskOpen, setNewTaskOpen] = useState(false);
@@ -414,7 +405,17 @@ export const Tasks: React.FC = () => {
   const fetchTasks = async () => {
     try {
       const res = await taskAPI.getTasks();
-      setTasks(res.data || []);
+      const loadedTasks = res.data || [];
+      setTasks(loadedTasks);
+      
+      const searchParams = new URLSearchParams(window.location.search);
+      const taskId = searchParams.get("taskId");
+      if (taskId) {
+        const found = loadedTasks.find((t: any) => t.id === Number(taskId));
+        if (found) {
+          handleAction("view", found);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -751,14 +752,14 @@ export const Tasks: React.FC = () => {
             </Dialog>
         </div>
 
-        {/* Toolbar: Filters & Search */}
+        {/* Toolbar: Search, Filters & View Mode Tabs */}
         <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl">
           <CardContent className="p-4 sm:p-5">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-col gap-4">
               
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full flex-wrap">
                 {/* Search */}
-                <div className="relative w-full sm:w-80">
+                <div className="relative w-full sm:w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
                     placeholder="Search tasks..."
@@ -770,7 +771,7 @@ export const Tasks: React.FC = () => {
 
                 {/* Filter Project */}
                 <SearchableSelect
-                  className="w-full sm:w-48 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
+                  className="w-full sm:w-44 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
                   placeholder="All Projects"
                   searchPlaceholder="Search project..."
                   value={filterProject}
@@ -786,7 +787,7 @@ export const Tasks: React.FC = () => {
 
                 {/* Filter Priority */}
                 <SearchableSelect
-                  className="w-full sm:w-40 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
+                  className="w-full sm:w-36 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
                   placeholder="Priority"
                   searchPlaceholder="Search priority..."
                   value={filterPriority}
@@ -801,7 +802,7 @@ export const Tasks: React.FC = () => {
 
                 {/* Filter Assignee */}
                 <SearchableSelect
-                  className="w-full sm:w-48 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
+                  className="w-full sm:w-44 bg-gray-50/50 dark:bg-gray-900/50 rounded-xl border-gray-200 dark:border-gray-800 shadow-sm"
                   placeholder="Assignee"
                   searchPlaceholder="Search assignee..."
                   value={filterAssignee}
@@ -814,28 +815,58 @@ export const Tasks: React.FC = () => {
                     })) || []),
                   ]}
                 />
+
+                {/* Reset Filters button */}
+                {(searchQuery || filterProject !== "all" || filterPriority !== "all" || filterAssignee !== "all") && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setFilterProject("all");
+                      setFilterPriority("all");
+                      setFilterAssignee("all");
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 gap-1 rounded-xl h-9"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Reset
+                  </Button>
+                )}
               </div>
 
+              {/* View Mode Segment Tabs */}
+              <div className="flex justify-start w-full">
+                <Tabs
+                  value={viewMode}
+                  onValueChange={(v) => setViewMode(v as any)}
+                  className="w-full sm:w-auto"
+                >
+                  <TabsList className="grid w-full grid-cols-3 max-w-xs bg-gray-100 dark:bg-gray-900 p-1 rounded-xl">
+                    <TabsTrigger value="kanban" className="rounded-lg text-xs font-semibold gap-1.5">
+                      <KanbanIcon className="w-3.5 h-3.5" />
+                      Kanban
+                    </TabsTrigger>
+                    <TabsTrigger value="grid" className="rounded-lg text-xs font-semibold gap-1.5">
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      Grid
+                    </TabsTrigger>
+                    <TabsTrigger value="table" className="rounded-lg text-xs font-semibold gap-1.5">
+                      <TableIcon className="w-3.5 h-3.5" />
+                      Table
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* View Segment Tabs */}
-        <Tabs defaultValue="kanban" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 max-w-xs bg-gray-100 dark:bg-gray-900 p-1 rounded-xl">
-            <TabsTrigger value="kanban" className="rounded-lg text-xs font-semibold gap-1.5">
-              <LayoutGrid className="w-3.5 h-3.5" />
-              Kanban View
-            </TabsTrigger>
-            <TabsTrigger value="table" className="rounded-lg text-xs font-semibold gap-1.5">
-              <List className="w-3.5 h-3.5" />
-              Table View
-            </TabsTrigger>
-          </TabsList>
-
+        {/* View Contents */}
+        <Tabs value={viewMode}>
           {/* ── KANBAN VIEW ────────────────────────────────────────────── */}
-          <TabsContent value="kanban" className="mt-0 space-y-0">
-            <div className="flex gap-4 overflow-x-auto pb-4 pt-2">
+          <TabsContent value="kanban" className="mt-0 pt-2">
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-3 pt-2">
               <KanbanColumn
                 title="To Do"
                 status="TODO"
@@ -863,6 +894,109 @@ export const Tasks: React.FC = () => {
                 onManageAssignees={handleOpenAssigneeSheet}
                 user={user}
               />
+            </div>
+          </TabsContent>
+
+          {/* ── GRID VIEW ──────────────────────────────────────────────── */}
+          <TabsContent value="grid" className="mt-0 pt-2">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {filteredTasks?.map((task) => {
+                const priorityKey = (task.priority || "medium").toLowerCase();
+                const priorityCfg = PRIORITY_CONFIG[priorityKey] || PRIORITY_CONFIG.medium;
+                const statusCfg = STATUS_CONFIG[task.status] || STATUS_CONFIG.TODO;
+
+                return (
+                  <Card
+                    key={task.id}
+                    className="hover:shadow-lg transition-all border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden flex flex-col justify-between"
+                  >
+                    <CardHeader className="pb-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/40 dark:bg-gray-900/40">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <CardTitle className="line-clamp-1 text-base font-bold">
+                            {task.title}
+                          </CardTitle>
+                          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                            <FolderKanban className="w-3.5 h-3.5 text-gray-400" />
+                            <span>{task.project?.title || "No Project"}</span>
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <Badge className={`px-2.5 py-0.5 border font-semibold text-[11px] ${statusCfg.badge}`}>
+                            {statusCfg.label}
+                          </Badge>
+                          <Badge className={`px-2 py-0.5 border text-[10px] font-semibold uppercase ${priorityCfg.badge}`}>
+                            {priorityCfg.label}
+                          </Badge>
+                        </div>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="pt-4 pb-5 space-y-4 flex-1">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                        {task.description || "No description provided."}
+                      </p>
+
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between items-center text-gray-500">
+                          <span>Assigned To</span>
+                          <span className="font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[140px]">
+                            {task.assignees?.map((e) => `${e.employee.firstName} ${e.employee.lastName || ''}`).join(", ") || "Unassigned"}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center text-gray-500">
+                          <span>Due Date</span>
+                          <span className="font-mono text-gray-800 dark:text-gray-200">
+                            {formatDate(task.deadline)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-9 gap-1.5 text-xs font-semibold rounded-xl"
+                          onClick={() => handleAction("view", task)}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          View Details
+                        </Button>
+
+                        {user?.role !== "USER" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 rounded-xl"
+                              onClick={() => handleAction("edit", task)}
+                              title="Edit Task"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 rounded-xl"
+                              onClick={() => handleAction("delete", task)}
+                              title="Delete Task"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+
+              {(!filteredTasks || filteredTasks.length === 0) && (
+                <div className="col-span-full py-16 text-center text-gray-400 bg-white dark:bg-gray-950 border border-dashed rounded-2xl">
+                  No tasks match your filter criteria.
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -966,8 +1100,6 @@ export const Tasks: React.FC = () => {
                                   </Button>
                                 </>
                               )}
-
-
                             </div>
                           </TableCell>
                         </TableRow>
@@ -988,15 +1120,15 @@ export const Tasks: React.FC = () => {
           </TabsContent>
         </Tabs>
 
-        {/* ── TASK DETAIL / EDIT SHEET DRAWER ───────────────────────── */}
-        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <SheetContent side="right" className="w-full sm:w-[560px] md:w-[640px] max-w-full p-0 flex flex-col h-full overflow-hidden rounded-l-2xl shadow-2xl border-l">
-            <SheetHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0 bg-gradient-to-r from-slate-900 to-indigo-950 text-white">
-              <SheetTitle className="text-xl font-bold text-white flex items-center gap-2">
+        {/* ── TASK DETAIL / EDIT DIALOG ───────────────────────── */}
+        <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <DialogContent className="w-full sm:max-w-[600px] md:max-w-[700px] p-0 flex flex-col max-h-[90vh] overflow-hidden rounded-2xl shadow-2xl border bg-white dark:bg-gray-950">
+            <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0 bg-gradient-to-r from-slate-900 to-indigo-950 text-white">
+              <DialogTitle className="text-xl font-bold text-white flex items-center gap-2">
                 <CheckSquare className="w-5 h-5 text-blue-400" />
                 <span>{mode === "view" ? "Task Details" : "Edit Task"}</span>
-              </SheetTitle>
-            </SheetHeader>
+              </DialogTitle>
+            </DialogHeader>
 
             {selectedTask && (
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
@@ -1130,13 +1262,13 @@ export const Tasks: React.FC = () => {
                                         {remark.attachments.map((att) => (
                                           <a
                                             key={att.id}
-                                            href={`${API_URL}${att.url}`}
+                                            href={`${API_URL}${att.filePath || att.url}`}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="text-[11px] bg-gray-100 dark:bg-gray-800 text-blue-600 px-2 py-0.5 rounded-md hover:underline flex items-center gap-1 border"
                                           >
                                             <Paperclip className="w-3 h-3" />
-                                            <span>{att.name}</span>
+                                            <span>{att.fileName || att.name}</span>
                                           </a>
                                         ))}
                                       </div>
@@ -1144,9 +1276,10 @@ export const Tasks: React.FC = () => {
 
                                     {/* Actions */}
                                     {isOwn && (
-                                      <div className="mt-2 flex gap-3 text-[11px]">
+                                      <div className="mt-2 flex gap-2 items-center">
                                         <button
-                                          className="text-blue-600 hover:underline font-semibold"
+                                          className="p-1.5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+                                          title="Edit remark"
                                           onClick={() => {
                                             setEditingRemark(remark);
                                             setRemarkTitle(remark.title || "");
@@ -1155,13 +1288,14 @@ export const Tasks: React.FC = () => {
                                             setRemarkFormOpen(true);
                                           }}
                                         >
-                                          Edit
+                                          <Pencil className="w-3.5 h-3.5" />
                                         </button>
                                         <button
-                                          className="text-rose-600 hover:underline font-semibold"
+                                          className="p-1.5 text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors border border-transparent hover:border-rose-100"
+                                          title="Delete remark"
                                           onClick={() => setDeleteRemarkId(remark.id)}
                                         >
-                                          Delete
+                                          <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
                                     )}
@@ -1358,8 +1492,8 @@ export const Tasks: React.FC = () => {
                 </Button>
               )}
             </div>
-          </SheetContent>
-        </Sheet>
+          </DialogContent>
+        </Dialog>
 
         {/* Add / Edit Remark Dialog */}
         <Dialog open={remarkFormOpen} onOpenChange={setRemarkFormOpen}>

@@ -104,9 +104,20 @@ const AttendanceDashboard: React.FC = () => {
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [locations,setLocations] = useState<Location[]>([]); // TODO: fetch real locations
-  const [selectedLocationId, setSelectedLocationId] = useState<string>('all');
+  const [selectedLocationId, setSelectedLocationId] = useState<string>(() => localStorage.getItem("selectedLocation") || 'all');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const handleLocationEvent = (e: any) => {
+      const loc = e.detail || localStorage.getItem("selectedLocation") || 'all';
+      setSelectedLocationId(loc);
+    };
+    window.addEventListener("location-changed", handleLocationEvent);
+    return () => {
+      window.removeEventListener("location-changed", handleLocationEvent);
+    };
+  }, []);
 
   const mapRef = useRef<google.maps.Map | null>(null);
 
@@ -131,7 +142,7 @@ const AttendanceDashboard: React.FC = () => {
             ...(dashRes.data?.present || []),
             ...(dashRes.data?.absent || []),
             ...(dashRes.data?.onLeave || []),
-          ];
+          ].filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin');
           setEmployees(combined);
         } else {
           toast.error('Invalid response from server');
@@ -238,7 +249,14 @@ const AttendanceDashboard: React.FC = () => {
           <Label htmlFor="location-filter" className="whitespace-nowrap">
             Location
           </Label>
-          <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
+          <Select 
+            value={selectedLocationId} 
+            onValueChange={(val) => {
+              setSelectedLocationId(val);
+              localStorage.setItem("selectedLocation", val);
+              window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+            }}
+          >
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Filter by location" />
             </SelectTrigger>

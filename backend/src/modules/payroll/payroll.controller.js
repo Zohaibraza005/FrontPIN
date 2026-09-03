@@ -425,6 +425,10 @@ exports.getPayrolls = async (req, res) => {
       deletedAt: null
     };
 
+    if (req.user.role !== "ADMIN") {
+      where.employeeId = req.user.id;
+    }
+
     if (month && year) {
       const startDate = moment({ year: Number(year), month: Number(month) - 1 })
         .startOf("month")
@@ -459,31 +463,37 @@ exports.getPayrolls = async (req, res) => {
     });
 
     const formatted = payrolls.map(p => {
+      const baseSalary = Number(p.rate || p.grossSalary || 0);
 
-      const earnings = p.components
+      const extraEarnings = p.components
         .filter(c =>
-          ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME"].includes(c.type)
+          ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME","INCREMENT","KPIS","BOUNTY","ARREARS"].includes(String(c.type || "").toUpperCase())
         )
-        .reduce((s, c) => s + c.amount, 0);
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const deductions = p.components
+      const extraDeductions = p.components
         .filter(c =>
-          ["TAX","LOAN","DEDUCTION"].includes(c.type)
+          ["TAX","LOAN","DEDUCTION","TARDIES","UNPAID","FOOD","CT","GYM","ADVANCE"].includes(String(c.type || "").toUpperCase())
         )
-        .reduce((s, c) => s + c.amount, 0);
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
 
       const overtimeAmount = p.components
-        .filter(c => c.type === "OVERTIME")
-        .reduce((s, c) => s + c.amount, 0);
+        .filter(c => String(c.type).toUpperCase() === "OVERTIME")
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
 
       const bonus = p.components
-        .filter(c => c.type === "BONUS")
-        .reduce((s, c) => s + c.amount, 0);
+        .filter(c => String(c.type).toUpperCase() === "BONUS")
+        .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+      const grossEarnings = baseSalary + extraEarnings;
+      const grossDeductions = extraDeductions;
+      const netSalary = Math.max(0, grossEarnings - grossDeductions);
 
       return {
         ...p,
-        grossEarnings: earnings,
-        grossDeductions: deductions,
+        grossEarnings,
+        grossDeductions,
+        netSalary,
         overtimeAmount,
         bonus
       };
@@ -556,23 +566,30 @@ exports.getSinglePayroll = async (req, res) => {
     // DERIVED COMPONENT TOTALS
     //////////////////////////////////////////////////////
 
-    const earnings = payroll.components
-      .filter(c =>
-        ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME"].includes(c.type)
-      )
-      .reduce((s, c) => s + c.amount, 0);
+    const baseSalary = Number(payroll.rate || payroll.grossSalary || 0);
 
-    const deductions = payroll.components
+    const extraEarnings = (payroll.components || [])
       .filter(c =>
-        ["TAX","LOAN","DEDUCTION"].includes(c.type)
+        ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME","INCREMENT","KPIS","BOUNTY","ARREARS"].includes(String(c.type || "").toUpperCase())
       )
-      .reduce((s, c) => s + c.amount, 0);
+      .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+    const extraDeductions = (payroll.components || [])
+      .filter(c =>
+        ["TAX","LOAN","DEDUCTION","TARDIES","UNPAID","FOOD","CT","GYM","ADVANCE"].includes(String(c.type || "").toUpperCase())
+      )
+      .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+    const grossEarnings = baseSalary + extraEarnings;
+    const grossDeductions = extraDeductions;
+    const computedNetSalary = Math.max(0, grossEarnings - grossDeductions);
 
     res.json({
       ...payroll,
       workingDaysCalculated,
-      grossEarnings: earnings,
-      grossDeductions: deductions
+      grossEarnings,
+      grossDeductions,
+      netSalary: computedNetSalary
     });
 
   } catch (err) {
@@ -1019,6 +1036,108 @@ exports.addComponent = async (req, res) => {
     res.status(500).json({ message: "Failed to add component" });
   }
 };
+
+exports.updateComponent = async (req, res) => {
+  try {
+    const componentId = Number(req.params.componentId);
+    const { type, title, amount } = req.body;
+
+    const existingComponent = await prisma.payrollComponent.findUnique({
+      where: { id: componentId },
+      include: { payroll: true },
+    });
+
+    if (!existingComponent) {
+      return res.status(404).json({ message: "Component not found" });
+    }
+
+    const payroll = existingComponent.payroll;
+    if (payroll.locked || payroll.isEditable === false || payroll.status === "PAID") {
+      return res.status(400).json({ message: "Payroll is locked or paid and cannot be modified" });
+    }
+
+    const updatedComponent = await prisma.payrollComponent.update({
+      where: { id: componentId },
+      data: {
+        ...(type && { type }),
+        ...(title && { title }),
+        ...(amount !== undefined && { amount: Number(amount) }),
+      },
+    });
+
+    const components = await prisma.payrollComponent.findMany({
+      where: { payrollId: payroll.id }
+    });
+
+    const earnings = components
+      .filter(c => ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const deductions = components
+      .filter(c => ["TAX", "LOAN", "DEDUCTION"].includes(c.type))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const netSalary = earnings - deductions;
+
+    await prisma.payroll.update({
+      where: { id: payroll.id },
+      data: { netSalary }
+    });
+
+    res.json({ success: true, component: updatedComponent, netSalary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to update component" });
+  }
+};
+
+exports.deleteComponent = async (req, res) => {
+  try {
+    const componentId = Number(req.params.componentId);
+
+    const existingComponent = await prisma.payrollComponent.findUnique({
+      where: { id: componentId },
+      include: { payroll: true },
+    });
+
+    if (!existingComponent) {
+      return res.status(404).json({ message: "Component not found" });
+    }
+
+    const payroll = existingComponent.payroll;
+    if (payroll.locked || payroll.isEditable === false || payroll.status === "PAID") {
+      return res.status(400).json({ message: "Payroll is locked or paid and cannot be modified" });
+    }
+
+    await prisma.payrollComponent.delete({
+      where: { id: componentId },
+    });
+
+    const components = await prisma.payrollComponent.findMany({
+      where: { payrollId: payroll.id }
+    });
+
+    const earnings = components
+      .filter(c => ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const deductions = components
+      .filter(c => ["TAX", "LOAN", "DEDUCTION"].includes(c.type))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const netSalary = earnings - deductions;
+
+    await prisma.payroll.update({
+      where: { id: payroll.id },
+      data: { netSalary }
+    });
+
+    res.json({ success: true, message: "Component deleted successfully", netSalary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to delete component" });
+  }
+};
 exports.getPayrollStats = async (req, res) => {
   try {
     const { month, year } = req.query;
@@ -1409,5 +1528,119 @@ exports.getRiskAlerts = async (req, res) => {
   } catch (error){
     console.log(error.message)
     res.status(500).json({ message: "Failed to fetch alerts" });
+  }
+};
+
+exports.updatePayroll = async (req, res) => {
+  try {
+    const payrollId = Number(req.params.id);
+    const { rate, overtimeAmount, bonus, grossDeductions, status } = req.body;
+
+    const payroll = await prisma.payroll.findUnique({
+      where: { id: payrollId },
+      include: { components: true }
+    });
+
+    if (!payroll) {
+      return res.status(404).json({ message: "Payroll not found" });
+    }
+
+    if (payroll.locked) {
+      return res.status(400).json({ message: "Locked payroll cannot be modified" });
+    }
+
+    const updateData = {};
+    if (rate !== undefined && !isNaN(Number(rate))) {
+      updateData.rate = Number(rate);
+      updateData.grossSalary = Number(rate);
+    }
+    if (status !== undefined) {
+      updateData.status = status;
+      if (status === "PAID") {
+        updateData.paidAt = new Date();
+      }
+    }
+
+    if (overtimeAmount !== undefined && !isNaN(Number(overtimeAmount))) {
+      const otComp = payroll.components.find(c => String(c.type).toUpperCase() === "OVERTIME");
+      if (otComp) {
+        await prisma.payrollComponent.update({
+          where: { id: otComp.id },
+          data: { amount: Number(overtimeAmount) }
+        });
+      } else if (Number(overtimeAmount) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId,
+            type: "OVERTIME",
+            title: "Overtime Pay",
+            amount: Number(overtimeAmount)
+          }
+        });
+      }
+    }
+
+    if (bonus !== undefined && !isNaN(Number(bonus))) {
+      const bonusComp = payroll.components.find(c => String(c.type).toUpperCase() === "BONUS");
+      if (bonusComp) {
+        await prisma.payrollComponent.update({
+          where: { id: bonusComp.id },
+          data: { amount: Number(bonus) }
+        });
+      } else if (Number(bonus) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId,
+            type: "BONUS",
+            title: "Bonus",
+            amount: Number(bonus)
+          }
+        });
+      }
+    }
+
+    if (grossDeductions !== undefined && !isNaN(Number(grossDeductions))) {
+      const dedComp = payroll.components.find(c => String(c.type).toUpperCase() === "DEDUCTION");
+      if (dedComp) {
+        await prisma.payrollComponent.update({
+          where: { id: dedComp.id },
+          data: { amount: Number(grossDeductions) }
+        });
+      } else if (Number(grossDeductions) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId,
+            type: "DEDUCTION",
+            title: "General Deduction",
+            amount: Number(grossDeductions)
+          }
+        });
+      }
+    }
+
+    const allComponents = await prisma.payrollComponent.findMany({
+      where: { payrollId }
+    });
+
+    const currentBaseSalary = updateData.rate !== undefined ? updateData.rate : payroll.rate;
+    const extraEarnings = allComponents
+      .filter(c => ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME","INCREMENT","KPIS","BOUNTY","ARREARS"].includes(String(c.type || "").toUpperCase()))
+      .reduce((s, c) => s + Number(c.amount || 0), 0);
+    const extraDeductions = allComponents
+      .filter(c => ["TAX","LOAN","DEDUCTION","TARDIES","UNPAID","FOOD","CT","GYM","ADVANCE"].includes(String(c.type || "").toUpperCase()))
+      .reduce((s, c) => s + Number(c.amount || 0), 0);
+
+    updateData.netSalary = Math.max(0, currentBaseSalary + extraEarnings - extraDeductions);
+
+    const updated = await prisma.payroll.update({
+      where: { id: payrollId },
+      data: updateData,
+      include: { components: true }
+    });
+
+    res.json({ success: true, message: "Payroll updated successfully", data: updated });
+  } catch (error) {
+    console.error("Update Payroll Error:", error);
+    res.status(500).json({ message: "Failed to update payroll" });
   }
 };
