@@ -194,24 +194,37 @@ exports.addDevice = async (req, res) => {
 exports.updateDevice = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, brand, ipAddress, port, username, password, status } = req.body;
+    const { name, brand, ipAddress, port, username, password, status, companyId } = req.body;
+
+    const updateData = {
+      name,
+      brand,
+      ipAddress: ipAddress ? ipAddress.trim() : undefined,
+      port: port ? parseInt(port) : (brand === "HIKVISION" ? 8000 : 4370),
+      username,
+      status,
+      companyId: companyId !== undefined ? (companyId ? parseInt(companyId) : null) : undefined,
+    };
+
+    // Only update password if a non-empty string is provided
+    if (password && password.trim() !== "") {
+      updateData.password = password;
+    }
 
     const device = await prisma.biometricDevice.update({
       where: { id: parseInt(id) },
-      data: {
-        name,
-        brand,
-        ipAddress,
-        port: port ? parseInt(port) : 4370,
-        username,
-        password,
-        status,
-      },
+      data: updateData,
     });
 
     return res.json({ success: true, data: device });
   } catch (error) {
-    console.error(error);
+    console.error("Error updating device:", error);
+    if (error.code === "P2002") {
+      return res.status(400).json({
+        success: false,
+        message: "A device with this IP address already exists",
+      });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };

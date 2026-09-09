@@ -179,6 +179,7 @@ exports.createEmployee = async (req, res) => {
           pin: canLogin ? parsedPersonal.pin || null : null,
 
           employeeId: parsedPersonal.employeeId || null,
+          biometricId: parsedPersonal.biometricId || null,
           phoneNumber: parsedPersonal.phoneNumber || null,
           nationalId: parsedPersonal.nationalId || null,
 
@@ -188,7 +189,9 @@ exports.createEmployee = async (req, res) => {
             ? `/uploads/${req.file.filename}`
             : null,
 
-          role: parsedPersonal.role.toUpperCase(),
+          role: (parsedPersonal.role && ["ADMIN", "SUPERVISOR", "USER"].includes(String(parsedPersonal.role).toUpperCase()))
+            ? String(parsedPersonal.role).toUpperCase()
+            : "USER",
 
           organizationId: orgId,
           companyId: parseInt(parsedPersonal.companyId),
@@ -253,6 +256,25 @@ exports.createEmployee = async (req, res) => {
       });
     });
 
+    // 🚀 Auto-Push User to Active Hikvision Devices
+    const bioIdToPush = employee.biometricId || employee.employeeId;
+    if (bioIdToPush) {
+      try {
+        const { pushUserToHikvision } = require("../devices/hikvision.service");
+        const activeDevices = await prisma.biometricDevice.findMany({
+          where: { brand: "HIKVISION", deletedAt: null },
+        });
+        activeDevices.forEach((device) => {
+          pushUserToHikvision(device, {
+            biometricId: bioIdToPush,
+            name: `${employee.firstName} ${employee.lastName}`,
+          }).catch((e) => console.error("Background Auto Push Error:", e));
+        });
+      } catch (err) {
+        console.error("Auto Push User Error:", err);
+      }
+    }
+
     return res.status(201).json({
       success: true,
       data: employee,
@@ -316,10 +338,16 @@ exports.updateEmployee = async (req, res) => {
     if (parsedPersonal.lastName || req.body.lastName) updateData.lastName = parsedPersonal.lastName || req.body.lastName;
     if (parsedPersonal.username || req.body.username) updateData.username = parsedPersonal.username || req.body.username;
     if (parsedPersonal.email || req.body.email) updateData.email = parsedPersonal.email || req.body.email;
-    if (parsedPersonal.role || req.body.role) updateData.role = (parsedPersonal.role || req.body.role).toUpperCase();
+    if (parsedPersonal.role || req.body.role) {
+      const rawRole = String(parsedPersonal.role || req.body.role).toUpperCase();
+      if (["ADMIN", "SUPERVISOR", "USER"].includes(rawRole)) {
+        updateData.role = rawRole;
+      }
+    }
     if (parsedPersonal.phoneNumber || req.body.phoneNumber) updateData.phoneNumber = parsedPersonal.phoneNumber || req.body.phoneNumber;
     if (parsedPersonal.nationalId || req.body.nationalId) updateData.nationalId = parsedPersonal.nationalId || req.body.nationalId;
     if (parsedPersonal.employeeId || req.body.employeeId) updateData.employeeId = parsedPersonal.employeeId || req.body.employeeId;
+    if (parsedPersonal.biometricId || req.body.biometricId) updateData.biometricId = parsedPersonal.biometricId || req.body.biometricId;
     if (parsedPersonal.pin || req.body.pin) updateData.pin = parsedPersonal.pin || req.body.pin;
     
     const passwordToUpdate = parsedPersonal.password || req.body.password;

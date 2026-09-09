@@ -267,13 +267,18 @@ exports.generateBulkPayroll = async (req, res) => {
       // WORKING DAYS USING SCHEDULE
       //////////////////////////////////////////////////////
 
-      const scheduleDays = emp.Schedule?.[0]?.days || [];
+      const rawScheduleDays = emp.Schedule?.[0]?.days || [];
+      const scheduleDays = Array.isArray(rawScheduleDays)
+        ? rawScheduleDays.map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || "")).map(s => s.trim().toLowerCase())
+        : [];
 
       let workingDays = 0;
       let cursor = periodStart.clone();
 
       while (cursor.isSameOrBefore(periodEnd)) {
-        if (scheduleDays.includes(cursor.format("ddd"))) {
+        const dShort = cursor.format("ddd").toLowerCase();
+        const dFull = cursor.format("dddd").toLowerCase();
+        if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
           workingDays++;
         }
         cursor.add(1, "day");
@@ -550,13 +555,18 @@ exports.getSinglePayroll = async (req, res) => {
     // CALCULATE WORKING DAYS FROM SCHEDULE
     //////////////////////////////////////////////////////
 
-    const scheduleDays = payroll.employee.Schedule?.[0]?.days || [];
+    const rawScheduleDays = payroll.employee.Schedule?.[0]?.days || [];
+    const scheduleDays = Array.isArray(rawScheduleDays)
+      ? rawScheduleDays.map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || "")).map(s => s.trim().toLowerCase())
+      : [];
 
     let workingDaysCalculated = 0;
     let cursor = moment(payroll.periodStart);
 
     while (cursor.isSameOrBefore(payroll.periodEnd)) {
-      if (scheduleDays.includes(cursor.format("ddd"))) {
+      const dShort = cursor.format("ddd").toLowerCase();
+      const dFull = cursor.format("dddd").toLowerCase();
+      if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
         workingDaysCalculated++;
       }
       cursor.add(1, "day");

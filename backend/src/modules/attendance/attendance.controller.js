@@ -52,7 +52,7 @@ function isOffDay(schedules, date, timezone = null) {
 
   const daysArr = activeSchedule.days.map((d) => {
     if (typeof d === "object" && d !== null) {
-      return String(d.day || d.name || d.short || "").trim().toLowerCase();
+      return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
     }
     return String(d).trim().toLowerCase();
   });
@@ -919,7 +919,9 @@ exports.getAttendanceReport = async (req, res) => {
           where: {
             OR: [
               { date: { gte: queryStartDate, lte: queryEndDate } },
-              { checkInTime: { gte: queryStartDate, lte: queryEndDate } }
+              { checkInTime: { gte: queryStartDate, lte: queryEndDate } },
+              { checkOutTime: { gte: queryStartDate, lte: queryEndDate } },
+              { checkOutTime: null, checkInTime: { not: null } }
             ],
             deletedAt: null
           },
@@ -999,7 +1001,11 @@ exports.getAttendanceReport = async (req, res) => {
     const formattedEmployees = employees.map(emp => {
 
       const attendanceMap = {};
-      emp.Attendance.forEach(att => {
+      const sortedAttendance = [...emp.Attendance].sort(
+        (a, b) => new Date(a.date || a.checkInTime) - new Date(b.date || b.checkInTime)
+      );
+
+      sortedAttendance.forEach(att => {
         const keys = new Set();
         if (att.date) {
           keys.add(moment(att.date).format("YYYY-MM-DD"));
@@ -1015,10 +1021,26 @@ exports.getAttendanceReport = async (req, res) => {
             try { keys.add(moment(att.checkInTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
           }
         }
-        keys.forEach(k => {
-          if (!attendanceMap[k]) {
-            attendanceMap[k] = att;
+        if (att.checkOutTime) {
+          keys.add(moment(att.checkOutTime).format("YYYY-MM-DD"));
+          keys.add(moment.utc(att.checkOutTime).format("YYYY-MM-DD"));
+          if (emp.company?.timezone) {
+            try { keys.add(moment(att.checkOutTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
           }
+        }
+        // If actively clocked in (checkInTime present and checkOutTime is null within last 36 hours)
+        if (att.checkInTime && !att.checkOutTime) {
+          const diffHours = moment().diff(moment(att.checkInTime), "hours");
+          if (diffHours < 36) {
+            keys.add(moment().format("YYYY-MM-DD"));
+            keys.add(moment.utc().format("YYYY-MM-DD"));
+            if (emp.company?.timezone) {
+              try { keys.add(moment().tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
+            }
+          }
+        }
+        keys.forEach(k => {
+          attendanceMap[k] = att;
         });
       });
 
@@ -1037,7 +1059,9 @@ exports.getAttendanceReport = async (req, res) => {
         if (leave) {
           return {
             id: null,
-            date: new Date(dateStr),
+            date: dateStr,
+            reportDate: dateStr,
+            dateStr: dateStr,
             status: "LEAVE",
             leave: {
               type: leave.leaveType?.name,
@@ -1069,7 +1093,9 @@ exports.getAttendanceReport = async (req, res) => {
 
           return {
             id: null,
-            date: new Date(dateStr),
+            date: dateStr,
+            reportDate: dateStr,
+            dateStr: dateStr,
             status: defaultStatus,
             overtimeHours: approvedOtHours,
             overtimeMinutes: approvedOtMinutes,
@@ -1110,7 +1136,7 @@ exports.getAttendanceReport = async (req, res) => {
             const totalMinutes = (outT - inT) / 1000 / 60;
             totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
           }
-        } else if (existing.checkInTime && !existing.checkOutTime && moment(existing.date).isSame(moment(), "day")) {
+        } else if (existing.checkInTime && !existing.checkOutTime) {
           const inT = new Date(existing.checkInTime).getTime();
           const totalMinutes = (now.getTime() - inT) / 1000 / 60;
           totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
@@ -1130,14 +1156,19 @@ exports.getAttendanceReport = async (req, res) => {
         }
 
         const tasks = existing.activities
-          .filter(log => log.type === "TASK")
-          .map(log => log.title);
+          ? existing.activities
+              .filter(log => log.type === "TASK")
+              .map(log => log.title)
+          : [];
 
         const finalOtMinutes = approvedOtMinutes || (existing.overtimeMinutes || 0);
         const finalOtHours = approvedOtHours || (finalOtMinutes / 60);
 
         return {
           ...existing,
+          reportDate: dateStr,
+          dateStr: dateStr,
+          date: dateStr,
           status: finalStatus,
           overtimeHours: finalOtHours,
           overtimeMinutes: finalOtMinutes,

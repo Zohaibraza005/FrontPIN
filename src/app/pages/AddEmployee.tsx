@@ -99,6 +99,7 @@ export const AddEmployee: React.FC = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [canLogin, setCanLogin] = useState(true);
   const [employeeId, setEmployeeId] = useState('');
+  const [biometricId, setBiometricId] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [fieldErrors, setFieldErrors] = useState<any>({});
@@ -270,6 +271,7 @@ export const AddEmployee: React.FC = () => {
         departmentId: department,
         supervisorId,
         employeeId,
+        biometricId,
         phoneNumber,
         nationalId,
         canLogin
@@ -451,7 +453,7 @@ export const AddEmployee: React.FC = () => {
             </div>
 
             {/* Basic Info Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800">Employee ID (Code)</Label>
                 <Input
@@ -459,6 +461,16 @@ export const AddEmployee: React.FC = () => {
                   className={visibleInputClass}
                   value={employeeId}
                   onChange={e => setEmployeeId(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-800">Biometric ID (Device ID)</Label>
+                <Input
+                  placeholder="e.g. 1001"
+                  className={visibleInputClass}
+                  value={biometricId}
+                  onChange={e => setBiometricId(e.target.value)}
                 />
               </div>
 

@@ -8,8 +8,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, Eye, AlertTriangle } from "lucide-react";
+import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2 } from "lucide-react";
 import { locationAPI, organizationAPI, leaveAPI, invoiceCompanyAPI, API_URL } from "../services/api";
+import { deviceService, BiometricDevice } from "../services/device.service";
 import ReactSelect from 'react-select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "../components/ui/dialog";
 import { Switch } from "../components/ui/switch";
@@ -24,8 +25,25 @@ export default function Organization() {
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('');
   const [selectedLocation, setSelectedLocation] = useState(null);
-  const [zkLocation, setZkLocation] = useState(null)
-  const [locations, setLocations] = useState([])
+  const [zkLocation, setZkLocation] = useState(null);
+  const [locations, setLocations] = useState([]);
+
+  // 🔹 Biometric Devices state
+  const [devices, setDevices] = useState<BiometricDevice[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [deviceModalOpen, setDeviceModalOpen] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<BiometricDevice | null>(null);
+  const [testingDeviceId, setTestingDeviceId] = useState<number | null>(null);
+  const [syncingDeviceId, setSyncingDeviceId] = useState<number | null>(null);
+  const [deviceForm, setDeviceForm] = useState({
+    name: "",
+    brand: "HIKVISION", // "HIKVISION" | "ZKTECO"
+    ipAddress: "",
+    port: "8000",
+    username: "admin",
+    password: "",
+    companyId: "",
+  });
 
   // 🔹 Leave Types state
   const [leaveTypes, setLeaveTypes] = useState([]);
@@ -89,6 +107,120 @@ export default function Organization() {
       console.error("Failed to load companies:", err);
     } finally {
       setLoadingCompanies(false);
+    }
+  };
+
+  const loadDevices = async () => {
+    setLoadingDevices(true);
+    try {
+      const res = await deviceService.getDevices();
+      setDevices(res.data || []);
+    } catch (err) {
+      console.error("Failed to load devices:", err);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
+  const handleEditDevice = (device: any) => {
+    setEditingDevice(device);
+    setDeviceForm({
+      name: device.name || "",
+      brand: device.brand || "HIKVISION",
+      ipAddress: device.ipAddress || "",
+      port: String(device.port || (device.brand === "HIKVISION" ? 8000 : 4370)),
+      username: device.username || "admin",
+      password: "",
+      companyId: device.companyId ? String(device.companyId) : "",
+    });
+    setDeviceModalOpen(true);
+  };
+
+  const handleSaveDevice = async () => {
+    if (!deviceForm.name.trim() || !deviceForm.ipAddress.trim()) {
+      toast.error("Please enter device name and IP address");
+      return;
+    }
+
+    try {
+      const payload: any = {
+        name: deviceForm.name.trim(),
+        brand: deviceForm.brand as any,
+        ipAddress: deviceForm.ipAddress.trim(),
+        port: Number(deviceForm.port) || (deviceForm.brand === "HIKVISION" ? 8000 : 4370),
+        username: deviceForm.username,
+        companyId: deviceForm.companyId ? Number(deviceForm.companyId) : undefined,
+      };
+
+      if (deviceForm.password && deviceForm.password.trim()) {
+        payload.password = deviceForm.password;
+      }
+
+      if (editingDevice) {
+        await deviceService.updateDevice(editingDevice.id, payload);
+        toast.success("Device updated successfully!");
+      } else {
+        await deviceService.addDevice({
+          ...payload,
+          password: deviceForm.password,
+        });
+        toast.success(`${deviceForm.brand} Device saved successfully!`);
+      }
+
+      setDeviceModalOpen(false);
+      setEditingDevice(null);
+      setDeviceForm({
+        name: "",
+        brand: "HIKVISION",
+        ipAddress: "",
+        port: "8000",
+        username: "admin",
+        password: "",
+        companyId: "",
+      });
+      loadDevices();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to save device");
+    }
+  };
+
+  const handleTestDevice = async (id: number) => {
+    setTestingDeviceId(id);
+    try {
+      const res = await deviceService.testConnection(id);
+      if (res.isOnline) {
+        toast.success("Device is ONLINE and reachable!");
+      } else {
+        toast.error("Device is OFFLINE or unreachable");
+      }
+      loadDevices();
+    } catch (err: any) {
+      toast.error("Connection test failed");
+    } finally {
+      setTestingDeviceId(null);
+    }
+  };
+
+  const handleSyncDevice = async (id: number) => {
+    setSyncingDeviceId(id);
+    try {
+      const res = await deviceService.syncLogs(id);
+      toast.success(res.message || "Logs synced successfully!");
+      loadDevices();
+    } catch (err: any) {
+      toast.error("Failed to sync logs");
+    } finally {
+      setSyncingDeviceId(null);
+    }
+  };
+
+  const handleDeleteDevice = async (id: number) => {
+    try {
+      await deviceService.deleteDevice(id);
+      toast.success("Device removed successfully");
+      loadDevices();
+    } catch (err: any) {
+      toast.error("Failed to delete device");
     }
   };
 
@@ -197,6 +329,7 @@ export default function Organization() {
     loadProfile();
     loadLeaveTypes();
     loadCompanies();
+    loadDevices();
   }, []);
 
   const handleOpenCreateModal = () => {
@@ -692,64 +825,285 @@ export default function Organization() {
         {/* ================= INTEGRATIONS TAB ================= */}
         <TabsContent value="integrations">
           <Card>
-            <CardHeader>
-              <CardTitle>ZKTeco Integration</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {zkConfig ? (
-                <div className="space-y-2">
-                  <Badge variant="success">Connected</Badge>
-                  <p>IP: {zkConfig.ip}</p>
-                  <p>Port: {zkConfig.port}</p>
-                  <p>Location: {zkConfig.location}</p>
-                </div>
-              ) : (
-                <Dialog open={open} onOpenChange={setOpen}>
-                  <DialogTrigger asChild>
-                    <Button onClick={() => setOpen(true)}>Connect ZKTeco</Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Connect ZKTeco Device</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-bold flex items-center gap-2">
+                  <Cpu className="h-6 w-6 text-primary" />
+                  Biometric & Hardware Integrations
+                </CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Connect Hikvision Face Terminals & ZKTeco Biometric Machines for real-time attendance tracking.
+                </p>
+              </div>
+              <Dialog
+                open={deviceModalOpen}
+                onOpenChange={(isOpen) => {
+                  setDeviceModalOpen(isOpen);
+                  if (!isOpen) {
+                    setEditingDevice(null);
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    onClick={() => {
+                      setEditingDevice(null);
+                      setDeviceForm({
+                        name: "",
+                        brand: "HIKVISION",
+                        ipAddress: "",
+                        port: "8000",
+                        username: "admin",
+                        password: "",
+                        companyId: "",
+                      });
+                      setDeviceModalOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Connect New Device
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {editingDevice ? "Edit Biometric Device" : "Connect Biometric Device"}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-2">
+                    <div className="space-y-2">
+                      <Label>Device Brand</Label>
+                      <Select
+                        value={deviceForm.brand}
+                        onValueChange={(val) =>
+                          setDeviceForm({
+                            ...deviceForm,
+                            brand: val,
+                            port: val === "HIKVISION" ? "8000" : "4370",
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Brand" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="HIKVISION">Hikvision (Face & Access Terminal)</SelectItem>
+                          <SelectItem value="ZKTECO">ZKTeco (Fingerprint & RFID Machine)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Device Name / Label</Label>
+                      <Input
+                        value={deviceForm.name}
+                        onChange={(e) => setDeviceForm({ ...deviceForm, name: e.target.value })}
+                        placeholder="e.g. Main Gate Turnstile Terminal"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label>IP Address</Label>
                         <Input
-                          value={ip}
-                          onChange={(e) => setIp(e.target.value)}
-                          placeholder="Enter IP"
+                          value={deviceForm.ipAddress}
+                          onChange={(e) => setDeviceForm({ ...deviceForm, ipAddress: e.target.value })}
+                          placeholder="e.g. 192.168.1.200"
                         />
                       </div>
                       <div className="space-y-2">
                         <Label>Port</Label>
                         <Input
-                          value={port}
-                          onChange={(e) => setPort(e.target.value)}
-                          placeholder="Enter Port"
+                          value={deviceForm.port}
+                          onChange={(e) => setDeviceForm({ ...deviceForm, port: e.target.value })}
+                          placeholder={deviceForm.brand === "HIKVISION" ? "8000" : "4370"}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label>Location</Label>
-                        {/* <Select onValueChange={setZkLocation}> */}
-
-                        <Select value={zkLocation || ""} onValueChange={setZkLocation}>
-                          <SelectTrigger >
-                            <SelectValue placeholder="Locations" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {locations.map(d => (
-                              <SelectItem key={d.id} value={String(d.id)}>
-                                {d.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button onClick={handleTestConnect}>Test Connection</Button>
                     </div>
-                  </DialogContent>
-                </Dialog>
+
+                    {deviceForm.brand === "HIKVISION" && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label>Username</Label>
+                          <Input
+                            value={deviceForm.username}
+                            onChange={(e) => setDeviceForm({ ...deviceForm, username: e.target.value })}
+                            placeholder="admin"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Password</Label>
+                          <Input
+                            type="password"
+                            value={deviceForm.password}
+                            onChange={(e) => setDeviceForm({ ...deviceForm, password: e.target.value })}
+                            placeholder={editingDevice ? "Leave blank to keep unchanged" : "••••••••"}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label>Office Location (Optional)</Label>
+                      <Select
+                        value={deviceForm.companyId || ""}
+                        onValueChange={(val) => setDeviceForm({ ...deviceForm, companyId: val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {locations.map((d: any) => (
+                            <SelectItem key={d.id} value={String(d.id)}>
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter className="mt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setDeviceModalOpen(false);
+                        setEditingDevice(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSaveDevice}>
+                      {editingDevice ? "Update Device" : "Save & Connect"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              {loadingDevices ? (
+                <p className="text-center py-6 text-muted-foreground">Loading devices...</p>
+              ) : devices.length === 0 ? (
+                <div className="text-center py-10 border border-dashed rounded-lg">
+                  <Server className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-50" />
+                  <h3 className="font-semibold text-lg">No Biometric Devices Connected</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-1 mb-4">
+                    Add your Hikvision Face Recognition Terminal or ZKTeco machine IP address to enable real-time attendance sync.
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setEditingDevice(null);
+                      setDeviceForm({
+                        name: "",
+                        brand: "HIKVISION",
+                        ipAddress: "",
+                        port: "8000",
+                        username: "admin",
+                        password: "",
+                        companyId: "",
+                      });
+                      setDeviceModalOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Connect Device Now
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Device Name</TableHead>
+                      <TableHead>Brand / Protocol</TableHead>
+                      <TableHead>IP & Port</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {devices.map((device) => (
+                      <TableRow key={device.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Server className="h-4 w-4 text-muted-foreground" />
+                            {device.name}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {device.brand === "HIKVISION" ? (
+                            <Badge className="bg-purple-600 hover:bg-purple-700 text-white">
+                              Hikvision (ISAPI)
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                              ZKTeco (UDP/TCP)
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {device.ipAddress}:{device.port}
+                        </TableCell>
+                        <TableCell>
+                          {device.status === "ONLINE" ? (
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 flex items-center gap-1 w-fit">
+                              <Wifi className="h-3 w-3" /> Online
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-300 flex items-center gap-1 w-fit">
+                              <WifiOff className="h-3 w-3" /> Offline / Standby
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={testingDeviceId === device.id}
+                            onClick={() => handleTestDevice(device.id)}
+                          >
+                            {testingDeviceId === device.id ? (
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" />
+                            ) : (
+                              <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                            )}
+                            Test
+                          </Button>
+                          {device.brand === "ZKTECO" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={syncingDeviceId === device.id}
+                              onClick={() => handleSyncDevice(device.id)}
+                            >
+                              {syncingDeviceId === device.id ? (
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" />
+                              ) : (
+                                <RefreshCw className="h-3.5 w-3.5 mr-1 text-blue-600" />
+                              )}
+                              Sync
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                            onClick={() => handleEditDevice(device)}
+                            title="Edit Device"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteDevice(device.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               )}
             </CardContent>
           </Card>

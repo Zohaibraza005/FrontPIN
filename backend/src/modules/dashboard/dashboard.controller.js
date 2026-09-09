@@ -825,9 +825,10 @@ const getUserDashboard = async (req, res) => {
         try { scheduleDays = JSON.parse(userSchedule.days); } catch(e) {}
       }
       if (scheduleDays.length > 0) {
-        isTodayOff = !scheduleDays.some(
-          (d) => String(d).toLowerCase().startsWith(todayDayShort.toLowerCase())
-        );
+        isTodayOff = !scheduleDays.some((d) => {
+          const str = typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || "");
+          return str.toLowerCase().startsWith(todayDayShort.toLowerCase());
+        });
       }
     } else {
       // Default weekend check (Saturday / Sunday)

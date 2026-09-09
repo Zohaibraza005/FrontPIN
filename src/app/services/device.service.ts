@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { apiCall } from "./api";
 
 export interface BiometricDevice {
   id: number;
@@ -8,6 +8,7 @@ export interface BiometricDevice {
   port: number;
   username?: string;
   password?: string;
+  companyId?: number;
   status: "ONLINE" | "OFFLINE";
   lastSyncedAt?: string;
   createdAt: string;
@@ -15,32 +16,32 @@ export interface BiometricDevice {
 
 export const deviceService = {
   getDevices: async () => {
-    const res = await api.get("/devices");
-    return res.data;
+    return await apiCall("/devices", { method: "GET" });
   },
 
   addDevice: async (data: Partial<BiometricDevice>) => {
-    const res = await api.post("/devices", data);
-    return res.data;
+    return await apiCall("/devices", {
+      method: "POST",
+      body: data as any,
+    });
   },
 
   updateDevice: async (id: number, data: Partial<BiometricDevice>) => {
-    const res = await api.put(`/devices/${id}`, data);
-    return res.data;
+    return await apiCall(`/devices/${id}`, {
+      method: "PUT",
+      body: data as any,
+    });
   },
 
   deleteDevice: async (id: number) => {
-    const res = await api.delete(`/devices/${id}`);
-    return res.data;
+    return await apiCall(`/devices/${id}`, { method: "DELETE" });
   },
 
   testConnection: async (id: number) => {
-    const res = await api.post(`/devices/${id}/test`);
-    return res.data;
+    return await apiCall(`/devices/${id}/test`, { method: "POST" });
   },
 
   syncLogs: async (id: number) => {
-    const res = await api.post(`/devices/${id}/sync`);
-    return res.data;
+    return await apiCall(`/devices/${id}/sync`, { method: "POST" });
   },
 };

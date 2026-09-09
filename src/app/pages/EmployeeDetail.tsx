@@ -93,6 +93,8 @@ export const EmployeeDetail: React.FC = () => {
     email: '',
     phone: '',
     username: '',
+    employeeId: '',
+    biometricId: '',
   });
 
   const [locationsList, setLocationsList] = useState<any[]>([]);
@@ -210,8 +212,10 @@ export const EmployeeDetail: React.FC = () => {
         firstName: emp.firstName || '',
         lastName: emp.lastName || '',
         email: emp.email || '',
-        phone: emp.phone || '',
+        phone: emp.phoneNumber || emp.phone || '',
         username: emp.username || '',
+        employeeId: emp.employeeId || '',
+        biometricId: emp.biometricId || '',
       });
 
       setJob({
@@ -397,10 +401,23 @@ export const EmployeeDetail: React.FC = () => {
   
 
   // ── Handlers ────────────────────────────────────────────────────────────
-  const handleSavePersonal = () => {
-    // API call: update personal info
-    toast.success('Personal information updated');
-    setIsEditingPersonal(false);
+  const handleSavePersonal = async () => {
+    try {
+      await employeeAPI.updateEmployee(Number(id), {
+        firstName: personal.firstName,
+        lastName: personal.lastName,
+        email: personal.email,
+        phoneNumber: personal.phone,
+        username: personal.username,
+        employeeId: personal.employeeId,
+        biometricId: personal.biometricId,
+      });
+      toast.success('Personal information updated');
+      setEditPersonal(false);
+      fetchEmployee();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update personal information');
+    }
   };
 
   const handleSaveJob = async () => {
@@ -636,6 +653,12 @@ export const EmployeeDetail: React.FC = () => {
                     <span className="font-semibold text-gray-800">{employee.employeeId || `#${employee.id}`}</span>
                   </div>
                 )}
+                {employee.biometricId && (
+                  <div className="flex items-center gap-1.5 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 text-xs">
+                    <span className="text-purple-500 font-medium">Bio ID:</span>
+                    <span className="font-bold text-purple-700">{employee.biometricId}</span>
+                  </div>
+                )}
                 {employee.hiringDate && (
                   <div className="flex items-center gap-1.5">
                     <Briefcase className="size-3.5 text-gray-400" />
@@ -725,6 +748,26 @@ export const EmployeeDetail: React.FC = () => {
                   value={personal.phone}
                   disabled={!editPersonal}
                   onChange={e => setPersonal({ ...personal, phone: e.target.value })}
+                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-gray-600">Employee ID (Code)</Label>
+                <Input
+                  value={personal.employeeId}
+                  disabled={!editPersonal}
+                  onChange={e => setPersonal({ ...personal, employeeId: e.target.value })}
+                  placeholder="e.g. 1919"
+                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-gray-600">Biometric ID (Device ID)</Label>
+                <Input
+                  value={personal.biometricId}
+                  disabled={!editPersonal}
+                  onChange={e => setPersonal({ ...personal, biometricId: e.target.value })}
+                  placeholder="e.g. 1001"
                   className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
                 />
               </div>

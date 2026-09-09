@@ -253,7 +253,21 @@ export const Layout: React.FC = () => {
 
   useEffect(() => {
     loadTodayStatus();
-  }, []);
+
+    const handleAttendanceUpdate = () => {
+      loadTodayStatus();
+    };
+
+    window.addEventListener("attendance-updated", handleAttendanceUpdate);
+    const pollInterval = setInterval(() => {
+      loadTodayStatus();
+    }, 15000);
+
+    return () => {
+      window.removeEventListener("attendance-updated", handleAttendanceUpdate);
+      clearInterval(pollInterval);
+    };
+  }, [user]);
 
   const [isTodayOff, setIsTodayOff] = useState(false);
   const [realTime, setRealTime] = useState(new Date());
@@ -277,6 +291,8 @@ export const Layout: React.FC = () => {
           checkInTime: res.checkInTime,
           checkOutTime: res.checkOutTime,
         });
+        setElapsedTime(0);
+        setActivityStartTime(null);
         return;
       }
 
@@ -289,10 +305,25 @@ export const Layout: React.FC = () => {
             type: res.currentActivity.type,
             name: res.currentActivity.title,
           });
+        } else {
+          setCurrentActivity({
+            type: "activity",
+            name: "General Work",
+          });
+        }
 
-          setActivityStartTime(
-            new Date(res.currentActivity.startTime).getTime()
-          );
+        const effectiveStart = res.currentActivity?.startTime || res.checkInTime;
+        const startMs = effectiveStart ? new Date(effectiveStart).getTime() : null;
+        if (startMs && !isNaN(startMs)) {
+          setActivityStartTime(startMs);
+
+          const now = Date.now();
+          let totalBreak = res.breakSeconds || 0;
+          if (res.isOnBreak && res.breakStartTime) {
+            totalBreak += Math.floor((now - new Date(res.breakStartTime).getTime()) / 1000);
+          }
+          const initialElapsed = Math.max(0, Math.floor((now - startMs) / 1000) - totalBreak);
+          setElapsedTime(initialElapsed);
         }
 
         setBreakSeconds(res.breakSeconds || 0);
@@ -302,7 +333,14 @@ export const Layout: React.FC = () => {
           setBreakStartTime(
             new Date(res.breakStartTime).getTime()
           );
+        } else {
+          setIsOnBreak(false);
+          setBreakStartTime(null);
         }
+      } else {
+        setIsClockedIn(false);
+        setElapsedTime(0);
+        setActivityStartTime(null);
       }
     } catch (err) {
       console.log("No active attendance");
@@ -318,7 +356,7 @@ export const Layout: React.FC = () => {
   useEffect(() => {
     if (!isClockedIn || !activityStartTime) return;
 
-    const interval = setInterval(() => {
+    const tick = () => {
       const now = Date.now();
 
       let totalBreak = breakSeconds;
@@ -331,7 +369,10 @@ export const Layout: React.FC = () => {
         Math.floor((now - activityStartTime) / 1000) - totalBreak;
 
       setElapsedTime(Math.max(totalWorked, 0));
-    }, 1000);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
 
     return () => clearInterval(interval);
   }, [
@@ -411,13 +452,14 @@ export const Layout: React.FC = () => {
       setIsClockedIn(true);
 
       setCurrentActivity({
-        type: res.activityType,
-        name: res.activityTitle
+        type: res.activityType || "activity",
+        name: res.activityTitle || "General Work"
       });
 
-      const activityStart = new Date(res.activityStartTime).getTime();
+      const effectiveStartTime = res.activityStartTime || res.checkInTime || new Date();
+      const activityStart = new Date(effectiveStartTime).getTime();
 
-      setActivityStartTime(activityStart);  // ✅ important
+      setActivityStartTime(activityStart);
       setBreakSeconds(0);
       setBreakStartTime(null);
       setIsOnBreak(false);

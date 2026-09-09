@@ -31,7 +31,7 @@ function isOffDay(schedules, date, timezone = null) {
 
   const daysArr = activeSchedule.days.map((d) => {
     if (typeof d === "object" && d !== null) {
-      return String(d.day || d.name || d.short || "").trim().toLowerCase();
+      return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
     }
     return String(d).trim().toLowerCase();
   });

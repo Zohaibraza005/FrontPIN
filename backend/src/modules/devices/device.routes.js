@@ -2,8 +2,14 @@ const router = require("express").Router();
 const controller = require("./device.controller");
 const { protect } = require("../../middleware/auth");
 
-// 🔴 PUBLIC WEBHOOK ROUTE for Hikvision Terminal (No JWT auth required)
-router.post("/hikvision/event", controller.handleHikvisionEvent);
+const express = require("express");
+
+// 🔴 PUBLIC WEBHOOK ROUTE for Hikvision Terminal (No JWT auth required, accepts all payload types)
+router.post(
+  "/hikvision/event",
+  express.text({ type: "*/*", limit: "10mb" }),
+  controller.handleHikvisionEvent
+);
 
 // 🟢 PROTECTED MANAGEMENT ROUTES (Admin only)
 router.get("/", protect, controller.getDevices);

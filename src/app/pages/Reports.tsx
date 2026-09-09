@@ -314,7 +314,12 @@ export const Reports: React.FC = () => {
           if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
             const dStr = format(cellDate, "EEE").toLowerCase();
             const dFull = format(cellDate, "EEEE").toLowerCase();
-            const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
+            const daysArr = activeSched.days.map((d: any) => {
+              if (typeof d === "object" && d !== null) {
+                return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+              }
+              return String(d || "").trim().toLowerCase();
+            });
             isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
           }
         }
@@ -770,7 +775,12 @@ export const Reports: React.FC = () => {
                                 if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
                                   const dStr = format(cellDate, "EEE").toLowerCase();
                                   const dFull = format(cellDate, "EEEE").toLowerCase();
-                                  const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
+                                  const daysArr = activeSched.days.map((d: any) => {
+                                    if (typeof d === "object" && d !== null) {
+                                      return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+                                    }
+                                    return String(d || "").trim().toLowerCase();
+                                  });
                                   isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
                                 }
                               }

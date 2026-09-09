@@ -47,7 +47,8 @@ import {
   Filter,
   CheckCircle2,
   AlertCircle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
@@ -200,12 +201,35 @@ const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
 
   return attendanceList.find((a: any) => {
     if (!a) return false;
-    if (a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr) return true;
+    if (a.reportDate && a.reportDate === targetDateStr) return true;
+    if (a.dateStr && a.dateStr === targetDateStr) return true;
+    if (typeof a.date === "string" && a.date.slice(0, 10) === targetDateStr) return true;
     if (a.date && getFormattedDateStr(a.date) === targetDateStr) return true;
+    if (a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr) return true;
     if (a.checkInTime && typeof a.checkInTime === "string" && a.checkInTime.slice(0, 10) === targetDateStr) return true;
-    if (a.date && typeof a.date === "string" && a.date.slice(0, 10) === targetDateStr) return true;
+    if (a.checkOutTime && getFormattedDateStr(a.checkOutTime) === targetDateStr) return true;
+    if (a.checkOutTime && typeof a.checkOutTime === "string" && a.checkOutTime.slice(0, 10) === targetDateStr) return true;
     return false;
   });
+};
+
+export const isScheduleOffDay = (schedules: any, date: Date | string): boolean => {
+  if (!schedules) return false;
+  const list = Array.isArray(schedules) ? schedules : [schedules];
+  const activeSched = list.find((s: any) => s && !s.deletedAt);
+  if (!activeSched || !Array.isArray(activeSched.days) || activeSched.days.length === 0) {
+    return false;
+  }
+  const d = typeof date === "string" ? new Date(date.length <= 10 ? `${date}T00:00:00` : date) : date;
+  const dStr = format(d, "EEE").toLowerCase();
+  const dFull = format(d, "EEEE").toLowerCase();
+  const daysArr = activeSched.days.map((item: any) => {
+    if (typeof item === "object" && item !== null) {
+      return String(item.day || item.dayFull || item.name || item.short || "").trim().toLowerCase();
+    }
+    return String(item || "").trim().toLowerCase();
+  });
+  return !daysArr.includes(dStr) && !daysArr.includes(dFull);
 };
 
 export const Attendance: React.FC = () => {
@@ -233,6 +257,7 @@ export const Attendance: React.FC = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -309,17 +334,7 @@ export const Attendance: React.FC = () => {
     const cellDate = cellDateStr ? new Date(`${cellDateStr}T00:00:00`) : (day ? new Date(day) : new Date());
     const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
 
-    let isEmpDayOff = false;
-    if (emp?.Schedule) {
-      const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
-      const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
-      if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
-        const dStr = format(cellDate, "EEE").toLowerCase();
-        const dFull = format(cellDate, "EEEE").toLowerCase();
-        const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
-        isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
-      }
-    }
+    const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
 
     let defaultStatus = "ABSENT";
     if (isEmpDayOff) {
@@ -356,10 +371,11 @@ export const Attendance: React.FC = () => {
     }
 
     const status = finalRecord.status?.toUpperCase();
-    const isOff = status === "OFF_DAY" || status === "OFF" || isEmpDayOff;
-    const isUpcoming = (isFutureDay || status === "UPCOMING_DAY" || status === "UPCOMING") && !isOff;
+    const hasWorked = status === "PRESENT" || status === "LATE" || status === "TARDY" || (Number(finalRecord.totalWorkedMinutes) > 0);
+    const isOff = !hasWorked && (status === "OFF_DAY" || status === "OFF" || (isEmpDayOff && status !== "LEAVE"));
+    const isUpcoming = !hasWorked && !isOff && (isFutureDay || status === "UPCOMING_DAY" || status === "UPCOMING");
     const isLeave = status === "LEAVE";
-    const isAbsent = status === "ABSENT";
+    const isAbsent = !hasWorked && !isOff && !isUpcoming && !isLeave;
 
     // Disable tooltip and lock interactions for OFF (O), LEAVE (L), ABSENT (A), and UPCOMING (U) days
     const isTooltipDisabled = isOff || isLeave || isAbsent || isUpcoming;
@@ -559,21 +575,47 @@ export const Attendance: React.FC = () => {
   
   useEffect(() => {
     loadReport();
+
+    // ⚡ Real-time live polling every 10 seconds
+    const interval = setInterval(() => {
+      loadReport(false);
+    }, 10000);
+
+    // ⚡ Real-time event listener for immediate clock-in/out or punch sync
+    const handleAttendanceUpdate = () => {
+      loadReport(false);
+    };
+    window.addEventListener("attendance-updated", handleAttendanceUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("attendance-updated", handleAttendanceUpdate);
+    };
   }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId]);
   
-  const loadReport = async () => {
-    const res = await attendanceAPI.getAttendanceReport({
-      view: activeTab,
-      date: selectedDate,
-      departmentId,
-      locationId,
-      employeeId:
-        user?.role === "ADMIN" && selectedEmployeeId !== "all"
-          ? selectedEmployeeId
-          : undefined
-    });
-    
-    setReport((res.employees || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin'));
+  const loadReport = async (showFeedback = false) => {
+    try {
+      if (showFeedback) setRefreshing(true);
+      const res = await attendanceAPI.getAttendanceReport({
+        view: activeTab,
+        date: selectedDate,
+        departmentId,
+        locationId,
+        employeeId:
+          user?.role === "ADMIN" && selectedEmployeeId !== "all"
+            ? selectedEmployeeId
+            : undefined
+      });
+      
+      setReport((res.employees || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin'));
+      if (showFeedback) {
+        toast.success("Attendance updated!");
+      }
+    } catch (err) {
+      console.error("Failed to load attendance report:", err);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const isNextDisabled = useMemo(() => {
@@ -629,17 +671,23 @@ export const Attendance: React.FC = () => {
     let absent = 0;
     let leave = 0;
 
+    const targetDateStr = format(selectedDate, "yyyy-MM-dd");
     report.forEach(emp => {
-      const rec = findAttendanceRecord(emp.Attendance, format(selectedDate, "yyyy-MM-dd"));
+      const rec = findAttendanceRecord(emp.Attendance, targetDateStr)
+        || (activeTab === "daily" && Array.isArray(emp.Attendance) && emp.Attendance.length === 1 && emp.Attendance[0]?.id ? emp.Attendance[0] : undefined);
       const st = rec?.status?.toUpperCase() || "ABSENT";
+      const isOff = isScheduleOffDay(emp?.Schedule, selectedDate) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
+
       if (st === "PRESENT") present++;
       else if (st === "LATE" || st === "TARDY") tardy++;
       else if (st === "LEAVE") leave++;
-      else absent++;
+      else if (st === "OFF_DAY" || isOff || st === "UPCOMING_DAY") {
+        // Off or upcoming day: not counted as absent
+      } else absent++;
     });
 
     return { present, tardy, absent, leave, total: report.length };
-  }, [report, selectedDate]);
+  }, [report, selectedDate, activeTab]);
 
   const renderTimesheetView = (start: Date, end: Date) => {
     const days = eachDayOfInterval({ start, end });
@@ -663,18 +711,7 @@ export const Attendance: React.FC = () => {
 
         const cellDate = new Date(`${dayStr}T00:00:00`);
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
-
-        let isEmpDayOff = false;
-        if (emp?.Schedule) {
-          const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
-          const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
-          if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
-            const dStr = format(cellDate, "EEE").toLowerCase();
-            const dFull = format(cellDate, "EEEE").toLowerCase();
-            const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
-            isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
-          }
-        }
+        const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
 
         let rawStatus = record?.status?.toUpperCase();
         if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
@@ -803,18 +840,7 @@ export const Attendance: React.FC = () => {
 
                   const cellDate = new Date(`${dayStr}T00:00:00`);
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
-
-                  let isEmpDayOff = false;
-                  if (emp?.Schedule) {
-                    const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
-                    const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
-                    if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
-                      const dStr = format(cellDate, "EEE").toLowerCase();
-                      const dFull = format(cellDate, "EEEE").toLowerCase();
-                      const daysArr = activeSched.days.map((d: any) => String(d).trim().toLowerCase());
-                      isEmpDayOff = !daysArr.includes(dStr) && !daysArr.includes(dFull);
-                    }
-                  }
+                  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
 
                   let rawStatus = record?.status?.toUpperCase();
                   if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
@@ -1027,6 +1053,17 @@ export const Attendance: React.FC = () => {
                 </>
               )}
               <Button
+                variant="outline"
+                size="sm"
+                disabled={refreshing}
+                onClick={() => loadReport(true)}
+                className="shrink-0 h-9 px-3 text-xs font-semibold gap-1.5 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 shadow-xs"
+                title="Real-time live refresh"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+              <Button
                 variant="default"
                 size="sm"
                 disabled={exporting}
@@ -1117,21 +1154,41 @@ export const Attendance: React.FC = () => {
 
                   <TableBody>
                     {report.map(emp => {
-                      const record = findAttendanceRecord(emp.Attendance, format(selectedDate, "yyyy-MM-dd"));
+                      const targetDateStr = format(selectedDate, "yyyy-MM-dd");
+                      const record = findAttendanceRecord(emp.Attendance, targetDateStr)
+                        || (activeTab === "daily" && Array.isArray(emp.Attendance) && emp.Attendance.length === 1 && emp.Attendance[0]?.id ? emp.Attendance[0] : undefined);
 
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
 
+                      const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate);
+                      const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
+
+                      let defaultStatus = "ABSENT";
+                      if (isEmpDayOff) {
+                        defaultStatus = "OFF_DAY";
+                      } else if (isFutureDate) {
+                        defaultStatus = "UPCOMING_DAY";
+                      }
+
+                      let rawStatus = record?.status;
+                      if (!rawStatus || rawStatus === "ABSENT") {
+                        rawStatus = defaultStatus;
+                      }
+                      if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
+                        rawStatus = "OFF_DAY";
+                      }
+
                       const finalRecord = {
                         id: record?.id ?? null,
                         date: record?.date ?? selectedDate,
-                        status: record?.status ?? "ABSENT",
                         checkInTime: record?.checkInTime ?? null,
                         checkOutTime: record?.checkOutTime ?? null,
                         totalWorkedMinutes: record?.totalWorkedMinutes ?? 0,
                         totalBreakMinutes: record?.totalBreakMinutes ?? 0,
                         employeeId: record?.employeeId ?? emp.id,
                         ...record,
+                        status: rawStatus,
                         overtimeHours: otHours,
                         overtimeMinutes: otMins,
                       };
