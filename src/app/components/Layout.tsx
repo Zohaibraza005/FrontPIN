@@ -85,7 +85,17 @@ const menuItems = [
   // { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'INVOICE' },
   { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
   { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
-  { icon: Users, label: 'Employee', path: '/employees', roles: ['ADMIN'], module: 'EMPLOYEE' },
+  {
+    icon: Users,
+    label: 'Employee',
+    roles: ['ADMIN'],
+    module: 'EMPLOYEE',
+    children: [
+      { label: 'All Employees', path: '/employees' },
+      { label: 'Add Employee', path: '/employees/add' },
+      { label: 'Roles', path: '/roles' },
+    ],
+  },
   { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN'] },
   // { icon: MapPin, label: 'Locations', path: '/locations', roles: ['ADMIN'] },
   // { icon: MapPin, label: 'Departments', path: '/departments', roles: ['ADMIN'] },
@@ -99,6 +109,7 @@ const menuItems = [
       { label: 'Settings', path: '/organization', },
       { label: 'Departments', path: '/departments', },
       { label: 'Locations', path: '/locations', },
+      { label: 'Entities', path: '/entities', },
       // you can add more later: Settings, Billing, Branches, etc.
     ]
   },
@@ -129,7 +140,90 @@ const getLocation = (): Promise<{ lat: number; lng: number }> => {
   });
 };
 
+interface CollapsibleSidebarItemProps {
+  item: any;
+  sidebarOpen: boolean;
+  isActive: boolean;
+  onNavigate: () => void;
+}
+
+const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
+  item,
+  sidebarOpen,
+  isActive,
+  onNavigate,
+}) => {
+  const location = useLocation();
+  const Icon = item.icon;
+  const isChildActive = item.children?.some(
+    (c: any) => location.pathname === c.path || (c.path && location.pathname.startsWith(c.path))
+  );
+  const [isOpen, setIsOpen] = useState(isChildActive);
+
+  useEffect(() => {
+    if (isChildActive) {
+      setIsOpen(true);
+    }
+  }, [isChildActive]);
+
+  return (
+    <div key={item.label} className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+          isActive
+            ? "bg-blue-50 text-blue-700"
+            : "text-gray-700 hover:bg-gray-100"
+        )}
+      >
+        <div className="flex items-center gap-3">
+          <Icon className="size-5 shrink-0" />
+          {sidebarOpen && <span>{item.label}</span>}
+        </div>
+        {sidebarOpen && (
+          isOpen ? (
+            <ChevronDown className="size-4 opacity-70" />
+          ) : (
+            <ChevronRight className="size-4 opacity-70" />
+          )
+        )}
+      </button>
+
+      {/* Submenu */}
+      {isOpen && sidebarOpen && (
+        <div className="ml-8 mt-1 space-y-1 pb-2">
+          {item.children.map((child: any) => {
+            const ChildIcon = child.icon;
+            const childActive =
+              location.pathname === child.path ||
+              (child.path && location.pathname.startsWith(child.path));
+
+            return (
+              <Link
+                key={child.path}
+                to={child.path}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  childActive
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                )}
+                onClick={onNavigate}
+              >
+                {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
+                <span>{child.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const Layout: React.FC = () => {
+
   const { user, logout, isAuthenticated } = useAuth();
   const { notifications, unreadCount, markAsRead } = useNotifications();
   const { startTour } = useTour();
@@ -776,66 +870,17 @@ export const Layout: React.FC = () => {
 
                   // Has children → render as collapsible
                   if (item.children && item.children.length > 0) {
-                    const [isOpen, setIsOpen] = React.useState(
-                      // auto-open if any child is active
-                      item.children.some(c => location.pathname === c.path || location.pathname.startsWith(c.path))
-                    );
-
                     return (
-                      <div key={item.label} className="relative">
-                        <button
-                          onClick={() => setIsOpen(!isOpen)}
-                          className={cn(
-                            "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                            isActive
-                              ? "bg-blue-50 text-blue-700"
-                              : "text-gray-700 hover:bg-gray-100"
-                          )}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Icon className="size-5 shrink-0" />
-                            {sidebarOpen && <span>{item.label}</span>}
-                          </div>
-                          {sidebarOpen && (
-                            isOpen ? (
-                              <ChevronDown className="size-4 opacity-70" />
-                            ) : (
-                              <ChevronRight className="size-4 opacity-70" />
-                            )
-                          )}
-                        </button>
-
-                        {/* Submenu */}
-                        {isOpen && sidebarOpen && (
-                          <div className="ml-8 mt-1 space-y-1 pb-2">
-                            {item.children.map((child) => {
-                              const ChildIcon = child.icon;
-                              const childActive =
-                                location.pathname === child.path ||
-                                (child.path && location.pathname.startsWith(child.path));
-
-                              return (
-                                <Link
-                                  key={child.path}
-                                  to={child.path}
-                                  className={cn(
-                                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                                    childActive
-                                      ? "bg-indigo-50 text-indigo-700"
-                                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                                  )}
-                                  onClick={() => setMobileMenuOpen(false)}
-                                >
-                                  {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
-                                  <span>{child.label}</span>
-                                </Link>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
+                      <CollapsibleSidebarItem
+                        key={item.label}
+                        item={item}
+                        sidebarOpen={sidebarOpen}
+                        isActive={isActive}
+                        onNavigate={() => setMobileMenuOpen(false)}
+                      />
                     );
                   }
+
 
                   // Normal menu item (no children)
                   return (

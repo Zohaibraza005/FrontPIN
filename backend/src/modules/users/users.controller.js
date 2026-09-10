@@ -21,7 +21,9 @@ exports.getEmployees = async (req, res) => {
       include: {
         company: true,
         department: true,
+        entity: true,
         supervisor: true,
+        appRole: true,
         jobInfo: true,
         payroll: true,
         privileges: true,
@@ -60,7 +62,20 @@ exports.createEmployee = async (req, res) => {
     const parsedPersonal = JSON.parse(personal);
     const parsedJob = JSON.parse(job);
     const parsedPayroll = JSON.parse(payroll);
-    const parsedPrivileges = privileges ? JSON.parse(privileges) : [];
+    let parsedPrivileges = privileges ? JSON.parse(privileges) : [];
+
+    if ((!parsedPrivileges || parsedPrivileges.length === 0) && parsedPersonal.roleId) {
+      const appRole = await prisma.appRole.findFirst({
+        where: {
+          id: parseInt(parsedPersonal.roleId),
+          organizationId: orgId,
+          deletedAt: null,
+        },
+      });
+      if (appRole && appRole.privileges) {
+        parsedPrivileges = typeof appRole.privileges === "string" ? JSON.parse(appRole.privileges) : appRole.privileges;
+      }
+    }
 
     const canLogin = parsedPersonal.canLogin ?? true;
 
@@ -183,6 +198,12 @@ exports.createEmployee = async (req, res) => {
           phoneNumber: parsedPersonal.phoneNumber || null,
           nationalId: parsedPersonal.nationalId || null,
 
+          gender: parsedPersonal.gender || null,
+          age: parsedPersonal.age ? parseInt(parsedPersonal.age) : null,
+          qualification: parsedPersonal.qualification || null,
+          maritalStatus: parsedPersonal.maritalStatus || null,
+          religion: parsedPersonal.religion || null,
+
           canLogin,
 
           profileImage: req.file
@@ -198,6 +219,12 @@ exports.createEmployee = async (req, res) => {
           departmentId: parsedPersonal.departmentId
             ? parseInt(parsedPersonal.departmentId)
             : null,
+          entityId: parsedPersonal.entityId
+            ? parseInt(parsedPersonal.entityId)
+            : null,
+          roleId: parsedPersonal.roleId
+            ? parseInt(parsedPersonal.roleId)
+            : null,
           supervisorId: parsedPersonal.supervisorId
             ? parseInt(parsedPersonal.supervisorId)
             : null,
@@ -208,6 +235,9 @@ exports.createEmployee = async (req, res) => {
               designation: parsedJob.designation || null,
               hiringDate: parsedJob.hiringDate
                 ? new Date(parsedJob.hiringDate)
+                : null,
+              joiningDate: parsedJob.joiningDate
+                ? new Date(parsedJob.joiningDate)
                 : null,
               workMode: parsedJob.workMode || null,
               allowExtraHours: parsedPayroll.allowExtraHours || false,
@@ -249,6 +279,7 @@ exports.createEmployee = async (req, res) => {
           },
         },
         include: {
+          appRole: true,
           jobInfo: true,
           payroll: true,
           privileges: true,
@@ -327,8 +358,10 @@ exports.updateEmployee = async (req, res) => {
 
     const companyId = parsedPersonal.companyId || req.body.companyId || req.body.locationId;
     const departmentId = parsedPersonal.departmentId || req.body.departmentId;
+    const entityId = parsedPersonal.entityId !== undefined ? parsedPersonal.entityId : req.body.entityId;
     const supervisorId = parsedPersonal.supervisorId || req.body.supervisorId;
     const hiringDate = parsedJobRaw.hiringDate || req.body.hiringDate;
+    const joiningDate = parsedJobRaw.joiningDate || req.body.joiningDate;
     const employmentStatus = parsedJobRaw.employmentStatus || req.body.employmentStatus;
     const workMode = parsedJobRaw.workMode || req.body.workMode;
 
@@ -346,6 +379,11 @@ exports.updateEmployee = async (req, res) => {
     }
     if (parsedPersonal.phoneNumber || req.body.phoneNumber) updateData.phoneNumber = parsedPersonal.phoneNumber || req.body.phoneNumber;
     if (parsedPersonal.nationalId || req.body.nationalId) updateData.nationalId = parsedPersonal.nationalId || req.body.nationalId;
+    if (parsedPersonal.gender !== undefined || req.body.gender !== undefined) updateData.gender = parsedPersonal.gender || req.body.gender || null;
+    if (parsedPersonal.age !== undefined || req.body.age !== undefined) updateData.age = (parsedPersonal.age || req.body.age) ? parseInt(parsedPersonal.age || req.body.age) : null;
+    if (parsedPersonal.qualification !== undefined || req.body.qualification !== undefined) updateData.qualification = parsedPersonal.qualification || req.body.qualification || null;
+    if (parsedPersonal.maritalStatus !== undefined || req.body.maritalStatus !== undefined) updateData.maritalStatus = parsedPersonal.maritalStatus || req.body.maritalStatus || null;
+    if (parsedPersonal.religion !== undefined || req.body.religion !== undefined) updateData.religion = parsedPersonal.religion || req.body.religion || null;
     if (parsedPersonal.employeeId || req.body.employeeId) updateData.employeeId = parsedPersonal.employeeId || req.body.employeeId;
     if (parsedPersonal.biometricId || req.body.biometricId) updateData.biometricId = parsedPersonal.biometricId || req.body.biometricId;
     if (parsedPersonal.pin || req.body.pin) updateData.pin = parsedPersonal.pin || req.body.pin;
@@ -357,15 +395,21 @@ exports.updateEmployee = async (req, res) => {
 
     if (companyId) updateData.companyId = parseInt(companyId);
     if (departmentId !== undefined) updateData.departmentId = departmentId ? parseInt(departmentId) : null;
+    if (entityId !== undefined) updateData.entityId = entityId ? parseInt(entityId) : null;
+    if (parsedPersonal.roleId !== undefined || req.body.roleId !== undefined) {
+      const rId = parsedPersonal.roleId !== undefined ? parsedPersonal.roleId : req.body.roleId;
+      updateData.roleId = rId ? parseInt(rId) : null;
+    }
     if (supervisorId !== undefined) updateData.supervisorId = supervisorId ? parseInt(supervisorId) : null;
 
     if (req.file) {
       updateData.profileImage = `/uploads/${req.file.filename}`;
     }
 
-    if (hiringDate || employmentStatus || workMode) {
+    if (hiringDate || joiningDate || employmentStatus || workMode) {
       const jobData = {
         ...(hiringDate && { hiringDate: new Date(hiringDate) }),
+        ...(joiningDate && { joiningDate: new Date(joiningDate) }),
         ...(employmentStatus && { employmentStatus }),
         ...(workMode && { workMode }),
       };
@@ -418,19 +462,30 @@ exports.updateEmployee = async (req, res) => {
         company: true,
         department: true,
         supervisor: true,
+        appRole: true,
         jobInfo: true,
         payroll: true,
         privileges: true,
       },
     });
 
-    if (Array.isArray(parsedPrivileges)) {
+    let privilegesToApply = Array.isArray(parsedPrivileges) ? parsedPrivileges : null;
+    if ((!privilegesToApply || privilegesToApply.length === 0) && updateData.roleId) {
+      const appRole = await prisma.appRole.findFirst({
+        where: { id: updateData.roleId, organizationId: req.user.orgId, deletedAt: null },
+      });
+      if (appRole && appRole.privileges) {
+        privilegesToApply = typeof appRole.privileges === "string" ? JSON.parse(appRole.privileges) : appRole.privileges;
+      }
+    }
+
+    if (Array.isArray(privilegesToApply)) {
       await prisma.employeePrivilege.deleteMany({
         where: { employeeId: parseInt(id) },
       });
-      if (parsedPrivileges.length > 0) {
+      if (privilegesToApply.length > 0) {
         await prisma.employeePrivilege.createMany({
-          data: parsedPrivileges.map((p) => {
+          data: privilegesToApply.map((p) => {
             const mod = typeof p === "string" ? p : p.module;
             const canRead = typeof p === "string" ? true : (p.canRead ?? true);
             const canCreate = typeof p === "string" ? false : (p.canCreate || false);
@@ -450,6 +505,7 @@ exports.updateEmployee = async (req, res) => {
         });
       }
     }
+
 
     return res.status(200).json({
       success: true,
@@ -610,6 +666,7 @@ exports.getEmployeeDetail = async (req, res) => {
       include: {
         company: true,
         department: true,
+        appRole: true,
         supervisor: {
           select: {
             id: true,

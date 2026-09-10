@@ -1,7 +1,8 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
-const { parseHikvisionEvent } = require("./hikvision.service");
+const { parseHikvisionEvent, startHikvisionStream } = require("./hikvision.service");
 const { fetchZkTecoLogs, testZkTecoConnection } = require("./zkteco.service");
+
 
 /**
  * Core Punch Handler: Maps biometricId -> Employee and records Attendance & AttendancePunch
@@ -181,6 +182,10 @@ exports.addDevice = async (req, res) => {
       },
     });
 
+    if (device.brand === "HIKVISION") {
+      startHikvisionStream(device, processBiometricPunch);
+    }
+
     return res.json({ success: true, data: device });
   } catch (error) {
     console.error(error);
@@ -216,7 +221,12 @@ exports.updateDevice = async (req, res) => {
       data: updateData,
     });
 
+    if (device.brand === "HIKVISION") {
+      startHikvisionStream(device, processBiometricPunch);
+    }
+
     return res.json({ success: true, data: device });
+
   } catch (error) {
     console.error("Error updating device:", error);
     if (error.code === "P2002") {

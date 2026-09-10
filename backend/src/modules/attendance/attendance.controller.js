@@ -926,7 +926,10 @@ exports.getAttendanceReport = async (req, res) => {
             deletedAt: null
           },
           include: {
-            activities: true
+            activities: true,
+            punches: {
+              orderBy: { punchTime: "asc" }
+            }
           }
         }
       }
@@ -1175,6 +1178,7 @@ exports.getAttendanceReport = async (req, res) => {
           overtimeAmount: overtime?.amount || 0,
           totalWorkedMinutes,
           totalBreakMinutes,
+          punches: existing.punches || [],
           tasks
         };
       });

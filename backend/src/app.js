@@ -9,6 +9,7 @@ const { errorHandler, notFound } = require("./middleware/error");
 const authRoutes = require("./modules/auth/auth.routes");
 const locationRoutes = require("./modules/location/location.routes");
 const departmentRoutes = require("./modules/department/department.routes");
+const entityRoutes = require("./modules/entity/entity.routes");
 const userRoutes = require("./modules/users/users.routes");
 const projectRoutes = require("./modules/project/project.routes");
 const scheduleRoutes = require("./modules/schedule/schedule.routes");
@@ -23,6 +24,7 @@ const jobsRoutes = require("./modules/job/job.routes");
 const candidateRoutes = require("./modules/job/candidate.routes");
 const reportRoutes = require("./modules/report/report.routes");
 const deviceRoutes = require("./modules/devices/device.routes");
+const roleRoutes = require("./modules/roles/role.routes");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));  // for urlencoded (optional but good)
@@ -64,6 +66,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/employees", userRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/departments", departmentRoutes);
+app.use("/api/entities", entityRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/schedules", scheduleRoutes);
 app.use("/api/attendance", attendanceRoutes);
@@ -77,6 +80,7 @@ app.use("/api/candidates", candidateRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/payroll", payrollRoutes);
+app.use("/api/roles", roleRoutes);
 
 
 

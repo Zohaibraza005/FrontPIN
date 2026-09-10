@@ -257,6 +257,63 @@ export const departmentAPI = {
   },
 };
 
+// Entity API
+export const entityAPI = {
+  getEntities: async () => {
+    return apiCall("/entities");
+  },
+
+  createEntity: async (data: any) => {
+    return apiCall("/entities", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateEntity: async (id: number, data: any) => {
+    return apiCall(`/entities/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteEntity: async (id: number) => {
+    return apiCall(`/entities/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  getNextEmployeeCode: async (id: number | string) => {
+    return apiCall(`/entities/${id}/next-employee-code`);
+  },
+};
+
+export const roleAPI = {
+  getRoles: async () => {
+    return apiCall("/roles");
+  },
+  getRoleById: async (id: number | string) => {
+    return apiCall(`/roles/${id}`);
+  },
+  createRole: async (data: { name: string; description?: string; privileges: any[] }) => {
+    return apiCall("/roles", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateRole: async (id: number | string, data: { name?: string; description?: string; privileges?: any[] }) => {
+    return apiCall(`/roles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteRole: async (id: number | string) => {
+    return apiCall(`/roles/${id}`, {
+      method: "DELETE",
+    });
+  },
+};
+
 
 // Attendance API
 // Attendance API

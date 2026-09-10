@@ -48,7 +48,12 @@ import {
   CheckCircle2,
   AlertCircle,
   FileSpreadsheet,
-  RefreshCw
+  RefreshCw,
+  Fingerprint,
+  Smartphone,
+  Hash,
+  ArrowDownRight,
+  ArrowUpRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
@@ -918,7 +923,7 @@ export const Attendance: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
-      {/* Simple Header */}
+      {/* Simple Header with Refresh */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Attendance Management</h2>
@@ -926,20 +931,32 @@ export const Attendance: React.FC = () => {
             Track, edit, and audit daily, weekly, and monthly employee timesheets effortlessly.
           </p>
         </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={refreshing}
+          onClick={() => loadReport(true)}
+          className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl"
+          title="Real-time live refresh"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
+          <span>Refresh</span>
+        </Button>
       </div>
 
       {/* Main Filter & Content Card */}
       <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
-        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 pb-4 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3.5 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             
-            {/* Left Controls: Date Nav Step Buttons + DatePicker */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 bg-white dark:bg-gray-950 p-1 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
+            {/* Left Controls: Date Navigation & DatePicker in one neat group */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs">
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400"
+                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
                   onClick={handlePrevDate}
                   title="Previous Period"
                 >
@@ -948,7 +965,7 @@ export const Attendance: React.FC = () => {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
                   onClick={handleNextDate}
                   disabled={isNextDisabled}
                   title="Next Period"
@@ -958,7 +975,7 @@ export const Attendance: React.FC = () => {
               </div>
 
               {/* DatePicker Input Box */}
-              <div className="relative min-w-[200px]">
+              <div className="relative w-48 sm:w-56">
                 <DatePicker
                   selected={selectedDate}
                   maxDate={new Date()}
@@ -989,13 +1006,13 @@ export const Attendance: React.FC = () => {
                       ? "'Week of' MMM d, yyyy"
                       : "MMMM yyyy"
                   }
-                  className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-1.5 h-9 text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
 
-            {/* Right Admin Filters */}
-            <div className="flex flex-wrap lg:flex-nowrap items-center gap-2.5 sm:gap-3">
+            {/* Right Controls: Filter Selects + Export Excel in a single line */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
               {user?.role === "ADMIN" && (
                 <>
                   <SearchableSelect
@@ -1036,7 +1053,7 @@ export const Attendance: React.FC = () => {
                   />
 
                   <SearchableSelect
-                    className="w-40 sm:w-44 lg:w-48"
+                    className="w-40 sm:w-44"
                     icon={<User className="w-3.5 h-3.5 text-gray-400" />}
                     placeholder="All Employees"
                     searchPlaceholder="Search employee..."
@@ -1052,25 +1069,15 @@ export const Attendance: React.FC = () => {
                   />
                 </>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={refreshing}
-                onClick={() => loadReport(true)}
-                className="shrink-0 h-9 px-3 text-xs font-semibold gap-1.5 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 shadow-xs"
-                title="Real-time live refresh"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
-                <span className="hidden sm:inline">Refresh</span>
-              </Button>
+
               <Button
                 variant="default"
                 size="sm"
                 disabled={exporting}
                 onClick={handleExportExcel}
-                className="shrink-0 h-9 px-3 text-xs font-bold gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all whitespace-nowrap"
+                className="shrink-0 h-9 px-3 text-xs font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-xl transition-all whitespace-nowrap"
               >
-                <FileSpreadsheet className="w-4 h-4" />
+                <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Export Excel</span>
               </Button>
             </div>
@@ -1525,126 +1532,208 @@ export const Attendance: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* View Detail Drawer Sheet */}
-      <Sheet open={viewPanelOpen} onOpenChange={setViewPanelOpen}>
-        <SheetContent side="right" className="w-[400px] sm:w-[460px] p-0 rounded-l-2xl border-l shadow-2xl">
+      {/* View Detail Modal Dialog */}
+      <Dialog open={viewPanelOpen} onOpenChange={setViewPanelOpen}>
+        <DialogContent className="max-w-lg rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
           {viewRecord && (
-            <>
-              <SheetHeader className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-slate-900 to-indigo-950 text-white">
-                <SheetTitle className="text-lg font-bold text-white flex items-center gap-2">
-                  <CalendarDays className="w-5 h-5 text-blue-400" />
-                  <span>Attendance Details</span>
-                </SheetTitle>
-                <div className="text-xs text-indigo-200/80">
-                  {format(new Date(viewRecord.date), "EEEE, MMMM d, yyyy")}
+            <div className="space-y-5">
+              {/* Clean, Single-color Header */}
+              <DialogHeader className="border-b border-gray-100 dark:border-gray-800 pb-3.5 pr-8">
+                <div className="flex items-center justify-between gap-3">
+                  <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <CalendarDays className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    <span>Attendance Details</span>
+                  </DialogTitle>
+                  <Badge className={`px-2.5 py-0.5 text-xs font-semibold ${STATUS_CONFIG[viewRecord.status]?.badge}`}>
+                    {viewRecord.status}
+                  </Badge>
                 </div>
-              </SheetHeader>
+                <p className="text-xs text-gray-500 font-medium text-left">
+                  {format(new Date(viewRecord.date), "EEEE, MMMM d, yyyy")}
+                </p>
+              </DialogHeader>
 
-              {/* Scrollable sheet body */}
-              <div className="overflow-y-auto h-[calc(100vh-100px)] px-6 pb-8">
-                <div className="mt-6 space-y-6">
-
-                  {/* Summary Grid Box */}
-                  <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 space-y-3.5">
-                    <div className="flex items-center justify-between border-b pb-2.5 border-gray-200 dark:border-gray-800">
-                      <span className="text-xs font-bold text-gray-500 uppercase">Status</span>
-                      <Badge className={STATUS_CONFIG[viewRecord.status]?.badge}>
-                        {viewRecord.status}
-                      </Badge>
+              {/* Body */}
+              <div className="max-h-[70vh] overflow-y-auto space-y-4 pr-1">
+                {/* Summary Grid Box */}
+                <div className="bg-gray-50/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-800 rounded-2xl p-4.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                    <div className="space-y-1">
+                      <span className="text-gray-400 font-medium block">Check In</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                        {viewRecord.checkInTime ? format(new Date(viewRecord.checkInTime), "hh:mm a") : "—"}
+                      </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <span className="text-gray-400 block font-medium">Check In</span>
-                        <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
-                          {viewRecord.checkInTime ? format(new Date(viewRecord.checkInTime), "hh:mm a") : "—"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-gray-400 block font-medium">Check Out</span>
-                        <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
-                          {viewRecord.checkOutTime ? format(new Date(viewRecord.checkOutTime), "hh:mm a") : "—"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-gray-400 block font-medium">Total Worked</span>
-                        <span className="font-bold text-blue-600 dark:text-blue-400 text-sm">
-                          {formatMinutes(viewRecord.totalWorkedMinutes)}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-gray-400 block font-medium">Break Duration</span>
-                        <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
-                          {formatMinutes(viewRecord.totalBreakMinutes)}
-                        </span>
-                      </div>
-
-                      {((Number(viewRecord.overtimeHours) || 0) > 0 || (Number(viewRecord.overtimeMinutes) || 0) > 0) && (
-                        <div>
-                          <span className="text-gray-400 block font-medium">Overtime</span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400 text-sm">
-                            {formatMinutes(Math.round(((Number(viewRecord.overtimeHours) || 0) * 60) || Number(viewRecord.overtimeMinutes) || 0))}
-                          </span>
-                        </div>
-                      )}
+                    <div className="space-y-1">
+                      <span className="text-gray-400 font-medium block">Check Out</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                        {viewRecord.checkOutTime ? format(new Date(viewRecord.checkOutTime), "hh:mm a") : "—"}
+                      </span>
                     </div>
-                  </div>
 
-                  {/* Summary Section */}
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Summary Note</h4>
-                    <div className="border rounded-xl px-4 py-3 bg-white dark:bg-gray-950 text-sm leading-relaxed text-gray-700 dark:text-gray-300 shadow-sm">
-                      {viewRecord.summary || "No summary provided for this shift."}
+                    <div className="space-y-1">
+                      <span className="text-gray-400 font-medium block">Total Worked</span>
+                      <span className="font-bold text-blue-600 dark:text-blue-400 text-sm">
+                        {formatMinutes(viewRecord.totalWorkedMinutes)}
+                      </span>
                     </div>
-                  </div>
 
-                  {/* Activity Timeline */}
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Activity Timeline</h4>
+                    <div className="space-y-1">
+                      <span className="text-gray-400 font-medium block">Break Duration</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                        {formatMinutes(viewRecord.totalBreakMinutes)}
+                      </span>
+                    </div>
 
-                    {viewRecord.activities?.length ? (
-                      <div className="space-y-4 border-l-2 border-indigo-200 dark:border-indigo-900 pl-5">
-                        {viewRecord.activities.map((act, i) => (
-                          <div 
-                            key={i} 
-                            className="relative pb-2 last:pb-0"
-                          >
-                            <div className="absolute -left-[27px] top-1.5 w-4 h-4 rounded-full bg-blue-600 border-4 border-white dark:border-gray-900 shadow-sm" />
-                            
-                            <div className="bg-white dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-3.5 hover:border-blue-300 transition-colors">
-                              <div className="font-bold text-gray-900 dark:text-gray-100 text-sm">{act.type}</div>
-                              <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                                {format(new Date(act.startTime), "hh:mm a")}
-                                {" — "}
-                                {act.endTime
-                                  ? format(new Date(act.endTime), "hh:mm a")
-                                  : "Ongoing"}
-                              </div>
-                              {act.title && (
-                                <div className="text-xs mt-2 text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-2 rounded-lg">
-                                  {act.title}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50 dark:bg-gray-900 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                        No detailed timeline activities logged for this date.
+                    {((Number(viewRecord.overtimeHours) || 0) > 0 || (Number(viewRecord.overtimeMinutes) || 0) > 0) && (
+                      <div className="space-y-1 col-span-2 sm:col-span-4 pt-2 border-t border-gray-200 dark:border-gray-800">
+                        <span className="text-gray-400 font-medium block">Overtime</span>
+                        <span className="font-bold text-purple-600 dark:text-purple-400 text-sm">
+                          {formatMinutes(Math.round(((Number(viewRecord.overtimeHours) || 0) * 60) || Number(viewRecord.overtimeMinutes) || 0))}
+                        </span>
                       </div>
                     )}
                   </div>
+                </div>
 
+                {/* Summary Section */}
+                <div>
+                  <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-2">Summary Note</h4>
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 bg-white dark:bg-gray-950 text-sm leading-relaxed text-gray-700 dark:text-gray-300 shadow-2xs">
+                    {viewRecord.summary || "No summary provided for this shift."}
+                  </div>
+                </div>
+
+                {/* Activity Timeline */}
+                <div>
+                  <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-3">Activity Timeline</h4>
+
+                  {viewRecord.activities?.length ? (
+                    <div className="space-y-3.5 border-l-2 border-indigo-200 dark:border-indigo-900 pl-4 ml-2">
+                      {viewRecord.activities.map((act, i) => (
+                        <div 
+                          key={i} 
+                          className="relative pb-1 last:pb-0"
+                        >
+                          <div className="absolute -left-[23px] top-1.5 w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white dark:border-gray-900 shadow-xs" />
+                          
+                          <div className="bg-white dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs p-3 hover:border-blue-300 transition-colors">
+                            <div className="font-bold text-gray-900 dark:text-gray-100 text-xs sm:text-sm">{act.type}</div>
+                            <div className="text-[11px] text-gray-500 mt-0.5 font-mono">
+                              {format(new Date(act.startTime), "hh:mm a")}
+                              {" — "}
+                              {act.endTime
+                                ? format(new Date(act.endTime), "hh:mm a")
+                                : "Ongoing"}
+                            </div>
+                            {act.title && (
+                              <div className="text-xs mt-1.5 text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-2 rounded-lg">
+                                {act.title}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+                      No detailed timeline activities logged for this date.
+                    </div>
+                  )}
+                </div>
+
+                {/* 🧾 Daily Attendance Punches (Invoice / Receipt Style) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Punch Logs ({viewRecord.punches?.length || 0})</span>
+                    </h4>
+                    <span className="text-[11px] text-gray-400 font-mono">
+                      Real-time Device Logs
+                    </span>
+                  </div>
+
+                  {viewRecord.punches?.length ? (
+                    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {viewRecord.punches.map((punch: any, idx: number) => {
+                          const isCheckIn = punch.type === "CHECK_IN";
+                          const isCheckOut = punch.type === "CHECK_OUT";
+
+                          return (
+                            <div 
+                              key={punch.id || idx} 
+                              className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
+                            >
+                              {/* Punch # and Direction */}
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  #{idx + 1}
+                                </span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Badge 
+                                      variant="outline"
+                                      className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
+                                        isCheckIn 
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
+                                          : isCheckOut 
+                                          ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300" 
+                                          : "bg-gray-50 text-gray-700 border-gray-300"
+                                      }`}
+                                    >
+                                      {isCheckIn ? (
+                                        <span className="inline-flex items-center gap-0.5">
+                                          <ArrowDownRight className="w-3 h-3 text-emerald-600" />
+                                          IN
+                                        </span>
+                                      ) : isCheckOut ? (
+                                        <span className="inline-flex items-center gap-0.5">
+                                          <ArrowUpRight className="w-3 h-3 text-blue-600" />
+                                          OUT
+                                        </span>
+                                      ) : (
+                                        punch.type
+                                      )}
+                                    </Badge>
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                      {punch.device || "Biometric Terminal"}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+                                    <span className="capitalize">{punch.method || "Biometric"}</span>
+                                    {punch.ip && <span>• IP: {punch.ip}</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Timestamp */}
+                              <div className="text-right shrink-0">
+                                <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                                  {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-mono">
+                                  {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+                      No raw biometric punches recorded for this date.
+                    </div>
+                  )}
                 </div>
               </div>
-            </>
+            </div>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -24,6 +24,7 @@ import { TourProvider } from "./contexts/TourContext";
 import { DetailProject } from "./pages/DetailProject";
 import { EmployeeDetail } from "./pages/EmployeeDetail";
 import { Departments } from "./pages/Departments";
+import { Entities } from "./pages/Entities";
 import CreateInvoice from "./pages/CreateInvoice";
 import { InvoiceView } from "./pages/InvoiceView";
 import EditInvoice from "./pages/EditInvoice";
@@ -37,6 +38,7 @@ import JobApplicants from "./pages/JobApplicants";
 import Organization from "./pages/Organization";
 import { Register } from "./pages/Register";
 import { Profile } from "./pages/Profile";
+import { Roles } from "./pages/Roles";
 
 // Wrapper component for providers
 import { Navigate } from "react-router";
@@ -107,10 +109,12 @@ export const router = createBrowserRouter([
       { path: "employees", Component: Employees },
       { path: "employees/add", Component: AddEmployee },
       { path: "employees/:id", Component: EmployeeDetail },
+      { path: "roles", Component: Roles },
       { path: "departments", Component: Departments },
       { path: "payroll", Component: Payroll },
       { path: "payroll/view/:id", Component: PayrollDetail},
       { path: "locations", Component: Locations },
+      { path: "entities", Component: Entities },
       { path: "applicants", Component: Applicants },
       { path: "jobs/add", Component: PostJob },
     { path: "jobs/:jobId/applicants", Component: JobApplicants },

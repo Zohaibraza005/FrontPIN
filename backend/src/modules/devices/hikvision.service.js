@@ -183,7 +183,143 @@ async function pushUserToHikvision(device, { biometricId, name }) {
   }
 }
 
+/**
+ * Real-time Outgoing TCP Socket Stream Handler for Hikvision Devices
+ */
+const activeStreams = new Map();
+
+function startHikvisionStream(device, processPunchCallback) {
+  const { id, name, ipAddress, port, username, password } = device;
+  if (!ipAddress) return;
+
+  if (activeStreams.has(id)) {
+    try {
+      activeStreams.get(id).destroy();
+    } catch (e) {}
+    activeStreams.delete(id);
+  }
+
+  const targetPort = port === 8000 ? 80 : (port || 80);
+  const path = "/ISAPI/Event/notification/alertStream";
+
+  console.log(`[Hikvision Stream] Initiating persistent stream connection to ${name} (${ipAddress}:${targetPort})...`);
+
+  const options = {
+    hostname: ipAddress,
+    port: targetPort,
+    path: path,
+    method: "GET",
+  };
+
+  const req = http.request(options, (res) => {
+    if (res.statusCode === 401 && res.headers["www-authenticate"]) {
+      const authHeader = res.headers["www-authenticate"];
+      const realmMatch = authHeader.match(/realm="([^"]+)"/);
+      const nonceMatch = authHeader.match(/nonce="([^"]+)"/);
+      const qopMatch = authHeader.match(/qop="([^"]+)"/);
+
+      const realm = realmMatch ? realmMatch[1] : "DS-K1T671TMFW";
+      const nonce = nonceMatch ? nonceMatch[1] : "";
+      const qop = qopMatch ? qopMatch[1] : "auth";
+      const nc = "00000001";
+      const cnonce = crypto.randomBytes(8).toString("hex");
+
+      const ha1 = md5(`${username || "admin"}:${realm}:${password || ""}`);
+      const ha2 = md5(`GET:${path}`);
+      const responseHash = md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`);
+
+      const digestHeader = `Digest username="${username || "admin"}", realm="${realm}", nonce="${nonce}", uri="${path}", response="${responseHash}", qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
+
+      const streamOptions = {
+        ...options,
+        headers: {
+          Authorization: digestHeader,
+        },
+      };
+
+      const streamReq = http.request(streamOptions, (streamRes) => {
+        console.log(`[Hikvision Stream] Real-time socket connected to ${name} (${ipAddress}) [HTTP ${streamRes.statusCode}]`);
+        activeStreams.set(id, streamReq);
+
+        streamRes.on("data", (chunk) => {
+          const str = chunk.toString();
+          const matchNo =
+            str.match(/"employeeNoString"\s*:\s*"([^"]+)"/) ||
+            str.match(/"employeeNo"\s*:\s*"([^"]+)"/) ||
+            str.match(/<employeeNoString>([^<]+)<\/employeeNoString>/) ||
+            str.match(/<employeeNo>([^<]+)<\/employeeNo>/);
+
+          if (matchNo) {
+            const bioId = matchNo[1].trim();
+            console.log(`[Hikvision Stream] Real-time punch detected for Biometric ID: ${bioId} on ${name}`);
+            if (typeof processPunchCallback === "function") {
+              processPunchCallback({
+                biometricId: bioId,
+                punchTime: new Date(),
+                brand: "HIKVISION",
+                deviceName: name,
+                method: "HIKVISION_FACE",
+              }).catch((err) => console.error("Error processing real-time punch:", err));
+            }
+          }
+        });
+
+        streamRes.on("end", () => {
+          console.log(`[Hikvision Stream] Stream disconnected from ${name}. Reconnecting in 10s...`);
+          activeStreams.delete(id);
+          setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
+        });
+
+        streamRes.on("error", (err) => {
+          console.error(`[Hikvision Stream Error] ${name}:`, err.message);
+          activeStreams.delete(id);
+          setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
+        });
+      });
+
+      streamReq.on("error", (err) => {
+        console.error(`[Hikvision Auth Stream Error] ${name}:`, err.message);
+        activeStreams.delete(id);
+        setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
+      });
+
+      streamReq.end();
+    } else {
+      console.warn(`[Hikvision Stream] Unexpected status HTTP ${res.statusCode} from ${name}`);
+      setTimeout(() => startHikvisionStream(device, processPunchCallback), 15000);
+    }
+  });
+
+  req.on("error", (err) => {
+    console.error(`[Hikvision Stream Req Error] ${name}:`, err.message);
+    setTimeout(() => startHikvisionStream(device, processPunchCallback), 15000);
+  });
+
+  req.end();
+}
+
+async function initHikvisionStreams(prisma, processPunchCallback) {
+  try {
+    const devices = await prisma.biometricDevice.findMany({
+      where: {
+        brand: "HIKVISION",
+        deletedAt: null,
+      },
+    });
+
+    console.log(`[Hikvision Streams] Starting alertStream listeners for ${devices.length} registered Hikvision device(s)...`);
+    for (const device of devices) {
+      startHikvisionStream(device, processPunchCallback);
+    }
+  } catch (error) {
+    console.error(`[Hikvision Streams Init Error]:`, error.message);
+  }
+}
+
 module.exports = {
   parseHikvisionEvent,
   pushUserToHikvision,
+  startHikvisionStream,
+  initHikvisionStreams,
 };
+

@@ -118,7 +118,12 @@ exports.getOvertimes = async (req, res) => {
     }
 
     const overtimes = await prisma.overtime.findMany({
-      where,
+      where: {
+        ...where,
+        employee: {
+          deletedAt: null,
+        },
+      },
       include: {
         employee: true,
         createdBy: true,
