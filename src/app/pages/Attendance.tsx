@@ -237,6 +237,34 @@ export const isScheduleOffDay = (schedules: any, date: Date | string): boolean =
   return !daysArr.includes(dStr) && !daysArr.includes(dFull);
 };
 
+const getPaginationRange = (current: number, total: number) => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const delta = 1;
+  const range: (number | string)[] = [];
+
+  for (
+    let i = Math.max(2, current - delta);
+    i <= Math.min(total - 1, current + delta);
+    i++
+  ) {
+    range.push(i);
+  }
+
+  if (current - delta > 2) {
+    range.unshift("...");
+  }
+  if (current + delta < total - 1) {
+    range.push("...");
+  }
+
+  range.unshift(1);
+  range.push(total);
+
+  return range;
+};
+
 export const Attendance: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState(user?.role === 'USER' ? 'monthly' : 'daily');
@@ -263,6 +291,14 @@ export const Attendance: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Pagination state for Daily View table
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -921,6 +957,16 @@ export const Attendance: React.FC = () => {
     );
   };
 
+  // Daily View pagination calculations
+  const totalEmployees = report.length;
+  const totalPages = Math.max(1, Math.ceil(totalEmployees / itemsPerPage));
+  const validPage = Math.min(currentPage, totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalEmployees);
+  const paginatedDailyReport = useMemo(() => {
+    return report.slice(startIndex, endIndex);
+  }, [report, startIndex, endIndex]);
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
       {/* Simple Header with Refresh */}
@@ -1160,7 +1206,7 @@ export const Attendance: React.FC = () => {
                   </TableHeader>
 
                   <TableBody>
-                    {report.map(emp => {
+                    {paginatedDailyReport.map(emp => {
                       const targetDateStr = format(selectedDate, "yyyy-MM-dd");
                       const record = findAttendanceRecord(emp.Attendance, targetDateStr)
                         || (activeTab === "daily" && Array.isArray(emp.Attendance) && emp.Attendance.length === 1 && emp.Attendance[0]?.id ? emp.Attendance[0] : undefined);
@@ -1316,6 +1362,99 @@ export const Attendance: React.FC = () => {
                     )}
                   </TableBody>
                 </Table>
+
+                {/* Pagination Footer */}
+                {totalEmployees > 0 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                      <span>
+                        Showing <strong className="text-gray-700 dark:text-gray-200">{startIndex + 1}</strong> to{" "}
+                        <strong className="text-gray-700 dark:text-gray-200">{endIndex}</strong> of{" "}
+                        <strong className="text-gray-700 dark:text-gray-200">{totalEmployees}</strong> employees
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="hidden sm:inline text-gray-500 dark:text-gray-400">Rows per page:</span>
+                        <Select
+                          value={String(itemsPerPage)}
+                          onValueChange={(val) => {
+                            setItemsPerPage(Number(val));
+                            setCurrentPage(1);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-[72px] text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent side="top">
+                            {[10, 20, 50, 100].map((size) => (
+                              <SelectItem key={size} value={String(size)} className="text-xs">
+                                {size}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={validPage === 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                        Previous
+                      </Button>
+
+                      <div className="flex items-center gap-1">
+                        {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                          if (item === "...") {
+                            return (
+                              <span
+                                key={`ellipsis-${idx}`}
+                                className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                              >
+                                ...
+                              </span>
+                            );
+                          }
+
+                          const pageNum = Number(item);
+                          const isActive = pageNum === validPage;
+
+                          return (
+                            <Button
+                              key={`page-${pageNum}`}
+                              variant={isActive ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setCurrentPage(pageNum)}
+                              className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                                isActive
+                                  ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                                  : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                              }`}
+                            >
+                              {pageNum}
+                            </Button>
+                          );
+                        })}
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={validPage === totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                      >
+                        Next
+                        <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </TabsContent>
 

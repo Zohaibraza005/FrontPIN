@@ -316,10 +316,46 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
   }
 }
 
+/**
+ * Fetches all enrolled users from a Hikvision terminal via ISAPI
+ */
+async function fetchHikvisionUsers(device) {
+  if (!device || !device.ipAddress) return [];
+  const payload = {
+    UserInfoSearchCond: {
+      searchID: "1",
+      searchResultPosition: 0,
+      maxResults: 500,
+    },
+  };
+
+  try {
+    const res = await sendHikvisionDigest(
+      device.ipAddress,
+      device.port || 80,
+      device.username || "admin",
+      device.password || "",
+      "POST",
+      "/ISAPI/AccessControl/UserInfo/Search?format=json",
+      payload
+    );
+
+    if (res && res.status === 200 && res.body) {
+      const data = JSON.parse(res.body);
+      return data?.UserInfoSearch?.UserInfo || [];
+    }
+  } catch (error) {
+    console.error(`[Hikvision Fetch Error] ${device.ipAddress}:`, error.message);
+  }
+  return [];
+}
+
 module.exports = {
   parseHikvisionEvent,
   pushUserToHikvision,
   startHikvisionStream,
   initHikvisionStreams,
+  fetchHikvisionUsers,
 };
+
 

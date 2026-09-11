@@ -753,7 +753,34 @@ export const employeeAPI = {
       body: data,
     });
   },
+  importSupervisors: async (fileOrSupervisors: FormData | { supervisors: string[] }) => {
+    if (fileOrSupervisors instanceof FormData) {
+      return apiCall('/employees/import-supervisors', {
+        method: 'POST',
+        body: fileOrSupervisors,
+      });
+    } else {
+      return apiCall('/employees/import-supervisors', {
+        method: 'POST',
+        body: JSON.stringify(fileOrSupervisors),
+      });
+    }
+  },
+  importEmployees: async (fileOrData: FormData | { employees?: string[]; role?: string }) => {
+    if (fileOrData instanceof FormData) {
+      return apiCall('/employees/import-employees', {
+        method: 'POST',
+        body: fileOrData,
+      });
+    } else {
+      return apiCall('/employees/import-employees', {
+        method: 'POST',
+        body: JSON.stringify(fileOrData),
+      });
+    }
+  },
 };
+
 
 
 // Invoice API

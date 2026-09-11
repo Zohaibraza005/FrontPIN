@@ -950,3 +950,333 @@ exports.addIncrement = async (req, res) => {
     });
   }
 };
+
+/**
+ * Bulk Import Employees / Supervisors via Excel file / CSV / JSON list
+ */
+exports.importSupervisors = async (req, res) => {
+  return exports.importEmployees(req, res);
+};
+
+exports.importEmployees = async (req, res) => {
+  try {
+    const orgId = req.user.orgId;
+    const { pushUserToHikvision, fetchHikvisionUsers } = require("../devices/hikvision.service");
+    const ExcelJS = require("exceljs");
+    const fs = require("fs");
+
+    // Target role (default USER, or SUPERVISOR if passed in body)
+    const targetRole = (req.body.role && ["ADMIN", "SUPERVISOR", "USER"].includes(String(req.body.role).toUpperCase()))
+      ? String(req.body.role).toUpperCase()
+      : (req.path.includes("supervisor") ? "SUPERVISOR" : "USER");
+
+    let employeeList = [];
+
+    const isHeaderKeyword = (str) => {
+      const s = String(str).toLowerCase().trim();
+      return (
+        s.includes("sup name") ||
+        s.includes("supervisor") ||
+        s.includes("emp name") ||
+        s.includes("employee name") ||
+        s.includes("full name") ||
+        s.includes("staff name") ||
+        s === "employee" ||
+        s === "name" ||
+        s === "users" ||
+        s === "user" ||
+        s === "sn" ||
+        s === "sr" ||
+        s === "id" ||
+        s === "no"
+      );
+    };
+
+    // 1️⃣ Check if Excel or CSV file was uploaded
+    if (req.file) {
+      const filePath = req.file.path;
+      const fileBuffer = req.file.buffer;
+
+      try {
+        const workbook = new ExcelJS.Workbook();
+
+        if (fileBuffer) {
+          await workbook.xlsx.load(fileBuffer);
+        } else if (filePath && fs.existsSync(filePath)) {
+          try {
+            await workbook.xlsx.readFile(filePath);
+          } catch (xlsxErr) {
+            try {
+              await workbook.csv.readFile(filePath);
+            } catch (csvErr) {
+              const text = fs.readFileSync(filePath, "utf8");
+              text.split(/\r?\n/).forEach((line) => {
+                const clean = line.replace(/["';,]/g, " ").trim();
+                if (clean && clean.length > 2 && !isHeaderKeyword(clean)) {
+                  employeeList.push(clean);
+                }
+              });
+            }
+          }
+        }
+
+        if (workbook.worksheets && workbook.worksheets.length > 0) {
+          workbook.worksheets.forEach((worksheet) => {
+            let targetColIndex = null;
+
+            // Step 1: Search for header row containing Name / Employee / Supervisor
+            worksheet.eachRow((row) => {
+              if (targetColIndex !== null) return;
+              row.values.forEach((val, colIdx) => {
+                if (!val) return;
+                const str = String(typeof val === "object" ? val.result || val.text || val.value || "" : val).toLowerCase().trim();
+                if (
+                  str.includes("sup name") ||
+                  str.includes("supervisor") ||
+                  str.includes("emp name") ||
+                  str.includes("employee name") ||
+                  str.includes("full name") ||
+                  str.includes("staff name") ||
+                  str === "name" ||
+                  str === "employee"
+                ) {
+                  targetColIndex = colIdx;
+                }
+              });
+            });
+
+            // Step 2: Read values from target column (or all cells if no column matched)
+            worksheet.eachRow((row) => {
+              if (targetColIndex !== null) {
+                const cellVal = row.getCell(targetColIndex).value;
+                if (!cellVal) return;
+                let str = String(typeof cellVal === "object" ? cellVal.result || cellVal.text || cellVal.value || "" : cellVal).trim();
+                if (str && str.length > 2 && !isHeaderKeyword(str)) {
+                  employeeList.push(str);
+                }
+              } else {
+                row.values.forEach((val) => {
+                  if (!val) return;
+                  let str = String(typeof val === "object" ? val.result || val.text || val.value || "" : val).trim();
+                  // Only accept valid human names (avoid dates, numbers, shifts)
+                  if (
+                    str &&
+                    str.length > 2 &&
+                    /^[A-Za-z\s\.\'-]+$/.test(str) &&
+                    !isHeaderKeyword(str)
+                  ) {
+                    employeeList.push(str);
+                  }
+                });
+              }
+            });
+          });
+        }
+
+      } catch (fileErr) {
+        console.error("Error reading employee Excel file:", fileErr);
+      } finally {
+        if (filePath && fs.existsSync(filePath)) {
+          try { fs.unlinkSync(filePath); } catch (e) {}
+        }
+      }
+    }
+
+    // 2️⃣ Check if names array was passed in JSON body
+    const rawInput = req.body.employees || req.body.supervisors || req.body.names;
+    if (rawInput) {
+      const rawList = Array.isArray(rawInput)
+        ? rawInput
+        : typeof rawInput === "string"
+        ? rawInput.split(/\n|,/)
+        : [];
+
+      rawList.forEach((name) => {
+        const str = String(name).trim();
+        if (str && str.length > 2 && !isHeaderKeyword(str)) {
+          employeeList.push(str);
+        }
+      });
+    }
+
+    // Deduplicate employee list
+    employeeList = Array.from(new Set(employeeList));
+
+    if (employeeList.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid employee names found to import.",
+      });
+    }
+
+    // Find default company & department for this org
+    const defaultCompany = await prisma.company.findFirst({
+      where: { organizationId: orgId, deletedAt: null },
+    });
+    const defaultDepartment = await prisma.department.findFirst({
+      where: { organizationId: orgId, deletedAt: null },
+    });
+
+    if (!defaultCompany) {
+      return res.status(400).json({
+        success: false,
+        message: "No active company found in organization. Please create a company first.",
+      });
+    }
+
+    // Find active Hikvision devices and fetch current machine users for ID matching
+    const activeHikvisionDevices = await prisma.biometricDevice.findMany({
+      where: { brand: "HIKVISION", deletedAt: null },
+    });
+
+    let machineUserList = [];
+    for (const dev of activeHikvisionDevices) {
+      const mUsers = await fetchHikvisionUsers(dev);
+      machineUserList = machineUserList.concat(mUsers);
+    }
+    console.log(`[Import Employees] Fetched ${machineUserList.length} user(s) from Hikvision machine for real-time matching.`);
+
+    // Hash default password
+    const hashedPassword = await bcrypt.hash("123456", 10);
+
+    let createdCount = 0;
+    let skippedCount = 0;
+    const createdEmployees = [];
+
+    // Find existing employees in DB for strict deduplication
+    const existingEmployees = await prisma.employee.findMany({
+      where: { organizationId: orgId },
+      select: { username: true, email: true, employeeId: true, biometricId: true, firstName: true, lastName: true },
+    });
+
+    let lastNum = 100;
+    existingEmployees.forEach((e) => {
+      const num = parseInt(e.biometricId || e.employeeId);
+      if (!isNaN(num) && num > lastNum) lastNum = num;
+    });
+
+    for (const fullName of employeeList) {
+      const cleanFull = fullName.trim();
+      const parts = cleanFull.split(/\s+/);
+      const firstName = parts[0] || cleanFull;
+      const lastName = parts.slice(1).join(" ") || "";
+
+      const cleanFirst = firstName.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+      // 🔴 Strict Deduplication: Check if employee exact full name already exists in Frontpin DB
+      const isDuplicate = existingEmployees.some((e) => {
+        const existingFull = `${e.firstName || ''} ${e.lastName || ''}`.trim().toLowerCase();
+        return existingFull === cleanFull.toLowerCase();
+      });
+
+      if (isDuplicate) {
+        skippedCount++;
+        continue;
+      }
+
+      // 🔍 Real-Time Machine Matching: Check if user already exists on physical Hikvision machine
+      const matchedMachineUser = machineUserList.find((u) => {
+        const mName = (u.name || "").trim().toLowerCase();
+        return mName === cleanFull.toLowerCase() || (mName.length > 3 && mName === firstName.toLowerCase());
+      });
+
+      let empCode = "";
+      let isAlreadyOnMachine = false;
+
+      if (matchedMachineUser && matchedMachineUser.employeeNo) {
+        empCode = String(matchedMachineUser.employeeNo).trim();
+        isAlreadyOnMachine = true;
+        console.log(`[Machine Match Success] Employee ${cleanFull} matched existing Machine Biometric ID: ${empCode}`);
+      } else {
+        lastNum++;
+        empCode = String(lastNum).padStart(4, "0");
+      }
+
+      // 📧 Email format: name480@gmail.com (e.g. faraz480@gmail.com)
+      let email = `${cleanFirst}480@gmail.com`;
+      let emailCounter = 1;
+      while (existingEmployees.some((e) => e.email?.toLowerCase() === email.toLowerCase())) {
+        email = `${cleanFirst}${emailCounter}480@gmail.com`;
+        emailCounter++;
+      }
+
+      // 🔑 Username format: name480 (e.g. faraz480)
+      let username = `${cleanFirst}480`;
+      let userCounter = 1;
+      while (existingEmployees.some((e) => e.username?.toLowerCase() === username.toLowerCase())) {
+        username = `${cleanFirst}${userCounter}480`;
+        userCounter++;
+      }
+
+      const newEmp = await prisma.employee.create({
+        data: {
+          firstName,
+          lastName,
+          username,
+          email,
+          password: hashedPassword, // Hashed '123456'
+          pin: "1234",               // PIN '1234'
+          employeeId: empCode,
+          biometricId: empCode,
+          canLogin: true,
+          role: targetRole,
+          organizationId: orgId,
+          companyId: defaultCompany.id,
+          departmentId: defaultDepartment ? defaultDepartment.id : null,
+          jobInfo: {
+            create: {
+              employmentStatus: "Full-Time",
+              designation: targetRole === "SUPERVISOR" ? "Supervisor" : "Employee",
+              hiringDate: new Date(),
+              workMode: "On-Site",
+            },
+          },
+          payroll: {
+            create: {
+              payoutType: "monthly",
+              rate: 0,
+              currency: "PKR",
+              cycleDate: 1,
+            },
+          },
+        },
+        include: {
+          company: true,
+          department: true,
+          jobInfo: true,
+        },
+      });
+
+      createdCount++;
+      createdEmployees.push(newEmp);
+      existingEmployees.push({ username, email, firstName, lastName, biometricId: empCode, employeeId: empCode });
+
+      // Auto-push to active Hikvision machines ONLY IF NOT ALREADY ON MACHINE
+      if (!isAlreadyOnMachine) {
+        for (const dev of activeHikvisionDevices) {
+          pushUserToHikvision(dev, {
+            biometricId: empCode,
+            name: `${firstName} ${lastName}`.trim(),
+          }).catch((e) => console.error("Auto Push Error during import:", e.message));
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Imported ${createdCount} employee(s) successfully! (${skippedCount} existing skipped)`,
+      createdCount,
+      skippedCount,
+      totalProcessed: employeeList.length,
+      data: createdEmployees,
+    });
+  } catch (error) {
+    console.error("Import Employees Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to import employees",
+      error: error.message,
+    });
+  }
+};
+

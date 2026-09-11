@@ -28,8 +28,11 @@ import {
   Calendar,
   X,
   RotateCcw,
-  Cpu
+  Cpu,
+  FileSpreadsheet,
+  Upload
 } from 'lucide-react';
+
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
@@ -82,6 +85,13 @@ export const Employees: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPushingMachine, setIsPushingMachine] = useState(false);
 
+  // Employee Import state
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [pastedNames, setPastedNames] = useState<string>('');
+  const [importRole, setImportRole] = useState<'USER' | 'SUPERVISOR'>('USER');
+  const [isImportingEmployees, setIsImportingEmployees] = useState(false);
+
   const handlePushToMachine = async (employeeId?: number) => {
     try {
       setIsPushingMachine(true);
@@ -98,6 +108,50 @@ export const Employees: React.FC = () => {
       setIsPushingMachine(false);
     }
   };
+
+  const handleImportEmployees = async () => {
+    if (!selectedFile && !pastedNames.trim()) {
+      toast.error('Please select an Excel/CSV file or paste employee names');
+      return;
+    }
+
+    try {
+      setIsImportingEmployees(true);
+      let res: any;
+
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('role', importRole);
+        if (pastedNames.trim()) {
+          formData.append('employees', pastedNames);
+        }
+        res = await employeeAPI.importEmployees(formData);
+      } else {
+        const namesArray = pastedNames
+          .split(/\n|,/)
+          .map((n) => n.trim())
+          .filter((n) => n.length > 2);
+        res = await employeeAPI.importEmployees({ employees: namesArray, role: importRole });
+      }
+
+      if (res && res.success) {
+        toast.success(res.message || 'Employees imported successfully!');
+        setImportModalOpen(false);
+        setSelectedFile(null);
+        setPastedNames('');
+        fetchEmployees();
+      } else {
+        toast.error(res?.message || 'Failed to import employees');
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Failed to import employees');
+    } finally {
+      setIsImportingEmployees(false);
+    }
+  };
+
 
   useEffect(() => {
 
@@ -375,7 +429,18 @@ export const Employees: React.FC = () => {
             <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
           </Button>
 
+          <Button
+            variant="outline"
+            onClick={() => setImportModalOpen(true)}
+            className="w-full sm:w-auto border-indigo-200 text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 hover:text-indigo-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
+            title="Import Employees / Supervisors from Excel / CSV file"
+          >
+            <FileSpreadsheet className="size-4 text-indigo-600" />
+            <span>Import Employees</span>
+          </Button>
+
           <Link to={'/employees/add'} className="flex-1 sm:flex-initial">
+
             <Button className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white font-medium shadow-xs rounded-xl h-10 px-4">
               <Plus className="mr-2 size-4" />
               Add Employee
@@ -977,6 +1042,121 @@ export const Employees: React.FC = () => {
               >
                 {isDeleting ? 'Deleting...' : 'Confirm Delete'}
               </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Import Employees Dialog ────────────────────────────── */}
+      <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
+        <DialogContent className="sm:max-w-lg rounded-2xl p-6 border-gray-200 shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-indigo-900">
+              <div className="size-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                <FileSpreadsheet className="size-4" />
+              </div>
+              Import Employees via Excel / CSV
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-gray-500">
+              Select your Excel sheet (<code className="bg-gray-100 px-1 py-0.5 rounded text-gray-700">.xlsx, .csv</code>) containing employee names. New employees will be created in system and auto-matched with their real biometric IDs on the Hikvision terminal!
+            </p>
+
+            {/* Role Selection Option */}
+            <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+              <span className="text-xs font-semibold text-gray-700">Assign Role to Imported Users:</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setImportRole('USER')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${importRole === 'USER' ? 'bg-sky-600 text-white shadow-2xs' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
+                >
+                  Employee (User)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportRole('SUPERVISOR')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${importRole === 'SUPERVISOR' ? 'bg-indigo-600 text-white shadow-2xs' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
+                >
+                  Supervisor
+                </button>
+              </div>
+            </div>
+
+            {/* File Upload Drop Zone */}
+            <div className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 hover:bg-indigo-50/60 transition-colors p-5 rounded-2xl text-center space-y-2">
+              <input
+                type="file"
+                id="employee-file-upload"
+                accept=".xlsx, .xls, .csv"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    setSelectedFile(e.target.files[0]);
+                  }
+                }}
+              />
+              <label htmlFor="employee-file-upload" className="cursor-pointer space-y-1 block">
+                <Upload className="size-8 text-indigo-500 mx-auto" />
+                <span className="text-xs font-semibold text-indigo-700 block">
+                  {selectedFile ? selectedFile.name : 'Click to Browse or Select Excel File'}
+                </span>
+                <span className="text-[11px] text-gray-400 block">
+                  Supports Excel (.xlsx, .xls) and CSV (.csv) files
+                </span>
+              </label>
+              {selectedFile && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedFile(null)}
+                  className="text-xs text-red-500 hover:text-red-700 underline font-medium pt-1 block mx-auto"
+                >
+                  Remove selected file
+                </button>
+              )}
+            </div>
+
+            {/* Optional Paste Text Area */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-700">
+                Or Paste Employee Names (One per line)
+              </Label>
+              <textarea
+                rows={4}
+                placeholder="Faraz Farooqi&#10;Waleed Ali Naweed&#10;Mujahid Rafiq&#10;Zargham Irtiza"
+                value={pastedNames}
+                onChange={(e) => setPastedNames(e.target.value)}
+                className="w-full text-xs font-mono p-3 bg-white rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-gray-500">
+                Target Role: <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px]">{importRole}</Badge>
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setImportModalOpen(false);
+                    setSelectedFile(null);
+                    setPastedNames('');
+                  }}
+                  className="rounded-xl border-gray-200 text-xs font-medium"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleImportEmployees}
+                  disabled={isImportingEmployees || (!selectedFile && !pastedNames.trim())}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold px-4 flex items-center gap-1.5"
+                >
+                  <FileSpreadsheet className="size-3.5" />
+                  {isImportingEmployees ? 'Importing...' : 'Import Employees'}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

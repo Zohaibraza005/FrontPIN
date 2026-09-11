@@ -23,8 +23,26 @@ router.get(
     protect,
     controller.getOrganizationProfile
   );
-  router.post(
-    "/register-organization",
-    controller.registerOrganization
-  );
+router.post(
+  "/import-supervisors",
+  protect,
+  upload.single("file"),
+  controller.importSupervisors
+);
+
+router.post(
+  "/import-employees",
+  protect,
+  upload.single("file"),
+  controller.importEmployees
+);
+
+router.post(
+  "/import",
+  protect,
+  upload.single("file"),
+  controller.importEmployees
+);
+
 module.exports = router;
+
