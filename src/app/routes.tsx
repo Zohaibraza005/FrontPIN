@@ -44,6 +44,7 @@ import { Roles } from "./pages/Roles";
 import { Navigate } from "react-router";
 import Locations from "./pages/Locations";
 import AttendanceDashboard from "./pages/AttendanceDashboard";
+import { RouteErrorBoundary } from "./components/ErrorBoundary";
   
 
 export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
@@ -70,6 +71,7 @@ function ProvidersWrapper({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   {
     path: "/login",
+    errorElement: <RouteErrorBoundary />,
     element: (
       <ProvidersWrapper>
         <PublicRoute>
@@ -80,6 +82,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/register",
+    errorElement: <RouteErrorBoundary />,
     element: (
       <ProvidersWrapper>
         <PublicRoute>
@@ -90,6 +93,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/",
+    errorElement: <RouteErrorBoundary />,
     element: <ProvidersWrapper><Layout /></ProvidersWrapper>,
     children: [
       { index: true, Component: Dashboard },

@@ -195,9 +195,15 @@ const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
         <div className="ml-8 mt-1 space-y-1 pb-2">
           {item.children.map((child: any) => {
             const ChildIcon = child.icon;
+            const isExact = location.pathname === child.path;
+            const hasMoreSpecificChild = item.children.some(
+              (other: any) =>
+                other.path !== child.path &&
+                other.path.length > child.path.length &&
+                (location.pathname === other.path || location.pathname.startsWith(other.path + "/"))
+            );
             const childActive =
-              location.pathname === child.path ||
-              (child.path && location.pathname.startsWith(child.path));
+              isExact || (!hasMoreSpecificChild && location.pathname.startsWith(child.path + "/"));
 
             return (
               <Link

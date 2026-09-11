@@ -27,13 +27,15 @@ import {
   XCircle,
   Calendar,
   X,
-  RotateCcw
+  RotateCcw,
+  Cpu
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { deviceService } from '../services/device.service';
 
 export const Employees: React.FC = () => {
   const { user } = useAuth();
@@ -43,6 +45,7 @@ export const Employees: React.FC = () => {
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
+
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -77,8 +80,27 @@ export const Employees: React.FC = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [employeeToDelete, setEmployeeToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isPushingMachine, setIsPushingMachine] = useState(false);
+
+  const handlePushToMachine = async (employeeId?: number) => {
+    try {
+      setIsPushingMachine(true);
+      const res = await deviceService.pushUsers(employeeId);
+      if (res && res.success) {
+        toast.success(res.message || 'Pushed employee(s) to biometric machine successfully!');
+      } else {
+        toast.error(res?.message || 'Failed to push employee(s) to machine');
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Failed to push to biometric machine');
+    } finally {
+      setIsPushingMachine(false);
+    }
+  };
 
   useEffect(() => {
+
     fetchEmployees();
     fetchLocations();
     fetchDepartments();
@@ -342,6 +364,17 @@ export const Employees: React.FC = () => {
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
 
+          <Button
+            variant="outline"
+            onClick={() => handlePushToMachine()}
+            disabled={isPushingMachine}
+            className="w-full sm:w-auto border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
+            title="Push all active employees to biometric machines"
+          >
+            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : 'text-sky-600'}`} />
+            <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
+          </Button>
+
           <Link to={'/employees/add'} className="flex-1 sm:flex-initial">
             <Button className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white font-medium shadow-xs rounded-xl h-10 px-4">
               <Plus className="mr-2 size-4" />
@@ -349,6 +382,7 @@ export const Employees: React.FC = () => {
             </Button>
           </Link>
         </div>
+
       </div>
 
       {/* ── Single Line Unified Toolbar & Content Container ────────────────────────────── */}
@@ -633,6 +667,23 @@ export const Employees: React.FC = () => {
                                   </TooltipContent>
                                 </Tooltip>
 
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handlePushToMachine(emp.id)}
+                                      disabled={isPushingMachine}
+                                      className="h-8 w-8 text-gray-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
+                                    >
+                                      <Cpu className="size-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top">
+                                    <p className="text-xs">Push {emp.firstName} to Machine</p>
+                                  </TooltipContent>
+                                </Tooltip>
+
                                 {emp.canLogin && (
                                   <Tooltip>
                                     <TooltipTrigger asChild>
@@ -650,6 +701,7 @@ export const Employees: React.FC = () => {
                                     </TooltipContent>
                                   </Tooltip>
                                 )}
+
 
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -791,12 +843,23 @@ export const Employees: React.FC = () => {
                             </Button>
                           </Link>
 
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePushToMachine(emp.id)}
+                            disabled={isPushingMachine}
+                            className="text-xs text-sky-700 bg-sky-50/60 border-sky-200 hover:bg-sky-100 h-8 rounded-xl"
+                            title={`Push ${emp.firstName} to Machine`}
+                          >
+                            <Cpu className="size-3.5" />
+                          </Button>
+
                           {emp.canLogin && (
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => handleOpenPinModal(emp)}
-                              className="text-xs font-semibold border-gray-200 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 h-8 rounded-xl"
+                              className="text-xs text-amber-700 bg-amber-50/60 border-amber-200 hover:bg-amber-100 h-8 rounded-xl"
                               title="Update PIN"
                             >
                               <Key className="size-3.5" />

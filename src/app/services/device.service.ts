@@ -44,4 +44,12 @@ export const deviceService = {
   syncLogs: async (id: number) => {
     return await apiCall(`/devices/${id}/sync`, { method: "POST" });
   },
+
+  pushUsers: async (employeeId?: number) => {
+    return await apiCall("/devices/push-users", {
+      method: "POST",
+      body: { employeeId } as any,
+    });
+  },
 };
+

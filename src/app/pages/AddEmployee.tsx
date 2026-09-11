@@ -38,7 +38,8 @@ import {
   Check,
   Loader2,
   Upload,
-  GraduationCap
+  GraduationCap,
+  Plus
 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 
@@ -60,8 +61,9 @@ const privilegesList = [
   { id: 'schedule', label: 'Schedule', description: 'Manage work shift schedules' },
 ];
 
-const visibleInputClass = "h-11 px-3.5 bg-white border border-gray-300 rounded-xl text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all w-full";
-const visibleSelectClass = "h-11 px-3.5 bg-white border border-gray-300 rounded-xl text-sm font-medium text-gray-900 shadow-2xs hover:border-gray-400 focus:ring-2 focus:ring-blue-500/20 w-full";
+const fieldBaseClass = "h-11 px-3.5 bg-white border border-gray-300 rounded-xl text-sm font-medium text-gray-900 shadow-2xs transition-all w-full focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20";
+const visibleInputClass = `${fieldBaseClass} placeholder:text-gray-400`;
+const visibleSelectClass = `${fieldBaseClass} hover:border-gray-400 data-[placeholder]:text-gray-400 [&>span]:line-clamp-1`;
 
 export const AddEmployee: React.FC = () => {
   const navigate = useNavigate();
@@ -191,17 +193,32 @@ export const AddEmployee: React.FC = () => {
     if (!roleIdStr || roleIdStr === 'none') {
       setSelectedRole(null);
       setSelectedPrivileges([]);
+      setRole('user');
       return;
     }
     const found = roles.find(r => String(r.id) === roleIdStr);
     setSelectedRole(found || null);
-    if (found && found.privileges) {
-      const privs = typeof found.privileges === 'string' ? JSON.parse(found.privileges) : found.privileges;
-      setSelectedPrivileges(Array.isArray(privs) ? privs : []);
+    if (found) {
+      const lowerName = found.name.toLowerCase();
+      if (lowerName.includes('admin')) {
+        setRole('admin');
+      } else if (lowerName.includes('supervisor')) {
+        setRole('supervisor');
+      } else {
+        setRole('user');
+      }
+
+      if (found.privileges) {
+        const privs = typeof found.privileges === 'string' ? JSON.parse(found.privileges) : found.privileges;
+        setSelectedPrivileges(Array.isArray(privs) ? privs : []);
+      } else {
+        setSelectedPrivileges([]);
+      }
     } else {
       setSelectedPrivileges([]);
     }
   };
+
 
 
   const handleEntityChange = async (val: string) => {
@@ -560,35 +577,63 @@ export const AddEmployee: React.FC = () => {
               </div>
             </div>
 
-            {/* Entity Selection */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-gray-400" />
-                Entity
-              </Label>
-              <Select value={entityId} onValueChange={handleEntityChange}>
-                <SelectTrigger className={visibleSelectClass}>
-                  <SelectValue placeholder="Select entity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None / No Entity</SelectItem>
-                  {entities.map(ent => (
-                    <SelectItem key={ent.id} value={ent.id.toString()}>
-                      {ent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Basic Info Fields */}
+            {/* Unified 4-Column Grid for All Personal & Identity Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Row 1: Entity, Role, Employee ID, Biometric ID */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                  Entity
+                </Label>
+                <Select value={entityId} onValueChange={handleEntityChange}>
+                  <SelectTrigger className={visibleSelectClass}>
+                    <SelectValue placeholder="Select entity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None / No Entity</SelectItem>
+                    {entities.map(ent => (
+                      <SelectItem key={ent.id} value={ent.id.toString()}>
+                        {ent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-gray-400" />
+                  Role <span className="text-red-500">*</span>
+                </Label>
+                <Select value={selectedRoleId} onValueChange={handleRoleSelect}>
+                  <SelectTrigger className={visibleSelectClass}>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-400 text-center italic">
+                        No roles found. Create roles in Role Management first.
+                      </div>
+                    ) : (
+                      roles.map((r) => (
+                        <SelectItem key={r.id} value={r.id.toString()}>
+                          {r.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold text-gray-800">Employee ID (Code)</Label>
+                  <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-gray-400" />
+                    Employee ID (Code)
+                  </Label>
                   {employeeId && (
                     <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                      Auto-generated
+                      Auto
                     </span>
                   )}
                 </div>
@@ -608,7 +653,10 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800">Biometric ID (Device ID)</Label>
+                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-gray-400" />
+                  Biometric ID (Device ID)
+                </Label>
                 <Input
                   placeholder="e.g. 1001"
                   className={visibleInputClass}
@@ -617,8 +665,10 @@ export const AddEmployee: React.FC = () => {
                 />
               </div>
 
+              {/* Row 2: First Name, Last Name, Phone Number, National ID */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800">
+                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-gray-400" />
                   First Name <span className="text-red-500">*</span>
                 </Label>
                 <Input
@@ -630,7 +680,8 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800">
+                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-gray-400" />
                   Last Name <span className="text-red-500">*</span>
                 </Label>
                 <Input
@@ -640,10 +691,7 @@ export const AddEmployee: React.FC = () => {
                   onChange={e => setLastName(e.target.value)}
                 />
               </div>
-            </div>
 
-            {/* Contact & Identity Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-gray-400" />
@@ -669,10 +717,8 @@ export const AddEmployee: React.FC = () => {
                   onChange={e => setNationalId(e.target.value)}
                 />
               </div>
-            </div>
 
-            {/* Personal Demographics & Background */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Row 3: Gender, Age, Marital Status, Religion */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-gray-400" />
@@ -693,6 +739,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-gray-400" />
                   Age
                 </Label>
                 <Input
@@ -708,6 +755,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-gray-400" />
                   Marital Status
                 </Label>
                 <Select value={maritalStatus} onValueChange={setMaritalStatus}>
@@ -725,6 +773,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-gray-400" />
                   Religion
                 </Label>
                 <Select value={religion} onValueChange={setReligion}>
@@ -741,7 +790,8 @@ export const AddEmployee: React.FC = () => {
                 </Select>
               </div>
 
-              <div className="space-y-1.5 sm:col-span-2">
+              {/* Row 4: Qualification (Full Width across all 4 columns) */}
+              <div className="space-y-1.5 col-span-1 sm:col-span-2 lg:col-span-4">
                 <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
                   <GraduationCap className="w-3.5 h-3.5 text-gray-400" />
                   Qualification
@@ -755,45 +805,6 @@ export const AddEmployee: React.FC = () => {
               </div>
             </div>
 
-            {/* User Role Card */}
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold text-gray-800">User Role Level *</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div
-                  onClick={() => handleRoleChange('user')}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-3 ${
-                    role === 'user'
-                      ? 'border-2 border-blue-600 bg-blue-50/50 shadow-xs'
-                      : 'border border-gray-300 bg-white hover:border-gray-400'
-                  }`}
-                >
-                  <div className={`p-2.5 rounded-xl ${role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                    <User className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-900">User Employee</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Standard staff with access to assigned tasks and personal attendance.</p>
-                  </div>
-                </div>
-
-                <div
-                  onClick={() => handleRoleChange('supervisor')}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-3 ${
-                    role === 'supervisor'
-                      ? 'border-2 border-indigo-600 bg-indigo-50/50 shadow-xs'
-                      : 'border border-gray-300 bg-white hover:border-gray-400'
-                  }`}
-                >
-                  <div className={`p-2.5 rounded-xl ${role === 'supervisor' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                    <UserCheck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-900">Supervisor</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Can review team attendance, approve leaves & manage team workflows.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
 
             {/* Login Credentials Switch Card */}
             <div className="bg-white border border-gray-300 p-5 rounded-2xl space-y-4 shadow-2xs">
@@ -1390,7 +1401,7 @@ export const AddEmployee: React.FC = () => {
                           {selectedPrivileges.length > 0 ? (
                             <div className="flex flex-wrap gap-1.5">
                               {selectedPrivileges
-                                .filter((p: any) => p.canRead || p.canCreate || p.canUpdate || p.canDelete)
+                                .filter((p: any) => typeof p === 'string' || p.canRead || p.canCreate || p.canUpdate || p.canDelete)
                                 .map((p) => {
                                   const pId = typeof p === "object" ? p.module : p;
                                   return (

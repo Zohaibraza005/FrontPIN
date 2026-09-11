@@ -330,6 +330,73 @@ exports.syncDeviceLogs = async (req, res) => {
   }
 };
 
+/**
+ * Push all active Employees (or a single employee) to active Hikvision devices
+ */
+exports.pushUsersToDevices = async (req, res) => {
+  try {
+    const { employeeId } = req.body;
+    const { pushUserToHikvision } = require("./hikvision.service");
+
+    const activeDevices = await prisma.biometricDevice.findMany({
+      where: { brand: "HIKVISION", deletedAt: null },
+    });
+
+    if (activeDevices.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No active Hikvision biometric devices found in system.",
+      });
+    }
+
+    let employees = [];
+    if (employeeId) {
+      const emp = await prisma.employee.findUnique({
+        where: { id: parseInt(employeeId) },
+      });
+      if (emp) employees = [emp];
+    } else {
+      employees = await prisma.employee.findMany({
+        where: { deletedAt: null, role: { not: "ADMIN" } },
+      });
+    }
+
+
+    if (employees.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No employees found to push to machine.",
+      });
+    }
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const emp of employees) {
+      const bioId = emp.biometricId || emp.employeeId || String(emp.id);
+      const name = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || `User ${bioId}`;
+
+      for (const device of activeDevices) {
+        const pushed = await pushUserToHikvision(device, {
+          biometricId: bioId,
+          name: name,
+        });
+        if (pushed) successCount++;
+        else failedCount++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Pushed ${employees.length} employee(s) to ${activeDevices.length} biometric device(s) successfully!`,
+      details: { successCount, failedCount, totalEmployees: employees.length },
+    });
+  } catch (error) {
+    console.error("Error in pushUsersToDevices:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   processBiometricPunch,
   handleHikvisionEvent: exports.handleHikvisionEvent,
@@ -339,4 +406,6 @@ module.exports = {
   deleteDevice: exports.deleteDevice,
   testDeviceConnection: exports.testDeviceConnection,
   syncDeviceLogs: exports.syncDeviceLogs,
+  pushUsersToDevices: exports.pushUsersToDevices,
 };
+
