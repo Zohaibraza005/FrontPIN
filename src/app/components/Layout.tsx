@@ -88,15 +88,15 @@ const menuItems = [
   {
     icon: Users,
     label: 'Employee',
-    roles: ['ADMIN'],
+    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
     module: 'EMPLOYEE',
     children: [
       { label: 'All Employees', path: '/employees' },
-      { label: 'Add Employee', path: '/employees/add' },
-      { label: 'Roles', path: '/roles' },
+      { label: 'Add Employee', path: '/employees/add', canCreateModule: 'EMPLOYEE' },
+      { label: 'Roles', path: '/roles', roles: ['ADMIN'] },
     ],
   },
-  { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN'] },
+  { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
   // { icon: MapPin, label: 'Locations', path: '/locations', roles: ['ADMIN'] },
   // { icon: MapPin, label: 'Departments', path: '/departments', roles: ['ADMIN'] },
   // { icon: UserPlus, label: 'Recruitment', path: '/jobs', roles: ['ADMIN'] },
@@ -104,12 +104,13 @@ const menuItems = [
   {
     icon: Cog,
     label: 'Organization',
-    roles: ['ADMIN'],
+    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
+    module: 'ORGANIZATION',
     children: [
-      { label: 'Settings', path: '/organization', },
-      { label: 'Departments', path: '/departments', },
-      { label: 'Locations', path: '/locations', },
-      { label: 'Entities', path: '/entities', },
+      { label: 'Settings', path: '/organization', roles: ['ADMIN'] },
+      { label: 'Departments', path: '/departments' },
+      { label: 'Locations', path: '/locations' },
+      { label: 'Entities', path: '/entities' },
       // you can add more later: Settings, Billing, Branches, etc.
     ]
   },
@@ -807,7 +808,7 @@ export const Layout: React.FC = () => {
 
   const filteredMenuItems = menuItems.filter(item => {
     // 1. Check if the user's role is allowed for this item
-    if (!item.roles.includes(user.role)) {
+    if (item.roles && !item.roles.includes(user.role)) {
       return false;
     }
 
@@ -819,17 +820,31 @@ export const Layout: React.FC = () => {
     // 3. Check specific module privileges if defined
     if (item.module) {
       const privileges = user.privileges || [];
-      const priv = privileges.find(p => p.module === item.module);
+      const priv = privileges.find((p: any) => p.module === item.module);
       if (priv) {
-        return priv.canRead;
+        return Boolean(priv.canRead);
       }
       
       // Default fallback when privilege record is missing in DB/session
-      const defaultVisibleModules = ['ATTENDANCE', 'TASK', 'LEAVE', 'OVERTIME', 'SCHEDULE'];
+      const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE'];
       return defaultVisibleModules.includes(item.module);
     }
 
     return true;
+  }).map(item => {
+    if (item.children) {
+      const filteredChildren = item.children.filter((child: any) => {
+        if (user.role === 'ADMIN') return true;
+        if (child.roles && !child.roles.includes(user.role)) return false;
+        if (child.canCreateModule) {
+          const priv = (user.privileges || []).find((p: any) => p.module === child.canCreateModule);
+          if (priv && !priv.canCreate) return false;
+        }
+        return true;
+      });
+      return { ...item, children: filteredChildren };
+    }
+    return item;
   });
 
   return (

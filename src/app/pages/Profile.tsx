@@ -762,9 +762,10 @@ export const Profile: React.FC = () => {
                 OVERTIME: "Overtime",
                 SCHEDULE: "Schedule",
                 REPORT: "Reports",
-                TASK: "Tasks",
-                PROJECT: "Projects",
                 EMPLOYEE: "Employee",
+                PAYROLL: "Payroll",
+                ORGANIZATION: "Organization",
+                ENABLE_GPS: "GPS Tracking",
               };
 
               // Fallback list of standard user modules if no custom DB privileges

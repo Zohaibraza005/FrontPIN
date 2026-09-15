@@ -51,14 +51,13 @@ const cycleDates = Array.from({ length: 31 }, (_, i) => i + 1);
 const privilegesList = [
   { id: 'employee', label: 'Employee', description: 'Manage employee profiles and status' },
   { id: 'attendance', label: 'Attendance', description: 'Clock in, check activities & time logs' },
-  { id: 'leave', label: 'Leave', description: 'Request & approve leave applications' },
-  { id: 'project', label: 'Project', description: 'Access and assign project tasks' },
-  { id: 'task', label: 'Task', description: 'Create, update & complete assigned tasks' },
-  { id: 'invoice', label: 'Invoice', description: 'Create and view client invoices' },
-  { id: 'report', label: 'Report (Own Team)', description: 'Export performance & summary reports' },
-  { id: 'overtime', label: 'Overtime', description: 'Log & manage overtime work hours' },
-  { id: 'enable_gps', label: 'GPS Tracking', description: 'Enforce geofencing & location check' },
   { id: 'schedule', label: 'Schedule', description: 'Manage work shift schedules' },
+  { id: 'leave', label: 'Leave', description: 'Request & approve leave applications' },
+  { id: 'overtime', label: 'Overtime', description: 'Log & manage overtime work hours' },
+  { id: 'payroll', label: 'Payroll', description: 'Manage salary, payslips, deductions and compensation' },
+  { id: 'report', label: 'Report (Own Team)', description: 'Export performance & summary reports' },
+  { id: 'organization', label: 'Organization', description: 'Manage settings, departments, locations and entities' },
+  { id: 'enable_gps', label: 'GPS Tracking', description: 'Enforce geofencing & location check' },
 ];
 
 const fieldBaseClass = "h-11 px-3.5 bg-white border border-gray-300 rounded-xl text-sm font-medium text-gray-900 shadow-2xs transition-all w-full focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20";
@@ -179,6 +178,21 @@ export const AddEmployee: React.FC = () => {
   };
 
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [isGeneratingBiometricId, setIsGeneratingBiometricId] = useState(false);
+
+  const fetchNextBiometricId = async () => {
+    try {
+      setIsGeneratingBiometricId(true);
+      const res = await employeeAPI.getNextBiometricId();
+      if (res?.data?.nextBiometricId) {
+        setBiometricId(res.data.nextBiometricId);
+      }
+    } catch (error) {
+      console.error("Failed to fetch next biometric ID:", error);
+    } finally {
+      setIsGeneratingBiometricId(false);
+    }
+  };
 
   useEffect(() => {
     fetchLocations();
@@ -186,6 +200,7 @@ export const AddEmployee: React.FC = () => {
     fetchSupervisors();
     fetchEntities();
     fetchRoles();
+    fetchNextBiometricId();
   }, []);
 
   const handleRoleSelect = (roleIdStr: string) => {
@@ -251,7 +266,7 @@ export const AddEmployee: React.FC = () => {
             prefix = selected.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 3).toUpperCase();
           }
         }
-        setEmployeeId(`${prefix}001`);
+        setEmployeeId(`${prefix}-001`);
       }
     } finally {
       setIsGeneratingCode(false);
@@ -308,6 +323,7 @@ export const AddEmployee: React.FC = () => {
     setJoiningDate('');
     setCanLogin(true);
     setFieldErrors({});
+    fetchNextBiometricId();
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -653,16 +669,30 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-gray-400" />
-                  Biometric ID (Device ID)
-                </Label>
-                <Input
-                  placeholder="e.g. 1001"
-                  className={visibleInputClass}
-                  value={biometricId}
-                  onChange={e => setBiometricId(e.target.value)}
-                />
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-gray-400" />
+                    Biometric ID (Device ID)
+                  </Label>
+                  {biometricId && (
+                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                      Auto
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <Input
+                    placeholder={isGeneratingBiometricId ? "Generating ID..." : "e.g. 1001"}
+                    className={`${visibleInputClass} font-mono font-semibold text-gray-800`}
+                    value={biometricId}
+                    onChange={e => setBiometricId(e.target.value)}
+                  />
+                  {isGeneratingBiometricId && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Row 2: First Name, Last Name, Phone Number, National ID */}

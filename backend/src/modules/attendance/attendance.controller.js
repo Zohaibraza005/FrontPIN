@@ -385,6 +385,18 @@ exports.clockOut = async (req, res) => {
     }
 
     const now = new Date(); // Always UTC
+    const inTime = attendance.checkInTime ? new Date(attendance.checkInTime) : now;
+    const totalWorkedMinutes = Math.max(0, Math.floor((now - inTime) / 60000));
+
+    let scheduledDurationMinutes = 540;
+    if (attendance.shiftStartTime && attendance.shiftEndTime) {
+      const [sh, sm] = attendance.shiftStartTime.split(":").map(Number);
+      const [eh, em] = attendance.shiftEndTime.split(":").map(Number);
+      const sMins = (sh || 9) * 60 + (sm || 0);
+      const eMins = (eh || 18) * 60 + (em || 0);
+      if (eMins > sMins) scheduledDurationMinutes = eMins - sMins;
+    }
+    const overtimeMinutes = totalWorkedMinutes > scheduledDurationMinutes ? totalWorkedMinutes - scheduledDurationMinutes : 0;
 
     await prisma.attendance.update({
       where: { id: attendance.id },
@@ -394,6 +406,8 @@ exports.clockOut = async (req, res) => {
         checkOutMethod: "PIN",
         checkOutLat: lat,
         checkOutLong: lng,
+        totalWorkedMinutes,
+        overtimeMinutes,
         summary,
       },
     });
@@ -920,8 +934,7 @@ exports.getAttendanceReport = async (req, res) => {
             OR: [
               { date: { gte: queryStartDate, lte: queryEndDate } },
               { checkInTime: { gte: queryStartDate, lte: queryEndDate } },
-              { checkOutTime: { gte: queryStartDate, lte: queryEndDate } },
-              { checkOutTime: null, checkInTime: { not: null } }
+              { checkOutTime: { gte: queryStartDate, lte: queryEndDate } }
             ],
             deletedAt: null
           },
@@ -1031,17 +1044,7 @@ exports.getAttendanceReport = async (req, res) => {
             try { keys.add(moment(att.checkOutTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
           }
         }
-        // If actively clocked in (checkInTime present and checkOutTime is null within last 36 hours)
-        if (att.checkInTime && !att.checkOutTime) {
-          const diffHours = moment().diff(moment(att.checkInTime), "hours");
-          if (diffHours < 36) {
-            keys.add(moment().format("YYYY-MM-DD"));
-            keys.add(moment.utc().format("YYYY-MM-DD"));
-            if (emp.company?.timezone) {
-              try { keys.add(moment().tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
-            }
-          }
-        }
+
         keys.forEach(k => {
           attendanceMap[k] = att;
         });
@@ -1141,20 +1144,25 @@ exports.getAttendanceReport = async (req, res) => {
           }
         } else if (existing.checkInTime && !existing.checkOutTime) {
           const inT = new Date(existing.checkInTime).getTime();
-          const totalMinutes = (now.getTime() - inT) / 1000 / 60;
-          totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
-        } else if ((existing.status === "PRESENT" || existing.status === "LATE") && (!totalWorkedMinutes || totalWorkedMinutes === 0)) {
+          const diffHours = (now.getTime() - inT) / 1000 / 3600;
+          if (diffHours >= 15) {
+            totalWorkedMinutes = 15 * 60;
+          } else {
+            const totalMinutes = (now.getTime() - inT) / 1000 / 60;
+            totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
+          }
+        } else if (!existing.checkInTime && (existing.status === "PRESENT" || existing.status === "LATE") && (!totalWorkedMinutes || totalWorkedMinutes === 0)) {
           const activeSched = emp.Schedule?.find(s => !s.deletedAt);
           const sTime = activeSched?.startTime || "09:00";
-          const eTime = activeSched?.endTime || "17:00";
+          const eTime = activeSched?.endTime || "18:00";
           const [sh, sm] = sTime.split(":").map(Number);
           const [eh, em] = eTime.split(":").map(Number);
           const startMins = (sh || 9) * 60 + (sm || 0);
-          const endMins = (eh || 17) * 60 + (em || 0);
+          const endMins = (eh || 18) * 60 + (em || 0);
           if (endMins > startMins) {
             totalWorkedMinutes = Math.max(endMins - startMins - totalBreakMinutes, 0);
           } else {
-            totalWorkedMinutes = 480;
+            totalWorkedMinutes = 540;
           }
         }
 
@@ -1164,7 +1172,22 @@ exports.getAttendanceReport = async (req, res) => {
               .map(log => log.title)
           : [];
 
-        const finalOtMinutes = approvedOtMinutes || (existing.overtimeMinutes || 0);
+        // Scheduled shift duration
+        const activeSched = emp.Schedule?.find(s => !s.deletedAt);
+        const sTime = activeSched?.startTime || "09:00";
+        const eTime = activeSched?.endTime || "18:00";
+        const [sh, sm] = sTime.split(":").map(Number);
+        const [eh, em] = eTime.split(":").map(Number);
+        const startMins = (sh || 9) * 60 + (sm || 0);
+        const endMins = (eh || 18) * 60 + (em || 0);
+        const scheduledMins = endMins > startMins ? endMins - startMins : 540;
+
+        let calculatedOtMinutes = 0;
+        if (totalWorkedMinutes > scheduledMins) {
+          calculatedOtMinutes = totalWorkedMinutes - scheduledMins;
+        }
+
+        const finalOtMinutes = approvedOtMinutes || existing.overtimeMinutes || calculatedOtMinutes;
         const finalOtHours = approvedOtHours || (finalOtMinutes / 60);
 
         return {

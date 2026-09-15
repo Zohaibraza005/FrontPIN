@@ -44,3 +44,9 @@ exports.checkIdentifier = asyncHandler(async (req, res) => {
   return ok(res, user, "User found");
 });
 
+exports.getMe = asyncHandler(async (req, res) => {
+  const user = await authService.getMe(req.user.id);
+  return ok(res, { user }, "User profile");
+});
+
+

@@ -17,6 +17,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   hasRole: (roles: string[]) => boolean;
   updateUser: (updatedData: any) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,6 +25,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<any>(getCurrentUser());
   const navigate = useNavigate();
+
+  const refreshUser = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        const res = await authAPI.getMe();
+        if (res?.success && res?.data?.user) {
+          setCurrentUser(res.data.user);
+          setUser(res.data.user);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to refresh user profile:', err);
+    }
+  };
+
+  useEffect(() => {
+    refreshUser();
+  }, []);
 
   const login = async (email: string, password: string) => {
     try {
@@ -58,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return user ? roles.includes(user.role) : false;
   };
 
+
   return (
     <AuthContext.Provider
       value={{
@@ -67,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         hasRole,
         updateUser,
+        refreshUser,
       }}
     >
       {children}

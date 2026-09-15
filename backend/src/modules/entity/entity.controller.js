@@ -139,9 +139,9 @@ exports.getNextEmployeeCode = async (req, res) => {
     }
 
     const nextNum = maxNum + 1;
-    // Format as TR001 (or TR01 if maxNum < 100, standard 3 digits padding: e.g. TR001)
+    // Format as TR-001 or TR-002 with hyphen
     const paddedNum = String(nextNum).padStart(3, "0");
-    const nextCode = `${prefix}${paddedNum}`;
+    const nextCode = `${prefix}-${paddedNum}`;
 
     res.json({
       success: true,

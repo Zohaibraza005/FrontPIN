@@ -63,13 +63,17 @@ export const Reports: React.FC = () => {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [departmentId, setDepartmentId] = useState("all");
-  const getInitialReportLoc = () => localStorage.getItem("selectedLocation") || "all";
+  const getInitialReportLoc = () => {
+    const loc = localStorage.getItem("selectedLocation") || "all";
+    return loc.toLowerCase() === "all" ? "all" : loc;
+  };
   const [locationId, setLocationId] = useState<string>(getInitialReportLoc);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
       const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
-      setLocationId(loc);
+      const normalized = loc.toLowerCase() === "all" ? "all" : loc;
+      setLocationId(normalized);
     };
     window.addEventListener("location-changed", handleLocationEvent);
     return () => {
@@ -137,8 +141,8 @@ export const Reports: React.FC = () => {
   const loadEmployees = async (dept?: string, loc?: string) => {
     const filters: any = {};
   
-    if (dept && dept !== "all") filters.departmentId = dept;
-    if (loc && loc !== "all") filters.companyId = loc;
+    if (dept && dept.toLowerCase() !== "all") filters.departmentId = dept;
+    if (loc && loc.toLowerCase() !== "all") filters.companyId = loc;
   
     const res = await employeeAPI.getEmployees(filters);
     setEmployees(res?.data || []);
@@ -149,41 +153,67 @@ export const Reports: React.FC = () => {
   }, [departmentId, locationId]);
 
   const loadReports = async () => {
-    const { start, end, view } = getDateInterval();
-    const formattedStart = format(start, "yyyy-MM-dd");
-    const formattedEnd = format(end, "yyyy-MM-dd");
+    try {
+      const { start, end, view } = getDateInterval();
+      const formattedStart = format(start, "yyyy-MM-dd");
+      const formattedEnd = format(end, "yyyy-MM-dd");
 
-    const filters: any = {
-      filter: dateRange || "all",
-      startDate: formattedStart,
-      endDate: formattedEnd,
-    };
-  
-    if (departmentId !== "all") filters.departmentId = departmentId;
-    if (locationId !== "all") filters.companyId = locationId;
-    if (employeeId !== "all") filters.employeeId = employeeId;
-  
-    const attendance = await reportsAPI.getAttendanceReport(filters);
-    const performance = await reportsAPI.getPerformanceReport(filters);
-    const tasks = await reportsAPI.getTaskAnalytics(filters);
+      const filters: any = {
+        filter: dateRange || "all",
+        startDate: formattedStart,
+        endDate: formattedEnd,
+      };
 
-    const monthlyReport = await attendanceAPI.getAttendanceReport({
-      view: view,
-      filter: dateRange,
-      date: formattedStart,
-      startDate: formattedStart,
-      endDate: formattedEnd,
-      departmentId: departmentId !== "all" ? departmentId : undefined,
-      companyId: locationId !== "all" ? locationId : undefined,
-      employeeId: employeeId !== "all" ? employeeId : undefined,
-    });
-  
-    setAttendanceTrend(attendance?.trend || []);
-    setAttendanceStats(attendance?.stats || {});
-    setAttendanceRecords(attendance?.records || []);
-    setPerformanceData(performance?.ranking || []);
-    setTaskDistribution(tasks?.distribution || []);
-    setMonthlyReportEmployees(monthlyReport?.employees || []);
+      const isAllDept = !departmentId || departmentId.toLowerCase() === "all";
+      const isAllLoc = !locationId || locationId.toLowerCase() === "all";
+      const isAllEmp = !employeeId || employeeId.toLowerCase() === "all";
+
+      if (!isAllDept) filters.departmentId = departmentId;
+      if (!isAllLoc) filters.companyId = locationId;
+      if (!isAllEmp) filters.employeeId = employeeId;
+
+      const activeDeptId = !isAllDept ? departmentId : undefined;
+      const activeLocId = !isAllLoc ? locationId : undefined;
+      const activeEmpId = !isAllEmp ? employeeId : undefined;
+
+      const [attendanceRes, performanceRes, tasksRes, monthlyReportRes] = await Promise.allSettled([
+        reportsAPI.getAttendanceReport(filters),
+        reportsAPI.getPerformanceReport(filters),
+        reportsAPI.getTaskAnalytics(filters),
+        attendanceAPI.getAttendanceReport({
+          view: view,
+          filter: dateRange,
+          date: formattedStart,
+          startDate: formattedStart,
+          endDate: formattedEnd,
+          departmentId: activeDeptId,
+          companyId: activeLocId,
+          locationId: activeLocId,
+          employeeId: activeEmpId,
+        }),
+      ]);
+
+      if (attendanceRes.status === "fulfilled") {
+        const attendance = attendanceRes.value;
+        setAttendanceTrend(attendance?.trend || []);
+        setAttendanceStats(attendance?.stats || {});
+        setAttendanceRecords(attendance?.records || []);
+      }
+      if (performanceRes.status === "fulfilled") {
+        const performance = performanceRes.value;
+        setPerformanceData(performance?.ranking || []);
+      }
+      if (tasksRes.status === "fulfilled") {
+        const tasks = tasksRes.value;
+        setTaskDistribution(tasks?.distribution || []);
+      }
+      if (monthlyReportRes.status === "fulfilled") {
+        const monthlyReport = monthlyReportRes.value;
+        setMonthlyReportEmployees(monthlyReport?.employees || []);
+      }
+    } catch (err) {
+      console.error("Failed to load reports:", err);
+    }
   };
 
   const exportToCSV = () => {
@@ -403,6 +433,10 @@ export const Reports: React.FC = () => {
       const formattedStart = format(start, "yyyy-MM-dd");
       const formattedEnd = format(end, "yyyy-MM-dd");
 
+      const isAllDept = !departmentId || departmentId.toLowerCase() === "all";
+      const isAllLoc = !locationId || locationId.toLowerCase() === "all";
+      const isAllEmp = !employeeId || employeeId.toLowerCase() === "all";
+
       await attendanceAPI.exportExcel({
         filter: dateRange,
         view: view,
@@ -411,10 +445,10 @@ export const Reports: React.FC = () => {
         endDate: formattedEnd,
         from: formattedStart,
         to: formattedEnd,
-        departmentId: departmentId !== "all" ? departmentId : undefined,
-        companyId: locationId !== "all" ? locationId : undefined,
-        locationId: locationId !== "all" ? locationId : undefined,
-        employeeId: employeeId !== "all" ? employeeId : undefined,
+        departmentId: !isAllDept ? departmentId : undefined,
+        companyId: !isAllLoc ? locationId : undefined,
+        locationId: !isAllLoc ? locationId : undefined,
+        employeeId: !isAllEmp ? employeeId : undefined,
       });
       toast.success("Attendance tracker exported to Excel successfully!", { id: "export-excel" });
     } catch (err: any) {

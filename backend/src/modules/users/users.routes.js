@@ -5,6 +5,7 @@ const { protect } = require("../../middleware/auth");
 const { upload } = require("../../middleware/upload");
 
 router.get("/", protect, controller.getEmployees);
+router.get("/next-biometric-id", protect, controller.getNextBiometricId);
 router.post("/", protect, upload.single("profileImage"), controller.createEmployee);
 router.put("/:id", protect, upload.single("profileImage"), controller.updateEmployee);
 router.put("/:id/pin", protect, controller.setPin);

@@ -226,6 +226,9 @@ export const authAPI = {
   logout: async () => {
     return apiCall('/auth/logout', { method: 'POST' });
   },
+  getMe: async () => {
+    return apiCall('/auth/me');
+  },
   checkIdentifier: async (identifier:string ) => {
     return apiCall('/auth/check-identifier', {method: 'POST', body:JSON.stringify({identifier})});
   },
@@ -736,6 +739,9 @@ export const employeeAPI = {
 
   getSupervisorsByLocation: async (companyId: number) => {
     return apiCall(`/employees/supervisors?companyId=${companyId}`);
+  },
+  getNextBiometricId: async () => {
+    return apiCall("/employees/next-biometric-id");
   },
   deleteEmployee: async (id: number) => {
     return apiCall(`/employees/${id}`, {

@@ -714,8 +714,7 @@ export const Attendance: React.FC = () => {
 
     const targetDateStr = format(selectedDate, "yyyy-MM-dd");
     report.forEach(emp => {
-      const rec = findAttendanceRecord(emp.Attendance, targetDateStr)
-        || (activeTab === "daily" && Array.isArray(emp.Attendance) && emp.Attendance.length === 1 && emp.Attendance[0]?.id ? emp.Attendance[0] : undefined);
+      const rec = findAttendanceRecord(emp.Attendance, targetDateStr);
       const st = rec?.status?.toUpperCase() || "ABSENT";
       const isOff = isScheduleOffDay(emp?.Schedule, selectedDate) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
 
@@ -1208,8 +1207,7 @@ export const Attendance: React.FC = () => {
                   <TableBody>
                     {paginatedDailyReport.map(emp => {
                       const targetDateStr = format(selectedDate, "yyyy-MM-dd");
-                      const record = findAttendanceRecord(emp.Attendance, targetDateStr)
-                        || (activeTab === "daily" && Array.isArray(emp.Attendance) && emp.Attendance.length === 1 && emp.Attendance[0]?.id ? emp.Attendance[0] : undefined);
+                      const record = findAttendanceRecord(emp.Attendance, targetDateStr);
 
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
@@ -1232,12 +1230,23 @@ export const Attendance: React.FC = () => {
                         rawStatus = "OFF_DAY";
                       }
 
+                      // Compute real-time elapsed minutes if actively on shift today
+                      let workedMins = record?.totalWorkedMinutes ?? 0;
+                      if (record?.checkInTime && !record?.checkOutTime && isSameDay(selectedDate, new Date())) {
+                        const inMs = new Date(record.checkInTime).getTime();
+                        const nowMs = Date.now();
+                        if (nowMs > inMs) {
+                          const diffMins = Math.floor((nowMs - inMs) / 60000);
+                          workedMins = Math.max(0, Math.min(diffMins, 900) - (record.totalBreakMinutes || 0));
+                        }
+                      }
+
                       const finalRecord = {
                         id: record?.id ?? null,
                         date: record?.date ?? selectedDate,
                         checkInTime: record?.checkInTime ?? null,
                         checkOutTime: record?.checkOutTime ?? null,
-                        totalWorkedMinutes: record?.totalWorkedMinutes ?? 0,
+                        totalWorkedMinutes: workedMins,
                         totalBreakMinutes: record?.totalBreakMinutes ?? 0,
                         employeeId: record?.employeeId ?? emp.id,
                         ...record,

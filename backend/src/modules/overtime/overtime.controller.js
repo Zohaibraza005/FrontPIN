@@ -108,13 +108,30 @@ exports.createOvertime = async (req, res) => {
 exports.getOvertimes = async (req, res) => {
   try {
     const orgId = req.user.orgId || req.user.organizationId;
+    const role = req.user.role;
     let where = {};
     if (orgId) {
       where.organizationId = orgId;
     }
 
-    if (req.user.role === "USER") {
+    if (role === "USER") {
+      // Specific employee strictly sees only their own overtime requests
       where.employeeId = req.user.id;
+    } else if (role === "SUPERVISOR") {
+      const team = await prisma.employee.findMany({
+        where: { supervisorId: req.user.id, organizationId: orgId, deletedAt: null },
+        select: { id: true },
+      });
+      const teamIds = [req.user.id, ...team.map((t) => t.id)];
+      where.employeeId = { in: teamIds };
+    } else if (role === "ADMIN") {
+      if (req.query.employeeId) {
+        where.employeeId = Number(req.query.employeeId);
+      }
+    }
+
+    if (req.query.status && req.query.status.toLowerCase() !== "all") {
+      where.status = req.query.status.toUpperCase();
     }
 
     const overtimes = await prisma.overtime.findMany({
@@ -122,6 +139,9 @@ exports.getOvertimes = async (req, res) => {
         ...where,
         employee: {
           deletedAt: null,
+          ...(req.query.companyId && req.query.companyId.toLowerCase() !== "all"
+            ? { companyId: Number(req.query.companyId) }
+            : {}),
         },
       },
       include: {
@@ -141,10 +161,6 @@ exports.getOvertimes = async (req, res) => {
 
 exports.updateOvertime = async (req, res) => {
   try {
-    if (req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Only admin can update overtime" });
-    }
-
     const { id } = req.params;
     const { employeeId, date, hours, rate, reason, status } = req.body;
 
@@ -156,7 +172,24 @@ exports.updateOvertime = async (req, res) => {
       return res.status(404).json({ message: "Overtime record not found" });
     }
 
-    const targetEmployeeId = employeeId ? Number(employeeId) : existing.employeeId;
+    // Role check:
+    // USER can only edit their own overtime request while it is PENDING
+    if (req.user.role === "USER") {
+      if (existing.employeeId !== req.user.id || existing.status !== "PENDING") {
+        return res.status(403).json({ message: "You can only edit your own pending overtime requests" });
+      }
+    } else if (req.user.role === "SUPERVISOR") {
+      const team = await prisma.employee.findMany({
+        where: { supervisorId: req.user.id, organizationId: req.user.organizationId, deletedAt: null },
+        select: { id: true },
+      });
+      const allowedIds = [req.user.id, ...team.map((t) => t.id)];
+      if (!allowedIds.includes(existing.employeeId)) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+    }
+
+    const targetEmployeeId = (req.user.role === "ADMIN" && employeeId) ? Number(employeeId) : existing.employeeId;
     const employee = await prisma.employee.findUnique({
       where: { id: targetEmployeeId },
       include: {
@@ -179,7 +212,7 @@ exports.updateOvertime = async (req, res) => {
     }
 
     const newHours = hours !== undefined ? Number(hours) : existing.hours;
-    const newRate = rate !== undefined ? Number(rate) : existing.rate;
+    const newRate = (req.user.role === "ADMIN" && rate !== undefined) ? Number(rate) : existing.rate;
     const baseRate = employee.payroll?.rate || 0;
     const amount = newHours * baseRate * newRate;
 
@@ -192,7 +225,7 @@ exports.updateOvertime = async (req, res) => {
       reason: reason !== undefined ? reason : existing.reason,
     };
 
-    if (status) {
+    if (status && req.user.role === "ADMIN") {
       dataToUpdate.status = status;
       dataToUpdate.reviewedById = req.user.id;
       dataToUpdate.reviewedAt = new Date();
@@ -289,15 +322,27 @@ exports.updateOvertimeStatus = async (req, res) => {
 
 exports.deleteOvertime = async (req, res) => {
   try {
-    if (req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Only admin can delete" });
+    const existing = await prisma.overtime.findUnique({
+      where: { id: Number(req.params.id) },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Overtime record not found" });
+    }
+
+    if (req.user.role === "USER") {
+      if (existing.employeeId !== req.user.id || existing.status !== "PENDING") {
+        return res.status(403).json({ message: "You can only cancel your own pending overtime requests" });
+      }
+    } else if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
     }
 
     await prisma.overtime.delete({
       where: { id: Number(req.params.id) },
     });
 
-    res.json({ success: true });
+    res.json({ success: true, message: "Overtime deleted successfully" });
   } catch (error) {
     console.error("Error deleting overtime:", error);
     res.status(500).json({ message: "Error deleting overtime" });

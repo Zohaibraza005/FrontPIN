@@ -120,18 +120,9 @@ export const Dashboard: React.FC = () => {
   const DATE_KEY = "dashboard-selected-date";
   const LOCATION_KEY = "dashboard-selected-location";
 
-  // ── Initialize from localStorage (or fallback) ──
+  // ── Initialize with today's local date for real-time live attendance ──
   const getInitialDate = () => {
-    const saved = localStorage.getItem(DATE_KEY);
-    const todayStr = new Date().toISOString().split("T")[0];
-    // Check if it's a valid YYYY-MM-DD string
-    if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) {
-      if (saved > todayStr) {
-        return todayStr;
-      }
-      return saved;
-    }
-    return todayStr; // today
+    return moment().format("YYYY-MM-DD");
   };
 
   const getInitialLocation = () => {
@@ -162,7 +153,7 @@ export const Dashboard: React.FC = () => {
   const [projectStatusData, setProjectStatusData] = useState<any[]>([]);
   const [taskTrend, setTaskTrend] = useState<any[]>([]);
   const [departmentData, setDepartmentData] = useState<any[]>([]);
-  const today = new Date().toISOString().split("T")[0];
+  const today = moment().format("YYYY-MM-DD");
   const [attendanceSheetOpen,setAttendanceSheetOpen] = useState(false)
   const [selectedAttendance,setSelectedAttendance] = useState(null)
 
@@ -402,8 +393,8 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem(DATE_KEY, selectedDate);
-  }, [selectedDate]);
+    localStorage.removeItem(DATE_KEY);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("selectedLocation", selectedLocation);
@@ -869,7 +860,7 @@ export const Dashboard: React.FC = () => {
                   <div className="inline-flex items-center gap-2.5 bg-gray-50/90 border border-gray-200/80 p-2.5 rounded-2xl">
                     <Calendar className="w-4 h-4 text-blue-600 ml-1 shrink-0" />
                     <DatePicker
-                      selected={selectedDate ? new Date(selectedDate) : new Date()}
+                      selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
                       maxDate={new Date()}
                       onChange={(date: Date | null) => {
                         if (!date) return;
@@ -885,6 +876,15 @@ export const Dashboard: React.FC = () => {
                       className="text-gray-900 font-semibold bg-white w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-xs cursor-pointer"
                       placeholderText="Select date..."
                     />
+                    {selectedDate !== moment().format("YYYY-MM-DD") && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                        className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs"
+                      >
+                        Today
+                      </button>
+                    )}
                   </div>
                 </div>
 

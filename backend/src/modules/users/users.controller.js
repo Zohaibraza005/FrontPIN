@@ -10,14 +10,35 @@ exports.getEmployees = async (req, res) => {
     const orgId = req.user.orgId;
     const { companyId, departmentId, role } = req.query;
 
+    let supervisorFilter = {};
+    if (req.user.role === "SUPERVISOR") {
+      const supervisor = await prisma.employee.findUnique({
+        where: { id: req.user.id },
+        include: { privileges: true, appRole: true },
+      });
+      const rawPrivs = supervisor?.privileges?.length
+        ? supervisor.privileges
+        : (supervisor?.appRole?.privileges
+            ? (typeof supervisor.appRole.privileges === "string"
+                ? JSON.parse(supervisor.appRole.privileges)
+                : supervisor.appRole.privileges)
+            : []);
+      const empPriv = rawPrivs.find((p) => p.module === "EMPLOYEE");
+      if (empPriv && empPriv.ownTeamOnly) {
+        supervisorFilter = { OR: [{ id: req.user.id }, { supervisorId: req.user.id }] };
+      }
+    }
+
     const employees = await prisma.employee.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
+        ...supervisorFilter,
         ...(companyId && companyId !== "all" && companyId !== "ALL" && !isNaN(parseInt(companyId)) && { companyId: parseInt(companyId) }),
         ...(departmentId && departmentId !== "all" && departmentId !== "ALL" && !isNaN(parseInt(departmentId)) && { departmentId: parseInt(departmentId) }),
         ...(role ? { role: role.toUpperCase() } : { NOT: { role: "ADMIN" } }),
       },
+
       include: {
         company: true,
         department: true,
@@ -399,6 +420,21 @@ exports.updateEmployee = async (req, res) => {
     if (parsedPersonal.roleId !== undefined || req.body.roleId !== undefined) {
       const rId = parsedPersonal.roleId !== undefined ? parsedPersonal.roleId : req.body.roleId;
       updateData.roleId = rId ? parseInt(rId) : null;
+      if (updateData.roleId && !updateData.role) {
+        const assignedRole = await prisma.appRole.findUnique({
+          where: { id: updateData.roleId }
+        });
+        if (assignedRole) {
+          const lowerName = assignedRole.name.toLowerCase();
+          if (lowerName.includes("supervisor")) {
+            updateData.role = "SUPERVISOR";
+          } else if (lowerName.includes("admin")) {
+            updateData.role = "ADMIN";
+          } else {
+            updateData.role = "USER";
+          }
+        }
+      }
     }
     if (supervisorId !== undefined) updateData.supervisorId = supervisorId ? parseInt(supervisorId) : null;
 
@@ -1200,11 +1236,11 @@ exports.importEmployees = async (req, res) => {
         emailCounter++;
       }
 
-      // 🔑 Username format: name480 (e.g. faraz480)
-      let username = `${cleanFirst}480`;
+      // 🔑 Username format: lowercase first name (e.g. zohaib, faraz)
+      let username = cleanFirst;
       let userCounter = 1;
       while (existingEmployees.some((e) => e.username?.toLowerCase() === username.toLowerCase())) {
-        username = `${cleanFirst}${userCounter}480`;
+        username = `${cleanFirst}${userCounter}`;
         userCounter++;
       }
 
@@ -1279,4 +1315,66 @@ exports.importEmployees = async (req, res) => {
     });
   }
 };
+
+//////////////////////////////////////////////////////
+// GET NEXT BIOMETRIC ID
+//////////////////////////////////////////////////////
+exports.getNextBiometricId = async (req, res) => {
+  try {
+    const orgId = req.user.orgId;
+
+    // Find the latest created employee who has a biometricId
+    const lastEmployee = await prisma.employee.findFirst({
+      where: {
+        organizationId: orgId,
+        biometricId: { not: null },
+      },
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        id: true,
+        biometricId: true,
+      },
+    });
+
+    let nextBiometricId = "1001";
+    if (lastEmployee && lastEmployee.biometricId) {
+      const match = String(lastEmployee.biometricId).match(/(\d+)/);
+      if (match && match[1]) {
+        const num = parseInt(match[1], 10);
+        nextBiometricId = String(num + 1);
+      }
+    }
+
+    // Ensure candidate nextBiometricId does not clash with any existing unique biometricId
+    const existingIds = new Set(
+      (
+        await prisma.employee.findMany({
+          where: { organizationId: orgId, biometricId: { not: null } },
+          select: { biometricId: true },
+        })
+      ).map((e) => String(e.biometricId).trim())
+    );
+
+    let candidate = parseInt(nextBiometricId, 10);
+    while (existingIds.has(String(candidate))) {
+      candidate++;
+    }
+    nextBiometricId = String(candidate);
+
+    res.json({
+      success: true,
+      data: {
+        lastBiometricId: lastEmployee ? lastEmployee.biometricId : null,
+        nextBiometricId,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching next biometric ID:", error);
+    res.status(500).json({ success: false, message: "Error fetching next biometric ID" });
+  }
+};
+
 

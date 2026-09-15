@@ -1,6 +1,6 @@
 //@ts-nocheck
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -57,6 +57,8 @@ import {
   Check,
   ChevronDown,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   Tooltip,
@@ -118,6 +120,34 @@ const DAYS_LIST = [
   { full: "Sunday", short: "Sun" },
 ];
 
+const getPaginationRange = (current: number, total: number) => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const delta = 1;
+  const range: (number | string)[] = [];
+
+  for (
+    let i = Math.max(2, current - delta);
+    i <= Math.min(total - 1, current + delta);
+    i++
+  ) {
+    range.push(i);
+  }
+
+  if (current - delta > 2) {
+    range.unshift("...");
+  }
+  if (current + delta < total - 1) {
+    range.push("...");
+  }
+
+  range.unshift(1);
+  range.push(total);
+
+  return range;
+};
+
 export const Schedule: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -135,6 +165,14 @@ export const Schedule: React.FC = () => {
   const getInitialScheduleLoc = () => localStorage.getItem("selectedLocation") || "all";
   const [filterLocation, setFilterLocation] = useState(getInitialScheduleLoc);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
+
+  // Pagination state for Schedules table
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterLocation]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -405,47 +443,67 @@ export const Schedule: React.FC = () => {
     }));
   };
 
-  // Filter schedules based on search and location
-  const filteredSchedules = schedules?.filter((schedule) => {
-    if (schedule.employee?.role === 'ADMIN' || schedule.employee?.role === 'admin') return false;
-    
-    // For Agent (USER role): Only show their own schedule
-    if (isAgent && schedule.employeeId !== user?.id && schedule.employee?.id !== user?.id) {
-      return false;
-    }
+  // Filter schedules based on search and location, strictly 1 schedule per employee
+  const filteredSchedules = useMemo(() => {
+    const seenEmployeeIds = new Set<string | number>();
+    return (schedules || []).filter((schedule) => {
+      if (!schedule) return false;
+      if (schedule.employee?.role === 'ADMIN' || schedule.employee?.role === 'admin') return false;
+      
+      // For Agent (USER role): Only show their own schedule
+      if (isAgent && schedule.employeeId !== user?.id && schedule.employee?.id !== user?.id) {
+        return false;
+      }
 
-    const empName = `${schedule.employee?.firstName || ''} ${schedule.employee?.lastName || ''}`.toLowerCase();
-    const companyObj =
-      schedule.company ||
-      schedule.employee?.company ||
-      locations.find(
-        (l) =>
-          String(l.id) === String(schedule.companyId) ||
-          String(l.id) === String(schedule.employee?.companyId)
-      );
-    const locName = (companyObj?.name || '').toLowerCase();
-    const query = searchQuery.toLowerCase().trim();
+      const empId = schedule.employeeId || schedule.employee?.id;
+      if (empId) {
+        if (seenEmployeeIds.has(empId)) return false;
+        seenEmployeeIds.add(empId);
+      }
 
-    const matchesSearch =
-      !query ||
-      empName.includes(query) ||
-      locName.includes(query) ||
-      (Array.isArray(schedule.days) && schedule.days.some((d: any) => {
-        const dStr = typeof d === 'object' && d !== null ? `${d.day || ''} ${d.dayFull || ''}` : String(d || '');
-        return dStr.toLowerCase().includes(query);
-      }));
+      const empName = `${schedule.employee?.firstName || ''} ${schedule.employee?.lastName || ''}`.toLowerCase();
+      const companyObj =
+        schedule.company ||
+        schedule.employee?.company ||
+        locations.find(
+          (l) =>
+            String(l.id) === String(schedule.companyId) ||
+            String(l.id) === String(schedule.employee?.companyId)
+        );
+      const locName = (companyObj?.name || '').toLowerCase();
+      const query = searchQuery.toLowerCase().trim();
 
-    const matchesLocation =
-      isAgent ||
-      filterLocation === "all" ||
-      String(schedule.companyId) === String(filterLocation) ||
-      String(schedule.company?.id) === String(filterLocation) ||
-      String(schedule.employee?.companyId) === String(filterLocation) ||
-      String(schedule.employee?.company?.id) === String(filterLocation) ||
-      String(schedule.employee?.locationId) === String(filterLocation);
+      const matchesSearch =
+        !query ||
+        empName.includes(query) ||
+        locName.includes(query) ||
+        (Array.isArray(schedule.days) && schedule.days.some((d: any) => {
+          const dStr = typeof d === 'object' && d !== null ? `${d.day || ''} ${d.dayFull || ''}` : String(d || '');
+          return dStr.toLowerCase().includes(query);
+        }));
 
-    return matchesSearch && matchesLocation;
-  });
+      const matchesLocation =
+        isAgent ||
+        filterLocation === "all" ||
+        String(schedule.companyId) === String(filterLocation) ||
+        String(schedule.company?.id) === String(filterLocation) ||
+        String(schedule.employee?.companyId) === String(filterLocation) ||
+        String(schedule.employee?.company?.id) === String(filterLocation) ||
+        String(schedule.employee?.locationId) === String(filterLocation);
+
+      return matchesSearch && matchesLocation;
+    });
+  }, [schedules, isAgent, user?.id, locations, searchQuery, filterLocation]);
+
+  // Pagination calculations
+  const totalSchedules = filteredSchedules?.length || 0;
+  const totalPages = Math.max(1, Math.ceil(totalSchedules / itemsPerPage));
+  const validPage = Math.min(currentPage, totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalSchedules);
+  const paginatedSchedules = useMemo(() => {
+    return (filteredSchedules || []).slice(startIndex, endIndex);
+  }, [filteredSchedules, startIndex, endIndex]);
 
   // ── Handlers for View, Edit, and Delete ──────────────────────────────
   const handleOpenView = (schedule: any) => {
@@ -494,6 +552,10 @@ export const Schedule: React.FC = () => {
         ? String(schedule.companyId)
         : schedule.company?.id
         ? String(schedule.company.id)
+        : schedule.employee?.companyId
+        ? String(schedule.employee.companyId)
+        : schedule.employee?.company?.id
+        ? String(schedule.employee.company.id)
         : ""
     );
     setEditAllowEarlyIn(Boolean(schedule.allowEarlyIn ?? schedule.allow_early_in));
@@ -1238,7 +1300,7 @@ export const Schedule: React.FC = () => {
                         days: daysPayload,
                         startTime: firstDayTime.startTime || startTime,
                         endTime: firstDayTime.endTime || endTime,
-                        companyId: selectedLocation,
+                        companyId: filterLocation !== "all" ? filterLocation : (selectedLocation || undefined),
                         allowEarlyIn,
                         earlyInMinutes,
                         allowEarlyOut,
@@ -1265,7 +1327,10 @@ export const Schedule: React.FC = () => {
 
                       if (res && res.data) {
                         const newItems = Array.isArray(res.data) ? res.data : [res.data];
-                        setSchedules((prev) => [...newItems, ...prev]);
+                        setSchedules((prev) => {
+                          const newEmpIds = new Set(newItems.map((n: any) => n.employeeId || n.employee?.id));
+                          return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
+                        });
                       }
                       window.dispatchEvent(new CustomEvent('schedule-updated'));
                       window.dispatchEvent(new CustomEvent('employee-updated'));
@@ -1350,7 +1415,7 @@ export const Schedule: React.FC = () => {
                       days: shortDays,
                       startTime: firstDayTime.startTime || startTime,
                       endTime: firstDayTime.endTime || endTime,
-                      companyId: selectedLocation,
+                      companyId: filterLocation !== "all" ? filterLocation : (selectedLocation || undefined),
                       allowEarlyIn,
                       earlyInMinutes,
                       allowEarlyOut,
@@ -1379,7 +1444,10 @@ export const Schedule: React.FC = () => {
 
                     if (res && res.data) {
                       const newItems = Array.isArray(res.data) ? res.data : [res.data];
-                      setSchedules((prev) => [...newItems, ...prev]);
+                      setSchedules((prev) => {
+                        const newEmpIds = new Set(newItems.map((n: any) => n.employeeId || n.employee?.id));
+                        return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
+                      });
                     }
                     fetchSchedules();
                   } catch {
@@ -1496,9 +1564,16 @@ export const Schedule: React.FC = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredSchedules.map((schedule) => {
+                  paginatedSchedules.map((schedule) => {
                     const empName = `${schedule.employee?.firstName || "Unknown"} ${schedule.employee?.lastName || ""}`.trim();
-                    const companyObj = schedule.company || locations.find((l) => String(l.id) === String(schedule.companyId));
+                    const companyObj =
+                      schedule.company ||
+                      schedule.employee?.company ||
+                      locations.find(
+                        (l) =>
+                          String(l.id) === String(schedule.companyId) ||
+                          String(l.id) === String(schedule.employee?.companyId)
+                      );
                     const locationName = companyObj?.name || "-";
 
                     const daysArr = Array.isArray(schedule.days) ? schedule.days : [];
@@ -1714,6 +1789,99 @@ export const Schedule: React.FC = () => {
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination Footer */}
+          {totalSchedules > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span>
+                  Showing <strong className="text-gray-700 dark:text-gray-200">{startIndex + 1}</strong> to{" "}
+                  <strong className="text-gray-700 dark:text-gray-200">{endIndex}</strong> of{" "}
+                  <strong className="text-gray-700 dark:text-gray-200">{totalSchedules}</strong> schedules
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden sm:inline text-gray-500 dark:text-gray-400">Rows per page:</span>
+                  <Select
+                    value={String(itemsPerPage)}
+                    onValueChange={(val) => {
+                      setItemsPerPage(Number(val));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[72px] text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent side="top">
+                      {[10, 20, 50, 100].map((size) => (
+                        <SelectItem key={size} value={String(size)} className="text-xs">
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                    if (item === "...") {
+                      return (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                        >
+                          ...
+                        </span>
+                      );
+                    }
+
+                    const pageNum = Number(item);
+                    const isActive = pageNum === validPage;
+
+                    return (
+                      <Button
+                        key={`page-${pageNum}`}
+                        variant={isActive ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                          isActive
+                            ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                            : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        }`}
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1758,8 +1926,9 @@ export const Schedule: React.FC = () => {
                   <span className="font-semibold text-gray-900 flex items-center gap-1">
                     <Building2 className="size-3.5 text-gray-500" />
                     {viewingSchedule.company?.name ||
-                      locations.find((l) => String(l.id) === String(viewingSchedule.companyId))?.name ||
-                      "N/A"}
+                      viewingSchedule.employee?.company?.name ||
+                      locations.find((l) => String(l.id) === String(viewingSchedule.companyId) || String(l.id) === String(viewingSchedule.employee?.companyId))?.name ||
+                      "-"}
                   </span>
                 </div>
 

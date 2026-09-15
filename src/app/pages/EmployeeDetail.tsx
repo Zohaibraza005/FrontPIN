@@ -16,7 +16,7 @@ import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
 import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2 } from 'lucide-react';
 import { useParams, Link } from 'react-router';
-import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI } from '../services/api';
+import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI } from '../services/api';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
@@ -67,10 +67,8 @@ export const EmployeeDetail: React.FC = () => {
   const [isEditingJob, setIsEditingJob] = useState(false);
   const [isEditingPayroll, setIsEditingPayroll] = useState(false);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
-  const [isEditingPrivileges, setIsEditingPrivileges] = useState(false);
   const [showIncrementModal, setShowIncrementModal] = useState(false);
   const [showSeparationModal, setShowSeparationModal] = useState(false);
-  const [privilegesList, setprivilegesList] = useState([]);
   
 
   const [employee, setEmployee] = useState<any>(null);
@@ -81,7 +79,6 @@ export const EmployeeDetail: React.FC = () => {
   const [editJob, setEditJob] = useState(false);
   const [editPayroll, setEditPayroll] = useState(false);
   const [editSchedule, setEditSchedule] = useState(false);
-  const [editPrivileges, setEditPrivileges] = useState(false);
 
   
   const [showUploadDocModal, setShowUploadDocModal] = useState(false);
@@ -95,8 +92,10 @@ export const EmployeeDetail: React.FC = () => {
     username: '',
     employeeId: '',
     biometricId: '',
+    roleId: '',
   });
 
+  const [rolesList, setRolesList] = useState<any[]>([]);
   const [locationsList, setLocationsList] = useState<any[]>([]);
   const [departmentsList, setDepartmentsList] = useState<any[]>([]);
   const [supervisorsList, setSupervisorsList] = useState<any[]>([]);
@@ -216,6 +215,7 @@ export const EmployeeDetail: React.FC = () => {
         username: emp.username || '',
         employeeId: emp.employeeId || '',
         biometricId: emp.biometricId || '',
+        roleId: emp.roleId ? String(emp.roleId) : (emp.appRole?.id ? String(emp.appRole.id) : ''),
       });
 
       setJob({
@@ -348,14 +348,16 @@ export const EmployeeDetail: React.FC = () => {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        const [locRes, depRes, empRes] = await Promise.all([
+        const [locRes, depRes, empRes, rolesRes] = await Promise.all([
           locationAPI.getLocations(),
           departmentAPI.getDepartments(),
           employeeAPI.getActiveEmployees ? employeeAPI.getActiveEmployees() : employeeAPI.getEmployees(),
+          roleAPI.getRoles ? roleAPI.getRoles() : Promise.resolve({ data: [] }),
         ]);
         if (locRes?.data) setLocationsList(locRes.data);
         if (depRes?.data) setDepartmentsList(depRes.data);
         if (empRes?.data) setSupervisorsList(empRes.data);
+        if (rolesRes?.data) setRolesList(rolesRes.data);
       } catch (err) {
         console.error("Metadata error:", err);
       }
@@ -411,6 +413,7 @@ export const EmployeeDetail: React.FC = () => {
         username: personal.username,
         employeeId: personal.employeeId,
         biometricId: personal.biometricId,
+        roleId: personal.roleId && personal.roleId !== 'none' ? Number(personal.roleId) : null,
       });
       toast.success('Personal information updated');
       setEditPersonal(false);
@@ -521,52 +524,6 @@ export const EmployeeDetail: React.FC = () => {
     } catch (err) {
       toast.error('Failed to update schedule');
     }
-  };
-
-  const handleSavePrivileges = async () => {
-    try {
-      await employeeAPI.updateEmployee(Number(id), {
-        privileges: privileges,
-      });
-      toast.success('Privileges updated');
-      setIsEditingPrivileges(false);
-      fetchEmployee();
-    } catch (err: any) {
-      console.error("Save privileges error:", err);
-      toast.error(err?.message || 'Failed to update privileges');
-    }
-  };
-
-  const isChecked = (module: string, key: string) => {
-    const existing = privileges.find(p => p.module === module);
-    if (!existing) return false;
-    return Boolean(existing[key]);
-  };
-
-  const togglePermission = (module: string, key: string) => {
-    setPrivileges(prev => {
-      const existing = prev.find(p => p.module === module);
-
-      if (!existing) {
-        return [
-          ...prev,
-          {
-            module,
-            canCreate: key === "canCreate",
-            canRead: key === "canRead",
-            canUpdate: key === "canUpdate",
-            canDelete: key === "canDelete",
-            ownTeamOnly: key === "ownTeamOnly",
-          },
-        ];
-      }
-
-      return prev.map(p =>
-        p.module === module
-          ? { ...p, [key]: !p[key] }
-          : p
-      );
-    });
   };
 
 
@@ -693,7 +650,6 @@ export const EmployeeDetail: React.FC = () => {
           <TabsTrigger value="payroll" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Payroll</TabsTrigger>
           <TabsTrigger value="approvals" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Approvals</TabsTrigger>
           <TabsTrigger value="password-separation" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Password / Separation</TabsTrigger>
-          <TabsTrigger value="privileges" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Privileges</TabsTrigger>
         </TabsList>
 
         {/* ── PERSONAL INFORMATION ──────────────────────────────────────── */}
@@ -779,6 +735,37 @@ export const EmployeeDetail: React.FC = () => {
                   onChange={e => setPersonal({ ...personal, username: e.target.value })}
                   className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
                 />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-gray-600">Role</Label>
+                {editPersonal ? (
+                  <Select
+                    value={personal.roleId || "none"}
+                    onValueChange={(val) => setPersonal({ ...personal, roleId: val === "none" ? "" : val })}
+                  >
+                    <SelectTrigger className="mt-1.5 h-10 rounded-xl border-gray-200 bg-white text-gray-800 font-medium text-sm">
+                      <SelectValue placeholder="Select Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Role Assigned</SelectItem>
+                      {rolesList.map((r: any) => (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          {r.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={
+                      rolesList.find((r: any) => String(r.id) === String(personal.roleId))?.name ||
+                      employee.appRole?.name ||
+                      (employee.role === "SUPERVISOR" ? "Supervisor" : employee.role === "ADMIN" ? "Admin" : "User")
+                    }
+                    disabled
+                    className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
+                  />
+                )}
               </div>
               {editPersonal && (
                 <div className="col-span-full flex justify-end pt-2">
@@ -1670,135 +1657,6 @@ export const EmployeeDetail: React.FC = () => {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </TabsContent>
-
-        {/* ── PRIVILEGES ─────────────────────────────────────────────────── */}
-        <TabsContent value="privileges">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Privileges</CardTitle>
-              {!isEditingPrivileges ? (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingPrivileges(true)}>
-                  <Edit className="mr-2 h-4 w-4" /> Edit
-                </Button>
-              ) : (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingPrivileges(false)}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleSavePrivileges}>
-                    <Save className="mr-2 h-4 w-4" /> Save
-                  </Button>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <Label className="text-base font-semibold">Module Permissions</Label>
-                {(() => {
-                  const listToRender = isEditingPrivileges
-                    ? ALL_PRIVILEGES
-                    : ALL_PRIVILEGES.filter(priv => {
-                        const existing = privileges.find(p => p.module === priv.id);
-                        if (!existing) return false;
-                        return (
-                          existing.canCreate ||
-                          existing.canRead ||
-                          existing.canUpdate ||
-                          existing.canDelete ||
-                          existing.ownTeamOnly
-                        );
-                      });
-
-                  if (listToRender.length === 0) {
-                    return (
-                      <div className="text-center py-10 border border-dashed rounded-lg text-muted-foreground text-sm">
-                        No privileges granted to this employee.
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="border rounded-xl overflow-hidden">
-                      <div className="grid grid-cols-6 bg-muted px-4 py-3 text-sm font-medium">
-                        <div>Module</div>
-                        <div className="text-center">Create</div>
-                        <div className="text-center">Read</div>
-                        <div className="text-center">Update</div>
-                        <div className="text-center">Delete</div>
-                        <div className="text-center">Own Team</div>
-                      </div>
-
-                      {listToRender.map((priv, index) => (
-                        <div
-                          key={priv.id}
-                          className={`grid grid-cols-6 items-center px-4 py-3 border-t ${
-                            index % 2 === 0 ? "bg-background" : "bg-muted/40"
-                          }`}
-                        >
-                          <div className="font-semibold text-sm text-gray-700">{priv.label}</div>
-
-                          <div className="flex justify-center">
-                            <input
-                              type="checkbox"
-                              disabled={!isEditingPrivileges}
-                              checked={isChecked(priv.id, "canCreate")}
-                              onChange={() => togglePermission(priv.id, "canCreate")}
-                              className="size-4 accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                          </div>
-
-                          <div className="flex justify-center">
-                            <input
-                              type="checkbox"
-                              disabled={!isEditingPrivileges}
-                              checked={isChecked(priv.id, "canRead")}
-                              onChange={() => togglePermission(priv.id, "canRead")}
-                              className="size-4 accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                          </div>
-
-                          <div className="flex justify-center">
-                            <input
-                              type="checkbox"
-                              disabled={!isEditingPrivileges}
-                              checked={isChecked(priv.id, "canUpdate")}
-                              onChange={() => togglePermission(priv.id, "canUpdate")}
-                              className="size-4 accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                          </div>
-
-                          <div className="flex justify-center">
-                            <input
-                              type="checkbox"
-                              disabled={!isEditingPrivileges}
-                              checked={isChecked(priv.id, "canDelete")}
-                              onChange={() => togglePermission(priv.id, "canDelete")}
-                              className="size-4 accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                          </div>
-
-                          <div className="flex justify-center">
-                            {priv.id === "REPORT" ? (
-                              <input
-                                type="checkbox"
-                                disabled={!isEditingPrivileges}
-                                checked={isChecked(priv.id, "ownTeamOnly")}
-                                onChange={() => togglePermission(priv.id, "ownTeamOnly")}
-                                className="size-4 accent-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                              />
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
     </div>

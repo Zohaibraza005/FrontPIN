@@ -38,6 +38,8 @@ async function login({ identifier, password }) {
       email: true,
       password: true,
       role: true,
+      roleId: true,
+      appRole: true,
       organizationId: true,
       companyId: true,
       canLogin: true,
@@ -88,6 +90,12 @@ async function login({ identifier, password }) {
     orgId: user.organizationId,
   });
 
+  const effectivePrivileges = (user.privileges && user.privileges.length > 0)
+    ? user.privileges
+    : (user.appRole?.privileges
+        ? (typeof user.appRole.privileges === 'string' ? JSON.parse(user.appRole.privileges) : user.appRole.privileges)
+        : []);
+
   return {
     user: {
       id: user.id,
@@ -96,11 +104,13 @@ async function login({ identifier, password }) {
       username: user.username,
       email: user.email,
       role: user.role,
+      roleId: user.roleId,
+      appRole: user.appRole ? { id: user.appRole.id, name: user.appRole.name } : null,
       organizationId: user.organizationId,
       companyId: user.companyId,
       jobInfo: user?.jobInfo ? user?.jobInfo: null,
       profileImage:user?.profileImage,
-      privileges: user.privileges || []
+      privileges: effectivePrivileges
     },
     accessToken,
     refreshToken,
@@ -176,4 +186,58 @@ async function checkIdentifier(identifier) {
 
 
 
-module.exports = { login,checkIdentifier };
+async function getMe(userId) {
+  const user = await prisma.employee.findFirst({
+    where: {
+      id: userId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true,
+      email: true,
+      role: true,
+      roleId: true,
+      appRole: true,
+      organizationId: true,
+      companyId: true,
+      canLogin: true,
+      profileImage: true,
+      jobInfo: true,
+      privileges: true,
+    },
+  });
+
+  if (!user) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const effectivePrivileges = (user.privileges && user.privileges.length > 0)
+    ? user.privileges
+    : (user.appRole?.privileges
+        ? (typeof user.appRole.privileges === "string" ? JSON.parse(user.appRole.privileges) : user.appRole.privileges)
+        : []);
+
+  return {
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    roleId: user.roleId,
+    appRole: user.appRole ? { id: user.appRole.id, name: user.appRole.name } : null,
+    organizationId: user.organizationId,
+    companyId: user.companyId,
+    jobInfo: user?.jobInfo ? user?.jobInfo : null,
+    profileImage: user?.profileImage,
+    privileges: effectivePrivileges,
+  };
+}
+
+module.exports = { login, checkIdentifier, getMe };
+

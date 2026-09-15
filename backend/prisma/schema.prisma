@@ -388,7 +388,10 @@ enum PrivilegeModule {
   OVERTIME
   ENABLE_GPS
   SCHEDULE
+  PAYROLL
+  ORGANIZATION
 }
+
 
 model EmployeePrivilege {
   id Int @id @default(autoincrement())

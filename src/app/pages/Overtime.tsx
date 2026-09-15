@@ -31,7 +31,10 @@ export const Overtime: React.FC = () => {
   const [overtimes, setOvertimes] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [filterStatus, setFilterStatus] = useState("all");
-  const getInitialOtLoc = () => localStorage.getItem("selectedLocation") || "all";
+  const getInitialOtLoc = () => {
+    const loc = localStorage.getItem("selectedLocation") || localStorage.getItem("dashboard-selected-location") || "all";
+    return loc.toLowerCase() === "all" ? "all" : loc;
+  };
   const [selectedLocation, setSelectedLocation] = useState(getInitialOtLoc);
   const [locations, setLocations] = useState<any[]>([]);
 
@@ -42,7 +45,7 @@ export const Overtime: React.FC = () => {
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
       const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
-      setSelectedLocation(loc);
+      setSelectedLocation(loc.toLowerCase() === "all" ? "all" : loc);
     };
     window.addEventListener("location-changed", handleLocationEvent);
     return () => {
@@ -107,7 +110,11 @@ export const Overtime: React.FC = () => {
 
   // 🔥 Submit (Create or Edit)
   const handleSubmit = async () => {
-    if (!formData.employeeId) {
+    const targetEmployeeId = user?.role === "ADMIN"
+      ? formData.employeeId
+      : String(user?.id || formData.employeeId || "");
+
+    if (!targetEmployeeId) {
       toast.error("Please select an employee");
       return;
     }
@@ -125,12 +132,12 @@ export const Overtime: React.FC = () => {
     }
 
     const payload = {
-      employeeId: Number(formData.employeeId),
+      employeeId: Number(targetEmployeeId),
       date: formData.date,
       hours: Number(formData.hours),
       rate: Number(formData.rate),
       reason: formData.reason,
-      status: editing?.status || "PENDING",
+      status: user?.role === "ADMIN" ? (editing?.status || "PENDING") : "PENDING",
     };
 
     try {
@@ -139,7 +146,7 @@ export const Overtime: React.FC = () => {
         toast.success("Overtime updated successfully");
       } else {
         await overtimeAPI.createOvertime(payload);
-        toast.success("Overtime added successfully");
+        toast.success(user?.role === "ADMIN" ? "Overtime added successfully" : "Overtime request submitted successfully");
       }
 
       setOpen(false);
@@ -154,7 +161,7 @@ export const Overtime: React.FC = () => {
 
       loadData();
     } catch (err: any) {
-      toast.error(err?.message || "Error saving overtime");
+      toast.error(err?.response?.data?.message || err?.data?.message || err?.message || "Error saving overtime");
     }
   };
 
@@ -185,7 +192,8 @@ export const Overtime: React.FC = () => {
   const filtered = overtimes.filter((ot) => {
     if (filterStatus !== "all" && ot.status !== filterStatus.toUpperCase())
       return false;
-    if (selectedLocation !== "all") {
+    // Location filter only applies to ADMIN and SUPERVISOR
+    if ((user?.role === "ADMIN" || user?.role === "SUPERVISOR") && selectedLocation !== "all") {
       const empCompId = String(ot.employee?.companyId || ot.employee?.company?.id || ot.employee?.locationId || "");
       if (empCompId !== String(selectedLocation)) return false;
     }
@@ -238,17 +246,18 @@ export const Overtime: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              {locations.length > 0 && (
+              {locations.length > 0 && (user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
                 <SearchableSelect
                   className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950"
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={selectedLocation}
                   onValueChange={(val) => {
-                    setSelectedLocation(val);
-                    localStorage.setItem("selectedLocation", val);
-                    localStorage.setItem("dashboard-selected-location", val);
-                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                    const norm = val.toLowerCase() === "all" ? "all" : val;
+                    setSelectedLocation(norm);
+                    localStorage.setItem("selectedLocation", norm);
+                    localStorage.setItem("dashboard-selected-location", norm);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: norm }));
                   }}
                   options={[
                     { value: "all", label: "All Locations" },
@@ -289,16 +298,14 @@ export const Overtime: React.FC = () => {
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Amount</TableHead>
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Reason</TableHead>
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Status</TableHead>
-                  {user?.role === "ADMIN" && (
-                    <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
-                  )}
+                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={user?.role === "ADMIN" ? 8 : 7} className="h-32 text-center text-gray-500">
+                    <TableCell colSpan={8} className="h-32 text-center text-gray-500">
                       <div className="flex flex-col items-center justify-center gap-1">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No overtime records found</p>
                         <p className="text-xs text-gray-400">Click {user?.role === "ADMIN" ? "'Add Overtime'" : "'Request Overtime'"} to create a new overtime entry.</p>
@@ -350,52 +357,79 @@ export const Overtime: React.FC = () => {
                         </TableCell>
                         <TableCell>{badgeColor(ot.status)}</TableCell>
 
-                        {user?.role === "ADMIN" && (
-                          <TableCell className="text-right pr-6">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {ot.status === "PENDING" && (
+                        <TableCell className="text-right pr-6">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {user?.role === "ADMIN" ? (
+                              <>
+                                {ot.status === "PENDING" && (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                                      onClick={() => handleStatus(ot.id, "APPROVED")}
+                                      title="Approve Overtime"
+                                    >
+                                      <Check className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                      onClick={() => handleStatus(ot.id, "REJECTED")}
+                                      title="Reject Overtime"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </Button>
+                                  </>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                                  onClick={() => handleEdit(ot)}
+                                  title="Edit Overtime"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                  onClick={() => setDeleteConfirm(ot)}
+                                  title="Delete Overtime"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              ot.status === "PENDING" ? (
                                 <>
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
-                                    onClick={() => handleStatus(ot.id, "APPROVED")}
-                                    title="Approve Overtime"
+                                    className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                                    onClick={() => handleEdit(ot)}
+                                    title="Edit Request"
                                   >
-                                    <Check className="w-4 h-4" />
+                                    <Pencil className="w-4 h-4" />
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
-                                    onClick={() => handleStatus(ot.id, "REJECTED")}
-                                    title="Reject Overtime"
+                                    onClick={() => setDeleteConfirm(ot)}
+                                    title="Cancel Request"
                                   >
-                                    <X className="w-4 h-4" />
+                                    <Trash2 className="w-4 h-4" />
                                   </Button>
                                 </>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
-                                onClick={() => handleEdit(ot)}
-                                title="Edit Overtime"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
-                                onClick={() => setDeleteConfirm(ot)}
-                                title="Delete Overtime"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        )}
+                              ) : (
+                                <span className="text-xs text-gray-400 font-medium mr-2">-</span>
+                              )
+                            )}
+                          </div>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -509,19 +543,21 @@ export const Overtime: React.FC = () => {
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogTitle>{user?.role === "ADMIN" ? "Confirm Delete" : "Cancel Overtime Request"}</DialogTitle>
           </DialogHeader>
 
           <p className="text-gray-600 text-sm">
-            Are you sure you want to delete this overtime record? This action cannot be undone.
+            {user?.role === "ADMIN"
+              ? "Are you sure you want to delete this overtime record? This action cannot be undone."
+              : "Are you sure you want to cancel this overtime request?"}
           </p>
 
           <div className="flex justify-end gap-2 mt-4">
             <Button onClick={() => setDeleteConfirm(null)} variant="outline">
-              Cancel
+              Close
             </Button>
             <Button onClick={handleDelete} variant="destructive">
-              Delete
+              {user?.role === "ADMIN" ? "Delete" : "Cancel Request"}
             </Button>
           </div>
         </DialogContent>

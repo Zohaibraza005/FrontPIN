@@ -397,16 +397,36 @@ const getWeeklyTimesheet = async (req, res) => {
     }
 
     // ── 5. Get relevant employee IDs ──
+    let supervisorFilter = {};
+    if (role === "SUPERVISOR") {
+      const supervisor = await prisma.employee.findUnique({
+        where: { id: req.user.id },
+        include: { privileges: true, appRole: true },
+      });
+      const rawPrivs = supervisor?.privileges?.length
+        ? supervisor.privileges
+        : (supervisor?.appRole?.privileges
+            ? (typeof supervisor.appRole.privileges === "string"
+                ? JSON.parse(supervisor.appRole.privileges)
+                : supervisor.appRole.privileges)
+            : []);
+      const empPriv = rawPrivs.find((p) => p.module === "EMPLOYEE" || p.module === "ATTENDANCE");
+      const isTeamOnly = empPriv ? empPriv.ownTeamOnly === true : false;
+      if (isTeamOnly) {
+        supervisorFilter = { OR: [{ id: req.user.id }, { supervisorId: req.user.id }] };
+      }
+    }
+
     const employees = await prisma.employee.findMany({
       where: {
         organizationId,
         deletedAt: null,
         ...companyWhere,
-        // Optional: restrict supervisors to their team
-        ...(role === "SUPERVISOR" ? { OR: [{ id: req.user.id }, { supervisorId: req.user.id }] } : {}),
+        ...supervisorFilter,
       },
       select: { id: true },
     });
+
 
     const employeeIds = employees.map(e => e.id);
 
@@ -536,49 +556,128 @@ const getSupervisorDashboard = async (req, res) => {
     const supervisorId = req.user.id;
     const organizationId = req.user.orgId;
 
-    const selectedDate = new Date();
-    selectedDate.setHours(0, 0, 0, 0);
+    // 1️⃣ Fetch supervisor to check permissions (e.g. ownTeamOnly)
+    const supervisor = await prisma.employee.findUnique({
+      where: { id: supervisorId },
+      include: {
+        privileges: true,
+        appRole: true,
+      },
+    });
 
-    /* ---------------------------------- */
-    /* 1️⃣ Supervisor + Team Employees */
-    /* ---------------------------------- */
+    const rawPrivs = supervisor?.privileges?.length
+      ? supervisor.privileges
+      : (supervisor?.appRole?.privileges
+          ? (typeof supervisor.appRole.privileges === "string"
+              ? JSON.parse(supervisor.appRole.privileges)
+              : supervisor.appRole.privileges)
+          : []);
+
+    const empPriv = rawPrivs.find((p) => p.module === "EMPLOYEE" || p.module === "ATTENDANCE");
+    const isTeamOnly = empPriv ? empPriv.ownTeamOnly === true : false;
+
+    // 2️⃣ Timezone & Date handling
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { orgTimeZone: true },
+    });
+    const orgTimeZone = organization?.orgTimeZone || "Asia/Karachi";
+
+    let selectedDateQuery = req.query.date
+      ? DateTime.fromISO(req.query.date, { zone: orgTimeZone })
+      : DateTime.now().setZone(orgTimeZone);
+
+    const localStartOfDay = selectedDateQuery.startOf("day");
+    const localEndOfDay = localStartOfDay.endOf("day");
+
+    const startOfDayUTC = localStartOfDay.toJSDate();
+    const endOfDayUTC = localEndOfDay.toJSDate();
+
+    const searchStartUTC = localStartOfDay.minus({ days: 1 }).toJSDate();
+    const searchEndUTC = localEndOfDay.plus({ days: 1 }).toJSDate();
+
+    const location = req.query.location;
+    const isLocationFiltered = location && String(location).toUpperCase() !== "ALL" && !isNaN(Number(location));
+    const locationIdNum = isLocationFiltered ? Number(location) : null;
+
+    // 3️⃣ Employee Where Clause
+    const employeeWhere = {
+      organizationId,
+      deletedAt: null,
+      ...(isTeamOnly
+        ? { OR: [{ id: supervisorId }, { supervisorId: supervisorId }] }
+        : { NOT: { role: "ADMIN" } }),
+    };
+
+    if (isLocationFiltered) {
+      employeeWhere.companyId = locationIdNum;
+    }
 
     const employees = await prisma.employee.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        OR: [{ id: supervisorId }, { supervisorId: supervisorId }],
-      },
+      where: employeeWhere,
       include: {
+        company: true,
+        department: true,
         Attendance: {
-          where: { date: selectedDate },
+          where: {
+            OR: [
+              {
+                date: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+              {
+                checkInTime: {
+                  gte: searchStartUTC,
+                  lte: searchEndUTC,
+                },
+              },
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+          include: {
+            activities: {
+              orderBy: { startTime: "asc" },
+            },
+          },
         },
       },
+      orderBy: { firstName: "asc" },
     });
 
     const employeeIds = employees.map((e) => e.id);
 
-    /* ---------------------------------- */
-    /* 2️⃣ Leaves Today */
-    /* ---------------------------------- */
-
+    // 4️⃣ Leaves Today
     const leavesToday = await prisma.leaveRequest.findMany({
       where: {
+        organizationId,
         status: "APPROVED",
-        startDate: { lte: selectedDate },
-        endDate: { gte: selectedDate },
+        startDate: { lte: endOfDayUTC },
+        endDate: { gte: startOfDayUTC },
         employeeId: { in: employeeIds },
       },
     });
 
     const leaveEmployeeIds = leavesToday.map((l) => l.employeeId);
 
-    /* ---------------------------------- */
-    /* 3️⃣ Attendance Categorization */
-    /* ---------------------------------- */
-
+    // 5️⃣ Attendance Widget
+    const targetDateStr = selectedDateQuery.toFormat("yyyy-MM-dd");
     const attendanceWidget = employees.map((emp) => {
-      const attendance = emp.Attendance[0];
+      const attendance = emp.Attendance.find((att) => {
+        const keys = new Set();
+        if (att.date) {
+          keys.add(DateTime.fromJSDate(new Date(att.date)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        if (att.checkInTime) {
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime)).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+        }
+        return keys.has(targetDateStr);
+      });
 
       let status = "ABSENT";
 
@@ -594,17 +693,17 @@ const getSupervisorDashboard = async (req, res) => {
 
       return {
         id: emp.id,
-        name: `${emp.firstName} ${emp.lastName}`,
+        name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
         status,
         checkInTime: attendance?.checkInTime || null,
         checkOutTime: attendance?.checkOutTime || null,
+        activities: attendance?.activities || [],
+        company: emp.company?.name || null,
+        department: emp.department?.title || null,
       };
     });
 
-    /* ---------------------------------- */
-    /* 4️⃣ Stats Calculation */
-    /* ---------------------------------- */
-
+    // 6️⃣ Stats Calculation
     const totalEmployees = employees.length;
 
     const presentToday = attendanceWidget.filter((e) =>
@@ -617,69 +716,88 @@ const getSupervisorDashboard = async (req, res) => {
       (e) => e.status === "ABSENT"
     ).length;
 
-    /* ---------------------------------- */
-    /* 5️⃣ Team Tasks */
-    /* ---------------------------------- */
+    const lateToday = attendanceWidget.filter((e) => e.status === "LATE").length;
 
-    const teamTasks = await prisma.task.findMany({
-      where: {
-        deletedAt: null,
-        assignees: {
-          some: {
-            employeeId: { in: employeeIds },
+    // 7️⃣ Projects & Tasks
+    const projPriv = rawPrivs.find((p) => p.module === "PROJECT");
+    const taskPriv = rawPrivs.find((p) => p.module === "TASK");
+    const isProjectTeamOnly = projPriv ? projPriv.ownTeamOnly === true : false;
+    const isTaskTeamOnly = taskPriv ? taskPriv.ownTeamOnly === true : false;
+
+    let activeProjects = 0;
+    if (isProjectTeamOnly) {
+      const teamTasks = await prisma.task.findMany({
+        where: {
+          deletedAt: null,
+          assignees: {
+            some: {
+              employeeId: { in: employeeIds },
+            },
           },
         },
-      },
-      include: {
-        project: true,
-      },
-    });
+        select: {
+          projectId: true,
+        },
+      });
+      const projectIds = [...new Set(teamTasks.map((t) => t.projectId).filter(Boolean))];
+      activeProjects = await prisma.project.count({
+        where: {
+          id: { in: projectIds },
+          status: { in: ["PLANNING", "IN_PROGRESS"] },
+          deletedAt: null,
+        },
+      });
+    } else {
+      activeProjects = await prisma.project.count({
+        where: {
+          organizationId,
+          status: { in: ["PLANNING", "IN_PROGRESS"] },
+          deletedAt: null,
+        },
+      });
+    }
 
-    const completedTasks = teamTasks.filter((t) =>
-      ["DONE", "COMPLETED"].includes(t.status)
-    ).length;
+    const taskWhere = {
+      deletedAt: null,
+      ...(isTaskTeamOnly
+        ? { assignees: { some: { employeeId: { in: employeeIds } } } }
+        : { project: { organizationId } }),
+    };
 
-    const pendingTasks = teamTasks.filter(
-      (t) =>
-        t.deadline &&
-        t.deadline < new Date() &&
-        !["DONE", "COMPLETED"].includes(t.status)
-    ).length;
-
-    /* ---------------------------------- */
-    /* 6️⃣ Active Projects (Team Based) */
-    /* ---------------------------------- */
-
-    const projectIds = [
-      ...new Set(teamTasks.map((t) => t.projectId).filter(Boolean)),
-    ];
-
-    const activeProjects = await prisma.project.count({
+    const completedTasks = await prisma.task.count({
       where: {
-        id: { in: projectIds },
-        status: { in: ["PLANNING", "IN_PROGRESS"] },
-        deletedAt: null,
+        ...taskWhere,
+        status: { in: ["DONE", "COMPLETED"] },
       },
     });
 
-    /* ---------------------------------- */
-    /* RESPONSE */
-    /* ---------------------------------- */
+    const pendingTasks = await prisma.task.count({
+      where: {
+        ...taskWhere,
+        status: { in: ["TODO", "IN_PROGRESS"] },
+        deadline: { lt: new Date() },
+      },
+    });
 
     return res.json({
+      selectedDate: localStartOfDay.toISODate(),
+      timeZone: orgTimeZone,
+      location: location || "ALL",
       stats: {
         totalEmployees,
         presentToday,
         onLeave,
         absentToday,
+        lateToday,
         activeProjects,
         completedTasks,
         pendingTasks,
       },
+      leaveEmployees: leavesToday,
       attendanceWidget,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Supervisor dashboard error:", error);
     res.status(500).json({ message: "Supervisor dashboard error" });
   }
 };
@@ -1041,11 +1159,27 @@ const getAdminDashboardGraphs = async (req, res) => {
 
       teamEmployeeIds = employees.map((e) => e.id);
     } else if (role === "SUPERVISOR") {
+      const supervisor = await prisma.employee.findUnique({
+        where: { id: userId },
+        include: { privileges: true, appRole: true },
+      });
+      const rawPrivs = supervisor?.privileges?.length
+        ? supervisor.privileges
+        : (supervisor?.appRole?.privileges
+            ? (typeof supervisor.appRole.privileges === "string"
+                ? JSON.parse(supervisor.appRole.privileges)
+                : supervisor.appRole.privileges)
+            : []);
+      const empPriv = rawPrivs.find((p) => p.module === "EMPLOYEE" || p.module === "ATTENDANCE");
+      const isTeamOnly = empPriv ? empPriv.ownTeamOnly === true : false;
+
       const employees = await prisma.employee.findMany({
         where: {
           organizationId,
           deletedAt: null,
-          OR: [{ id: userId }, { supervisorId: userId }],
+          ...(isTeamOnly
+            ? { OR: [{ id: userId }, { supervisorId: userId }] }
+            : { NOT: { role: "ADMIN" } }),
         },
         select: { id: true },
       });
@@ -1100,30 +1234,52 @@ const getAdminDashboardGraphs = async (req, res) => {
     /* 3️⃣ Project Status Distribution */
     /* ---------------------------------- */
 
-    const teamTasks = await prisma.task.findMany({
-      where: {
-        deletedAt: null,
-        assignees: {
-          some: {
-            employeeId: { in: teamEmployeeIds },
+    let isProjectTeamOnly = false;
+    if (role === "SUPERVISOR") {
+      const supervisor = await prisma.employee.findUnique({
+        where: { id: userId },
+        include: { privileges: true, appRole: true },
+      });
+      const rawPrivs = supervisor?.privileges?.length
+        ? supervisor.privileges
+        : (supervisor?.appRole?.privileges
+            ? (typeof supervisor.appRole.privileges === "string"
+                ? JSON.parse(supervisor.appRole.privileges)
+                : supervisor.appRole.privileges)
+            : []);
+      const projPriv = rawPrivs.find((p) => p.module === "PROJECT");
+      isProjectTeamOnly = projPriv ? projPriv.ownTeamOnly === true : false;
+    }
+
+    const projectWhere = {
+      organizationId,
+      deletedAt: null,
+    };
+
+    if (isProjectTeamOnly) {
+      const teamTasks = await prisma.task.findMany({
+        where: {
+          deletedAt: null,
+          assignees: {
+            some: {
+              employeeId: { in: teamEmployeeIds },
+            },
           },
         },
-      },
-      select: {
-        projectId: true,
-      },
-    });
+        select: {
+          projectId: true,
+        },
+      });
 
-    const projectIds = [
-      ...new Set(teamTasks.map((t) => t.projectId).filter(Boolean)),
-    ];
+      const projectIds = [
+        ...new Set(teamTasks.map((t) => t.projectId).filter(Boolean)),
+      ];
+      projectWhere.id = { in: projectIds };
+    }
 
     const projectStatuses = await prisma.project.groupBy({
       by: ["status"],
-      where: {
-        id: { in: projectIds },
-        deletedAt: null,
-      },
+      where: projectWhere,
       _count: true,
     });
 
@@ -1143,11 +1299,15 @@ const getAdminDashboardGraphs = async (req, res) => {
       where: {
         deletedAt: null,
         createdAt: { gte: sixMonthsAgo },
-        assignees: {
-          some: {
-            employeeId: { in: teamEmployeeIds },
-          },
-        },
+        ...(isProjectTeamOnly
+          ? {
+              assignees: {
+                some: {
+                  employeeId: { in: teamEmployeeIds },
+                },
+              },
+            }
+          : { project: { organizationId } }),
       },
     });
 

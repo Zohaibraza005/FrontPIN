@@ -46,8 +46,9 @@ exports.getAdminDashboard = async (req, res) => {
       const company = parseOptionalInt(companyId);
       const employee = parseOptionalInt(employeeId);
   
+      const orgId = req.user?.organizationId || req.user?.orgId;
       const employeeFilter = {
-        organizationId: req.user.organizationId,
+        ...(orgId && { organizationId: orgId }),
         deletedAt: null,
         NOT: { role: "ADMIN" },
         ...(department && { departmentId: department }),
@@ -121,11 +122,15 @@ const company = parseOptionalInt(companyId);
 const employee = parseOptionalInt(employeeId);
 
   
+      const orgId = req.user?.organizationId || req.user?.orgId;
       const attendance = await prisma.attendance.findMany({
         where: {
           date: { gte: start, lte: end },
+          deletedAt: null,
           employee: {
-            organizationId: req.user.organizationId,
+            deletedAt: null,
+            NOT: { role: "ADMIN" },
+            ...(orgId && { organizationId: orgId }),
             ...(department && { departmentId: department }),
             ...(company && { companyId: company }),
             ...(employee && { id: employee }),
@@ -216,54 +221,71 @@ const employee = parseOptionalInt(employeeId);
       const department = parseOptionalInt(req.query.departmentId);
       const company = parseOptionalInt(req.query.companyId);
       const employee = parseOptionalInt(req.query.employeeId);
+      const orgId = req.user?.organizationId || req.user?.orgId;
 
-      
+      const employeeWhere = {
+        deletedAt: null,
+        NOT: { role: "ADMIN" },
+        ...(orgId && { organizationId: orgId }),
+        ...(department && { departmentId: department }),
+        ...(company && { companyId: company }),
+        ...(employee && { id: employee }),
+      };
+
+      const validEmployees = await prisma.employee.findMany({
+        where: employeeWhere,
+        select: { id: true, firstName: true, lastName: true },
+      });
+
+      const empMap = new Map(
+        validEmployees.map((e) => [e.id, `${e.firstName || ""} ${e.lastName || ""}`.trim()])
+      );
+      const employeeIds = validEmployees.map((e) => e.id);
+
+      if (employeeIds.length === 0) {
+        return res.json({
+          success: true,
+          ranking: [],
+        });
+      }
+
       const activities = await prisma.activityLog.findMany({
         where: {
           type: "TASK",
           startTime: { gte: start, lte: end },
-          employee: {
-            organizationId: req.user.organizationId,
-            ...(department && { departmentId: department }),
-            ...(company && { companyId: company }),
-            ...(employee && { id: employee }), // 🔥 NEW
-
-          },
-        },
-        include: {
-          employee: true,
+          employeeId: { in: employeeIds },
         },
       });
-    
-  
+
       const grouped = {};
-  
+
       activities.forEach((a) => {
         const id = a.employeeId;
-  
+
         if (!grouped[id]) {
           grouped[id] = {
-            employee: `${a.employee.firstName} ${a.employee.lastName}`,
+            employee: empMap.get(id) || "Unknown",
             totalMinutes: 0,
           };
         }
-  
+
         grouped[id].totalMinutes += a.durationMinutes || 0;
       });
-  
+
       const ranking = Object.values(grouped)
         .map((e) => ({
           employee: e.employee,
           totalHours: (e.totalMinutes / 60).toFixed(1),
         }))
-        .sort((a, b) => b.totalHours - a.totalHours);
-  
+        .sort((a, b) => Number(b.totalHours) - Number(a.totalHours));
+
       res.json({
         success: true,
         ranking,
       });
     } catch (err) {
-      res.status(500).json({ success: false });
+      console.error("Error in getEmployeePerformance:", err);
+      res.status(500).json({ success: false, message: err.message });
     }
   };
   exports.getTaskAnalytics = async (req, res) => {

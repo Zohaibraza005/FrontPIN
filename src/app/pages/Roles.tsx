@@ -11,7 +11,7 @@ import { Textarea } from "../components/ui/textarea";
 import { 
   Search, Plus, Edit, Trash2, Shield, Users, RefreshCw, CheckCircle2, 
   Lock, Sparkles, AlertTriangle, Eye, Check, X, Clock, Calendar, 
-  CalendarDays, Timer, FolderKanban, CheckSquare, Receipt, BarChart3, MapPin 
+  CalendarDays, Timer, DollarSign, Cog, BarChart3, MapPin 
 } from "lucide-react";
 import { toast } from "sonner";
 import { roleAPI } from "../services/api";
@@ -22,10 +22,9 @@ export const privilegesList = [
   { id: "schedule", label: "Schedule", description: "Manage and assign work shifts and rosters" },
   { id: "leave", label: "Leave", description: "Request, review and approve leave applications" },
   { id: "overtime", label: "Overtime", description: "Submit, verify and approve overtime logs" },
-  { id: "project", label: "Project", description: "Create projects, milestones and team allocations" },
-  { id: "task", label: "Task", description: "Create, assign and update project task statuses" },
-  { id: "invoice", label: "Invoice", description: "Generate invoices, billing items and track payments" },
+  { id: "payroll", label: "Payroll", description: "Manage salary, payslips, deductions and hourly rates" },
   { id: "report", label: "Report (Own Team)", description: "View analytics, export attendance and team reports" },
+  { id: "organization", label: "Organization", description: "Manage company settings, departments, locations and entities" },
   { id: "enable_gps", label: "GPS Tracking", description: "Enforce location geofencing and mobile check-ins" },
 ];
 
@@ -35,10 +34,9 @@ const moduleConfig: Record<string, { icon: any; color: string; bg: string }> = {
   schedule: { icon: Calendar, color: "text-purple-600", bg: "bg-purple-50 text-purple-600 border border-purple-200" },
   leave: { icon: CalendarDays, color: "text-amber-600", bg: "bg-amber-50 text-amber-600 border border-amber-200" },
   overtime: { icon: Timer, color: "text-orange-600", bg: "bg-orange-50 text-orange-600 border border-orange-200" },
-  project: { icon: FolderKanban, color: "text-sky-600", bg: "bg-sky-50 text-sky-600 border border-sky-200" },
-  task: { icon: CheckSquare, color: "text-indigo-600", bg: "bg-indigo-50 text-indigo-600 border border-indigo-200" },
-  invoice: { icon: Receipt, color: "text-teal-600", bg: "bg-teal-50 text-teal-600 border border-teal-200" },
+  payroll: { icon: DollarSign, color: "text-emerald-600", bg: "bg-emerald-50 text-emerald-600 border border-emerald-200" },
   report: { icon: BarChart3, color: "text-rose-600", bg: "bg-rose-50 text-rose-600 border border-rose-200" },
+  organization: { icon: Cog, color: "text-indigo-600", bg: "bg-indigo-50 text-indigo-600 border border-indigo-200" },
   enable_gps: { icon: MapPin, color: "text-cyan-600", bg: "bg-cyan-50 text-cyan-600 border border-cyan-200" },
 };
 

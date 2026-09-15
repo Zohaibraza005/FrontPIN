@@ -106,7 +106,7 @@ exports.createSchedule = async (req, res) => {
         }
       });
   
-      const existingEmployeeIds = existingSchedules.map(s => s.employeeId);
+      const existingEmployeeIds = [...new Set(existingSchedules.map(s => s.employeeId))];
   
       //////////////////////////////////////////////////
       // IF EXISTING AND NO OVERWRITE → RETURN CONFLICT
@@ -125,34 +125,46 @@ exports.createSchedule = async (req, res) => {
       }
   
       //////////////////////////////////////////////////
-      // OVERWRITE LOGIC
+      // DETERMINE TARGET EMPLOYEES & OVERWRITE
       //////////////////////////////////////////////////
   
-      if (overwriteEmployeeIds.length) {
-        await prisma.schedule.updateMany({
-          where: {
-            employeeId: { in: overwriteEmployeeIds },
-            deletedAt: null
-          },
-          data: {
-            deletedAt: new Date()
-          }
+      // Only create/update schedules for employees that don't have one, or were explicitly confirmed for overwrite
+      const targetEmployees = employees.filter(emp =>
+        !existingEmployeeIds.includes(emp.id) || overwriteEmployeeIds.includes(emp.id)
+      );
+
+      if (!targetEmployees.length) {
+        return res.json({
+          success: true,
+          message: "No schedules to update",
+          data: []
         });
       }
+
+      // Soft-delete any existing active schedules for target employees so each employee has strictly ONE active schedule
+      await prisma.schedule.updateMany({
+        where: {
+          employeeId: { in: targetEmployees.map(e => e.id) },
+          deletedAt: null
+        },
+        data: {
+          deletedAt: new Date()
+        }
+      });
   
       //////////////////////////////////////////////////
       // CREATE SCHEDULE
       //////////////////////////////////////////////////
   
       const schedules = await prisma.$transaction(
-        employees.map(emp =>
+        targetEmployees.map(emp =>
           prisma.schedule.create({
             data: {
               employeeId: emp.id,
               days,
               startTime,
               endTime,
-              companyId: companyId ? Number(companyId) : null,
+              companyId: companyId ? Number(companyId) : (scopeType === 'location' && selectedIds?.[0] ? Number(selectedIds[0]) : (emp.companyId || null)),
               allowEarlyIn: allowEarlyIn || false,
               earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
               allowEarlyOut: allowEarlyOut || false,
@@ -163,6 +175,24 @@ exports.createSchedule = async (req, res) => {
               halfDayMinutes: halfDayMins,
               breaksAllowed: breaksAllowed || false,
               breakDurations: breaksAllowed ? breakDurations : []
+            },
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  role: true,
+                  companyId: true,
+                  company: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              },
+              company: true
             }
           })
         )
@@ -238,9 +268,31 @@ exports.getSchedules = async (req, res) => {
       orderBy: { createdAt: "desc" }
     });
 
+    // Deduplicate by employeeId: keep only the latest active schedule per employee
+    const seenEmpIds = new Set();
+    const uniqueSchedules = [];
+    const duplicateScheduleIds = [];
+
+    for (const sched of schedules) {
+      const empId = sched.employeeId || sched.employee?.id;
+      if (empId && !seenEmpIds.has(empId)) {
+        seenEmpIds.add(empId);
+        uniqueSchedules.push(sched);
+      } else if (empId) {
+        duplicateScheduleIds.push(sched.id);
+      }
+    }
+
+    if (duplicateScheduleIds.length > 0) {
+      prisma.schedule.updateMany({
+        where: { id: { in: duplicateScheduleIds } },
+        data: { deletedAt: new Date() }
+      }).catch(err => console.error("Error auto-cleaning duplicate schedules:", err));
+    }
+
     res.json({
       success: true,
-      data: schedules
+      data: uniqueSchedules
     });
 
   } catch (error) {
@@ -287,7 +339,7 @@ exports.updateSchedule = async (req, res) => {
         days,
         startTime,
         endTime,
-        companyId: companyId ? Number(companyId) : null,
+        companyId: companyId !== undefined ? (companyId ? Number(companyId) : null) : undefined,
         allowEarlyIn,
         earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
         allowEarlyOut,
@@ -298,6 +350,24 @@ exports.updateSchedule = async (req, res) => {
         halfDayMinutes: halfDayMinsEdit,
         breaksAllowed,
         breakDurations: breaksAllowed ? breakDurations : []
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+            companyId: true,
+            company: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        },
+        company: true
       }
     });
 
