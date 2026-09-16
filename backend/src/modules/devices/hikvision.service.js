@@ -190,6 +190,13 @@ async function pushUserToHikvision(device, { biometricId, name }) {
       employeeNo: String(biometricId),
       name: String(name || `User ${biometricId}`),
       userType: "normal",
+      doorRight: "1",
+      RightPlan: [
+        {
+          doorNo: 1,
+          planTemplateNo: "1",
+        },
+      ],
       closeDelayEnabled: false,
       Valid: {
         enable: true,
@@ -511,7 +518,7 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
         } catch (e) {
           console.error("[Hikvision Periodic Sync Error]:", e.message);
         }
-      }, 60 * 1000);
+      }, 300 * 1000);
     }
   } catch (error) {
     console.error(`[Hikvision Streams Init Error]:`, error.message);

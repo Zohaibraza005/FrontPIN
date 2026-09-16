@@ -201,68 +201,98 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     }
   };
 
-  // Find existing attendance for today
-  let attendance = await prisma.attendance.findFirst({
-    where: {
-      employeeId: employee.id,
-      date: {
-        gte: todayStart,
-        lte: todayEnd,
-      },
-    },
-    orderBy: { checkInTime: "asc" },
-  });
+  // Find existing attendance for today (use upsert to prevent race-condition duplicates)
+  let attendance = null;
+  let isNewCheckIn = false;
 
-  // If no attendance found for today, check for an active unclosed shift from yesterday within 15 hours
-  if (!attendance) {
-    const activeRecent = await prisma.attendance.findFirst({
+  try {
+    // First try to find existing record
+    attendance = await prisma.attendance.findFirst({
       where: {
         employeeId: employee.id,
-        checkInTime: { not: null },
-        checkOutTime: null,
+        date: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
       },
-      orderBy: { checkInTime: "desc" },
+      orderBy: { checkInTime: "asc" },
     });
 
-    if (activeRecent && activeRecent.checkInTime) {
-      const diffHoursFromCheckIn = pTime.diff(moment(activeRecent.checkInTime), "hours", true);
-      if (diffHoursFromCheckIn < 15) {
-        // Still within 15-hour window of the previous shift
-        attendance = activeRecent;
-      } else {
-        // Auto-close past unclosed attendance at 15 hours limit
-        const autoOutTime = moment(activeRecent.checkInTime).add(15, "hours").toDate();
-        await prisma.attendance.update({
-          where: { id: activeRecent.id },
-          data: {
-            checkOutTime: autoOutTime,
-            autoClockedOut: true,
-            totalWorkedMinutes: 15 * 60,
-          },
-        });
+    // If no attendance found for today, check for an active unclosed shift from yesterday within 15 hours
+    if (!attendance) {
+      const activeRecent = await prisma.attendance.findFirst({
+        where: {
+          employeeId: employee.id,
+          checkInTime: { not: null },
+          checkOutTime: null,
+        },
+        orderBy: { checkInTime: "desc" },
+      });
+
+      if (activeRecent && activeRecent.checkInTime) {
+        const diffHoursFromCheckIn = pTime.diff(moment(activeRecent.checkInTime), "hours", true);
+        if (diffHoursFromCheckIn < 15) {
+          // Still within 15-hour window of the previous shift
+          attendance = activeRecent;
+        } else {
+          // Auto-close past unclosed attendance at 15 hours limit
+          const autoOutTime = moment(activeRecent.checkInTime).add(15, "hours").toDate();
+          await prisma.attendance.update({
+            where: { id: activeRecent.id },
+            data: {
+              checkOutTime: autoOutTime,
+              autoClockedOut: true,
+              totalWorkedMinutes: 15 * 60,
+            },
+          });
+        }
       }
+    }
+
+    // 1️⃣ First Punch of the Shift -> CHECK-IN (atomic upsert to prevent duplicates)
+    if (!attendance) {
+      const { isLate, lateMinutes, status } = calcLateness(pTime);
+
+      attendance = await prisma.attendance.upsert({
+        where: {
+          employeeId_date: {
+            employeeId: employee.id,
+            date: todayStart,
+          },
+        },
+        create: {
+          employeeId: employee.id,
+          date: todayStart,
+          shiftStartTime: schedule.startTime,
+          shiftEndTime: schedule.endTime,
+          checkInTime: punchDate,
+          checkInMethod: punchMethod,
+          checkInDevice: deviceTag,
+          isLate,
+          lateMinutes,
+          status,
+        },
+        update: {},  // If already exists, don't overwrite — just return it
+      });
+
+      isNewCheckIn = true;
+    }
+  } catch (err) {
+    // P2002 = unique constraint violation (another stream already created the record)
+    if (err.code === "P2002") {
+      attendance = await prisma.attendance.findFirst({
+        where: {
+          employeeId: employee.id,
+          date: { gte: todayStart, lte: todayEnd },
+        },
+        orderBy: { checkInTime: "asc" },
+      });
+    } else {
+      throw err;
     }
   }
 
-  // 1️⃣ First Punch of the Shift -> CHECK-IN
-  if (!attendance) {
-    const { isLate, lateMinutes, status } = calcLateness(pTime);
-
-    attendance = await prisma.attendance.create({
-      data: {
-        employeeId: employee.id,
-        date: todayStart,
-        shiftStartTime: schedule.startTime,
-        shiftEndTime: schedule.endTime,
-        checkInTime: punchDate,
-        checkInMethod: punchMethod,
-        checkInDevice: deviceTag,
-        isLate,
-        lateMinutes,
-        status,
-      },
-    });
-
+  if (isNewCheckIn && attendance) {
     await recordPunch(attendance.id, "CHECK_IN", punchDate);
     console.log(`[Biometric Punch] CHECK-IN recorded for ${employee.firstName} ${employee.lastName} (${bioIdStr}) at ${punchDate.toISOString()}`);
     return { success: true, type: "CHECK_IN", employee, attendance };
@@ -310,24 +340,45 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
     const { isLate, lateMinutes, status } = calcLateness(pTime);
 
-    const newAttendance = await prisma.attendance.create({
-      data: {
-        employeeId: employee.id,
-        date: todayStart,
-        shiftStartTime: schedule.startTime,
-        shiftEndTime: schedule.endTime,
-        checkInTime: punchDate,
-        checkInMethod: punchMethod,
-        checkInDevice: deviceTag,
-        isLate,
-        lateMinutes,
-        status,
-      },
-    });
+    let newAttendance;
+    try {
+      newAttendance = await prisma.attendance.upsert({
+        where: {
+          employeeId_date: {
+            employeeId: employee.id,
+            date: todayStart,
+          },
+        },
+        create: {
+          employeeId: employee.id,
+          date: todayStart,
+          shiftStartTime: schedule.startTime,
+          shiftEndTime: schedule.endTime,
+          checkInTime: punchDate,
+          checkInMethod: punchMethod,
+          checkInDevice: deviceTag,
+          isLate,
+          lateMinutes,
+          status,
+        },
+        update: {},
+      });
+    } catch (err) {
+      if (err.code === "P2002") {
+        newAttendance = await prisma.attendance.findFirst({
+          where: { employeeId: employee.id, date: { gte: todayStart, lte: todayEnd } },
+          orderBy: { checkInTime: "asc" },
+        });
+      } else {
+        throw err;
+      }
+    }
 
-    await recordPunch(newAttendance.id, "CHECK_IN", punchDate);
-    console.log(`[Biometric Punch] 15h exceeded: New CHECK-IN recorded for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
-    return { success: true, type: "CHECK_IN", employee, attendance: newAttendance };
+    if (newAttendance) {
+      await recordPunch(newAttendance.id, "CHECK_IN", punchDate);
+      console.log(`[Biometric Punch] 15h exceeded: New CHECK-IN recorded for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
+      return { success: true, type: "CHECK_IN", employee, attendance: newAttendance };
+    }
   }
 
   // Punches received within 2 minutes of Check-In are treated as duplicate scans

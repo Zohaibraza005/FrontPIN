@@ -94,8 +94,7 @@ export const Employees: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
-  const getInitialEmpLoc = () => localStorage.getItem("selectedLocation") || 'all';
-  const [filterLocation, setFilterLocation] = useState<string>(getInitialEmpLoc);
+  const [filterLocation, setFilterLocation] = useState<string>('all');
   const [filterLogin, setFilterLogin] = useState('all');
 
   // Pagination state for Employees
@@ -308,16 +307,31 @@ export const Employees: React.FC = () => {
     if (emp.role === 'ADMIN' || emp.role === 'admin') return false;
     const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || '';
     const email = emp.email || '';
+    const username = emp.username || '';
+    const phone = emp.phoneNumber || '';
     const designation = emp.jobInfo?.designation || emp.designation || '';
     const empCode = emp.employeeId || emp.id?.toString() || '';
+    const biometricId = emp.biometricId ? String(emp.biometricId) : '';
     const query = searchQuery.toLowerCase().trim();
 
     const matchesSearch =
       !query ||
       fullName.toLowerCase().includes(query) ||
       email.toLowerCase().includes(query) ||
+      username.toLowerCase().includes(query) ||
+      phone.toLowerCase().includes(query) ||
       designation.toLowerCase().includes(query) ||
-      empCode.toLowerCase().includes(query);
+      empCode.toLowerCase().includes(query) ||
+      biometricId.toLowerCase().includes(query);
+
+    // If query was typed but this employee doesn't match the search, skip
+    if (!matchesSearch) return false;
+
+    // When a user explicitly searches for an employee by name, ID, username, phone or email,
+    // show them immediately across all branches and departments so they are never hidden
+    if (query) {
+      return true;
+    }
 
     const empDept = String(
       emp.departmentId ||
@@ -332,7 +346,7 @@ export const Employees: React.FC = () => {
       empDept === filterDepartment ||
       (emp.department?.title && emp.department.title === filterDepartment);
 
-    const matchesRole = filterRole === 'all' || emp.role === filterRole;
+    const matchesRole = filterRole === 'all' || emp.role?.toLowerCase() === filterRole?.toLowerCase();
 
     const empCompId = String(emp.companyId || emp.company?.id || emp.locationId || '');
     const matchesLocation =
@@ -346,7 +360,7 @@ export const Employees: React.FC = () => {
       (filterLogin === 'yes' && Boolean(emp.canLogin)) ||
       (filterLogin === 'no' && !emp.canLogin);
 
-    return matchesSearch && matchesDept && matchesRole && matchesLocation && matchesLogin;
+    return matchesDept && matchesRole && matchesLocation && matchesLogin;
   });
 
   // Pagination calculations

@@ -448,6 +448,7 @@ export const AddEmployee: React.FC = () => {
       await employeeAPI.createEmployee(formData);
 
       toast.success("Employee created successfully!");
+      window.dispatchEvent(new CustomEvent('employee-updated'));
       resetForm();
       navigate('/employees');
 

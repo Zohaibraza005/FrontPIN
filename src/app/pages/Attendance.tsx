@@ -237,6 +237,105 @@ export const isScheduleOffDay = (schedules: any, date: Date | string): boolean =
   return !daysArr.includes(dStr) && !daysArr.includes(dFull);
 };
 
+const calculateShiftDuration = (startStr?: string, endStr?: string) => {
+  if (!startStr || !endStr) return "—";
+  try {
+    const [sh, sm] = startStr.trim().split(":").map(Number);
+    const [eh, em] = endStr.trim().split(":").map(Number);
+    if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return "—";
+    let startMinutes = sh * 60 + sm;
+    let endMinutes = eh * 60 + em;
+    if (endMinutes < startMinutes) {
+      endMinutes += 24 * 60; // Overnight shift
+    }
+    const diff = endMinutes - startMinutes;
+    return formatMinutes(diff);
+  } catch {
+    return "—";
+  }
+};
+
+const getEmployeeScheduleForDate = (schedules: any, date: Date | string, fallbackRecord?: any) => {
+  const list = Array.isArray(schedules) ? schedules : (schedules ? [schedules] : []);
+  const activeSched = list.find((s: any) => s && !s.deletedAt) || list[0];
+
+  const targetDate = typeof date === "string" ? new Date(date.length <= 10 ? `${date}T00:00:00` : date) : new Date(date);
+  const shortDay = format(targetDate, "EEE").toLowerCase();
+  const fullDay = format(targetDate, "EEEE").toLowerCase();
+
+  if (!activeSched) {
+    if (fallbackRecord?.shiftStartTime && fallbackRecord?.shiftEndTime) {
+      return {
+        isScheduled: true,
+        isWorkingDay: true,
+        dayName: format(targetDate, "EEEE"),
+        startTime: fallbackRecord.shiftStartTime,
+        endTime: fallbackRecord.shiftEndTime,
+        startTime12: convertTo12Hour(fallbackRecord.shiftStartTime),
+        endTime12: convertTo12Hour(fallbackRecord.shiftEndTime),
+        allowEarlyIn: false,
+        earlyInMinutes: 0,
+        allowEarlyOut: false,
+        earlyOutMinutes: 0,
+        overtimeAllowed: false,
+        overtimeMinutes: 0,
+        allowHalfDay: false,
+        halfDayMinutes: 0,
+        breaksAllowed: false,
+        breakDurations: [],
+      };
+    }
+    return null;
+  }
+
+  const daysArr = Array.isArray(activeSched.days) ? activeSched.days : [];
+  
+  let isWorkingDay = false;
+  let daySpecificStart: string | null = null;
+  let daySpecificEnd: string | null = null;
+
+  for (const d of daysArr) {
+    if (typeof d === "object" && d !== null) {
+      const name = String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+      if (name === shortDay || name === fullDay) {
+        isWorkingDay = true;
+        if (d.startTime) daySpecificStart = d.startTime;
+        if (d.endTime) daySpecificEnd = d.endTime;
+        break;
+      }
+    } else {
+      const name = String(d || "").trim().toLowerCase();
+      if (name === shortDay || name === fullDay) {
+        isWorkingDay = true;
+        break;
+      }
+    }
+  }
+
+  const shiftStart = daySpecificStart || activeSched.startTime || fallbackRecord?.shiftStartTime || "09:00";
+  const shiftEnd = daySpecificEnd || activeSched.endTime || fallbackRecord?.shiftEndTime || "18:00";
+
+  return {
+    isScheduled: true,
+    isWorkingDay,
+    dayName: format(targetDate, "EEEE"),
+    startTime: shiftStart,
+    endTime: shiftEnd,
+    startTime12: convertTo12Hour(shiftStart),
+    endTime12: convertTo12Hour(shiftEnd),
+    allowEarlyIn: Boolean(activeSched.allowEarlyIn),
+    earlyInMinutes: activeSched.earlyInMinutes ?? 15,
+    allowEarlyOut: Boolean(activeSched.allowEarlyOut),
+    earlyOutMinutes: activeSched.earlyOutMinutes ?? 15,
+    overtimeAllowed: Boolean(activeSched.overtimeAllowed),
+    overtimeMinutes: activeSched.overtimeMinutes ?? 30,
+    allowHalfDay: Boolean(activeSched.allowHalfDay),
+    halfDayMinutes: activeSched.halfDayMinutes ?? 240,
+    breaksAllowed: Boolean(activeSched.breaksAllowed),
+    breakDurations: activeSched.breakDurations || [],
+  };
+};
+
 const getPaginationRange = (current: number, total: number) => {
   if (total <= 7) {
     return Array.from({ length: total }, (_, i) => i + 1);
@@ -329,8 +428,13 @@ export const Attendance: React.FC = () => {
     }
   };
 
-  const openViewPanel = (record) => {
-    setViewRecord(record);
+  const openViewPanel = (record: any, emp?: any) => {
+    const matchedEmp = emp || report.find((e) => e.id === record?.employeeId) || employees.find((e) => e.id === record?.employeeId);
+    setViewRecord({
+      ...record,
+      employee: matchedEmp || record?.employee,
+      schedule: record?.schedule || matchedEmp?.Schedule,
+    });
     setViewPanelOpen(true);
   };
 
@@ -1249,6 +1353,10 @@ export const Attendance: React.FC = () => {
                         totalWorkedMinutes: workedMins,
                         totalBreakMinutes: record?.totalBreakMinutes ?? 0,
                         employeeId: record?.employeeId ?? emp.id,
+                        employee: emp,
+                        schedule: emp?.Schedule,
+                        shiftStartTime: record?.shiftStartTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.startTime : emp?.Schedule?.startTime),
+                        shiftEndTime: record?.shiftEndTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.endTime : emp?.Schedule?.endTime),
                         ...record,
                         status: rawStatus,
                         overtimeHours: otHours,
@@ -1329,7 +1437,7 @@ export const Attendance: React.FC = () => {
                                 size="sm"
                                 variant="outline"
                                 className="h-8 px-2.5 text-xs gap-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                onClick={() => openViewPanel(finalRecord)}
+                                onClick={() => openViewPanel(finalRecord, emp)}
                               >
                                 <Eye className="w-3.5 h-3.5 text-gray-500" />
                                 View
@@ -1683,27 +1791,147 @@ export const Attendance: React.FC = () => {
       {/* View Detail Modal Dialog */}
       <Dialog open={viewPanelOpen} onOpenChange={setViewPanelOpen}>
         <DialogContent className="max-w-lg rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
-          {viewRecord && (
-            <div className="space-y-5">
-              {/* Clean, Single-color Header */}
-              <DialogHeader className="border-b border-gray-100 dark:border-gray-800 pb-3.5 pr-8">
-                <div className="flex items-center justify-between gap-3">
-                  <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                    <CalendarDays className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                    <span>Attendance Details</span>
-                  </DialogTitle>
-                  <Badge className={`px-2.5 py-0.5 text-xs font-semibold ${STATUS_CONFIG[viewRecord.status]?.badge}`}>
-                    {viewRecord.status}
-                  </Badge>
-                </div>
-                <p className="text-xs text-gray-500 font-medium text-left">
-                  {format(new Date(viewRecord.date), "EEEE, MMMM d, yyyy")}
-                </p>
-              </DialogHeader>
+          {viewRecord && (() => {
+            const targetEmp = viewRecord.employee || report.find((e) => e.id === viewRecord.employeeId) || employees.find((e) => e.id === viewRecord.employeeId);
+            const empSched = viewRecord.schedule || targetEmp?.Schedule;
+            const daySchedule = getEmployeeScheduleForDate(empSched, viewRecord.date, viewRecord);
+            const companyObj = targetEmp?.company || locations.find((l) => String(l.id) === String(targetEmp?.companyId || (Array.isArray(empSched) ? empSched[0]?.companyId : empSched?.companyId)));
+            const locName = companyObj?.name || companyObj?.title || "";
+            const empFullName = targetEmp ? `${targetEmp.firstName || ""} ${targetEmp.lastName || ""}`.trim() : "";
+            const empIdCode = targetEmp?.employeeId || targetEmp?.id;
 
-              {/* Body */}
-              <div className="max-h-[70vh] overflow-y-auto space-y-4 pr-1">
-                {/* Summary Grid Box */}
+            return (
+              <div className="space-y-5">
+                {/* Clean, Single-color Header */}
+                <DialogHeader className="border-b border-gray-100 dark:border-gray-800 pb-3.5 pr-8">
+                  <div className="flex items-center justify-between gap-3">
+                    <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                      <CalendarDays className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                      <span>Attendance Details</span>
+                    </DialogTitle>
+                    <Badge className={`px-2.5 py-0.5 text-xs font-semibold ${STATUS_CONFIG[viewRecord.status]?.badge}`}>
+                      {viewRecord.status}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <p className="text-xs text-gray-500 font-medium text-left">
+                      {format(new Date(viewRecord.date), "EEEE, MMMM d, yyyy")}
+                    </p>
+                    {empFullName && (
+                      <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                        {empFullName} {empIdCode ? `(#${empIdCode})` : ""}
+                      </span>
+                    )}
+                  </div>
+                </DialogHeader>
+
+                {/* Body */}
+                <div className="max-h-[70vh] overflow-y-auto space-y-4 pr-1">
+                  {/* ── Today's Scheduled Shift Card ────────────────────────── */}
+                  <div className="bg-blue-50/70 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="size-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-blue-950 dark:text-blue-200 uppercase tracking-wider">
+                            Today's Shift Schedule
+                          </h4>
+                          <p className="text-[11px] text-blue-600/90 dark:text-blue-400 font-medium">
+                            {daySchedule?.dayName || format(new Date(viewRecord.date), "EEEE")}
+                          </p>
+                        </div>
+                      </div>
+
+                      {daySchedule ? (
+                        daySchedule.isWorkingDay ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
+                            Working Day
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300">
+                            Scheduled Off Day
+                          </span>
+                        )
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                          No Schedule
+                        </span>
+                      )}
+                    </div>
+
+                    {daySchedule?.isWorkingDay ? (
+                      <div className="space-y-2.5 pt-1">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-white/80 dark:bg-gray-900/80 border border-blue-100/80 dark:border-blue-900/50 rounded-xl p-3 text-xs">
+                          <div>
+                            <span className="text-gray-400 font-medium block text-[11px]">Shift Timing</span>
+                            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">
+                              {daySchedule.startTime12} — {daySchedule.endTime12}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 font-medium block text-[11px]">Shift Duration</span>
+                            <span className="font-bold text-blue-600 dark:text-blue-400 text-sm">
+                              {calculateShiftDuration(daySchedule.startTime, daySchedule.endTime)}
+                            </span>
+                          </div>
+                          {locName && (
+                            <div className="col-span-2 sm:col-span-1">
+                              <span className="text-gray-400 font-medium block text-[11px]">Location</span>
+                              <span className="font-bold text-gray-800 dark:text-gray-200 text-sm truncate block">
+                                {locName}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Shift Badges */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {daySchedule.allowEarlyIn && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Early In ({daySchedule.earlyInMinutes}m)
+                            </span>
+                          )}
+                          {daySchedule.allowEarlyOut && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300">
+                              Early Out ({daySchedule.earlyOutMinutes}m)
+                            </span>
+                          )}
+                          {daySchedule.overtimeAllowed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300">
+                              Overtime ({daySchedule.overtimeMinutes}m)
+                            </span>
+                          )}
+                          {daySchedule.allowHalfDay && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300">
+                              Half Day ({daySchedule.halfDayMinutes}m)
+                            </span>
+                          )}
+                          {daySchedule.breaksAllowed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300">
+                              Breaks ({Array.isArray(daySchedule.breakDurations) ? daySchedule.breakDurations.length : 1})
+                            </span>
+                          )}
+                          {!daySchedule.allowEarlyIn &&
+                            !daySchedule.allowEarlyOut &&
+                            !daySchedule.overtimeAllowed &&
+                            !daySchedule.allowHalfDay &&
+                            !daySchedule.breaksAllowed && (
+                              <span className="text-[11px] text-gray-400">Standard Shift</span>
+                            )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white/80 dark:bg-gray-900/80 border border-blue-100/80 dark:border-blue-900/50 rounded-xl p-3 text-xs text-gray-500 dark:text-gray-400">
+                        {daySchedule
+                          ? `This day (${daySchedule.dayName}) is a scheduled Off Day / Rest Day for this employee.`
+                          : "No active schedule assigned to this employee."}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Summary Grid Box */}
                 <div className="bg-gray-50/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-800 rounded-2xl p-4.5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                     <div className="space-y-1">
@@ -1879,7 +2107,8 @@ export const Attendance: React.FC = () => {
                 </div>
               </div>
             </div>
-          )}
+          );
+        })()}
         </DialogContent>
       </Dialog>
     </div>
