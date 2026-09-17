@@ -6,12 +6,30 @@ function md5(str) {
   return crypto.createHash("md5").update(str).digest("hex");
 }
 
+function resolveHikvisionPort(port) {
+  const p = Number(port);
+  if (!p || p === 8000 || p === 4370) return 80;
+  return p;
+}
+
 const VALID_MINOR_CODES = new Set([
   1,   // Legal card / Access granted
+  25,  // Card and Face comparison passed
   38,  // Card + Face / Access granted
   75,  // Face verification / Access granted
   76,  // Fingerprint verification / Access granted
+  77,  // Face and fingerprint passed
+  78,  // Card and face and fingerprint passed
+  79,  // Card and password passed
+  80,  // Fingerprint and password passed
+  81,  // Face and password passed
+  82,  // Face, fingerprint, and password passed
+  83,  // Card, fingerprint, and password passed
+  84,  // Card, face, and password passed
+  85,  // Card, face, fingerprint, and password passed
+  113, // Bluetooth passed
   115, // QR code verification / Access granted
+  120, // Iris passed
 ]);
 
 /**
@@ -113,7 +131,7 @@ async function parseHikvisionEvent(body) {
 function sendHikvisionDigest(ip, port, username, password, method, path, data) {
   return new Promise((resolve) => {
     const postData = JSON.stringify(data);
-    const targetPort = port || 80;
+    const targetPort = resolveHikvisionPort(port);
 
     const options = {
       hostname: ip,
@@ -209,7 +227,7 @@ async function pushUserToHikvision(device, { biometricId, name }) {
   try {
     const res = await sendHikvisionDigest(
       device.ipAddress,
-      device.port || 80,
+      resolveHikvisionPort(device.port),
       device.username || "admin",
       device.password || "",
       "PUT",
@@ -241,7 +259,7 @@ function startHikvisionStream(device, processPunchCallback) {
     activeStreams.delete(id);
   }
 
-  const targetPort = port || 80;
+  const targetPort = resolveHikvisionPort(port);
   const path = "/ISAPI/Event/notification/alertStream";
 
   console.log(`[Hikvision Stream] Initiating persistent stream connection to ${name} (${ipAddress}:${targetPort})...`);
@@ -382,7 +400,7 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
   const { ipAddress, port, username, password } = device;
   if (!ipAddress) return [];
 
-  const targetPort = port || 80;
+  const targetPort = resolveHikvisionPort(port);
   let allEvents = [];
   let position = 0;
   const pageSize = 30;
@@ -431,10 +449,18 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
       const isValidMinor = VALID_MINOR_CODES.has(minor);
 
       if (bioId && isAccessEvent && isValidMinor) {
+        const rawTime = ev.time || ev.dateTime;
+        const evDate = rawTime ? new Date(rawTime) : null;
+        if (!evDate || isNaN(evDate.getTime())) continue;
+
+        // Strictly enforce startTime and endTime boundaries
+        if (startTime && evDate < new Date(startTime)) continue;
+        if (endTime && evDate > new Date(endTime)) continue;
+
         allEvents.push({
           biometricId: bioId,
           name: ev.name ? String(ev.name).trim() : null,
-          punchTime: ev.time || ev.dateTime,
+          punchTime: rawTime,
           minor: minor,
           verifyMode: ev.currentVerifyMode || "HIKVISION_FACE",
           serialNo: ev.serialNo,
@@ -505,6 +531,13 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
       });
     }
 
+    // Automatically trigger cross-device biometrics & fingerprint sync 10 seconds after startup
+    setTimeout(() => {
+      syncBiometricsAcrossDevices(prisma).catch((e) => {
+        console.error("[Hikvision Startup Biometrics Sync Error]:", e.message);
+      });
+    }, 10000);
+
     // 3. Periodic safety-net sync every 60 seconds
     if (!syncIntervalHandle) {
       syncIntervalHandle = setInterval(async () => {
@@ -526,41 +559,113 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
 }
 
 /**
- * Fetches all enrolled users from a Hikvision terminal via ISAPI
+ * Fetches all enrolled users from a Hikvision terminal via ISAPI with pagination
  */
 async function fetchHikvisionUsers(device) {
   if (!device || !device.ipAddress) return [];
-  const payload = {
-    UserInfoSearchCond: {
-      searchID: "1",
-      searchResultPosition: 0,
-      maxResults: 500,
-    },
-  };
+  const allUsers = [];
+  let position = 0;
+  const pageSize = 30;
 
+  try {
+    while (true) {
+      const payload = {
+        UserInfoSearchCond: {
+          searchID: "scan",
+          searchResultPosition: position,
+          maxResults: pageSize,
+        },
+      };
+
+      const res = await sendHikvisionDigest(
+        device.ipAddress,
+        resolveHikvisionPort(device.port),
+        device.username || "admin",
+        device.password || "",
+        "POST",
+        "/ISAPI/AccessControl/UserInfo/Search?format=json",
+        payload
+      );
+
+      if (!res || res.status !== 200 || !res.body) break;
+      let data;
+      try {
+        data = JSON.parse(res.body);
+      } catch (e) {
+        break;
+      }
+      const list = data?.UserInfoSearch?.UserInfo || [];
+      const total = data?.UserInfoSearch?.totalMatches || 0;
+      if (list.length === 0) break;
+      allUsers.push(...list);
+      position += list.length;
+      if (position >= total) break;
+    }
+  } catch (error) {
+    console.error(`[Hikvision Fetch Users Error] ${device.name || device.ipAddress}:`, error.message);
+  }
+  return allUsers;
+}
+
+/**
+ * Fetches enrolled fingerprint template(s) for an employee from a Hikvision terminal
+ */
+async function fetchHikvisionFingerprints(device, employeeNo) {
+  if (!device || !device.ipAddress || !employeeNo) return [];
   try {
     const res = await sendHikvisionDigest(
       device.ipAddress,
-      device.port || 80,
+      resolveHikvisionPort(device.port),
       device.username || "admin",
       device.password || "",
       "POST",
-      "/ISAPI/AccessControl/UserInfo/Search?format=json",
-      payload
+      "/ISAPI/AccessControl/FingerPrintUpload?format=json",
+      { FingerPrintCond: { searchID: "1", employeeNo: String(employeeNo) } }
     );
-
     if (res && res.status === 200 && res.body) {
       const data = JSON.parse(res.body);
-      return data?.UserInfoSearch?.UserInfo || [];
+      if (data?.FingerPrintInfo?.status === "OK") {
+        return data?.FingerPrintInfo?.FingerPrintList || [];
+      }
     }
   } catch (error) {
-    console.error(`[Hikvision Fetch Error] ${device.ipAddress}:`, error.message);
+    console.error(`[Hikvision FP Fetch Error] ${device.name || device.ipAddress} (emp ${employeeNo}):`, error.message);
   }
   return [];
 }
 
 /**
- * Cross-syncs enrolled users and biometric profiles across all active Hikvision devices
+ * Pushes/configures an enrolled fingerprint template onto a Hikvision terminal
+ */
+async function pushHikvisionFingerprint(device, employeeNo, fp) {
+  if (!device || !device.ipAddress || !employeeNo || !fp?.fingerData) return false;
+  try {
+    const res = await sendHikvisionDigest(
+      device.ipAddress,
+      resolveHikvisionPort(device.port),
+      device.username || "admin",
+      device.password || "",
+      "POST",
+      "/ISAPI/AccessControl/FingerPrintDownload?format=json",
+      {
+        FingerPrintCfg: {
+          employeeNo: String(employeeNo),
+          enableCardReader: [fp.cardReaderNo || 1],
+          fingerPrintID: fp.fingerPrintID || 1,
+          fingerType: fp.fingerType || "normalFP",
+          fingerData: fp.fingerData,
+        },
+      }
+    );
+    return res && res.status === 200;
+  } catch (error) {
+    console.error(`[Hikvision FP Push Error] ${device.name || device.ipAddress} (emp ${employeeNo}):`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Cross-syncs enrolled users and biometric profiles (including fingerprints) across all active Hikvision devices
  */
 async function syncBiometricsAcrossDevices(prisma) {
   try {
@@ -569,42 +674,88 @@ async function syncBiometricsAcrossDevices(prisma) {
     });
 
     if (devices.length < 2) {
-      console.log("[Hikvision Sync] 1 or no devices registered. Single device active.");
+      console.log("[Hikvision Cross-Sync] 1 or no devices registered. Single device active.");
       return { success: true, message: "Sync complete." };
     }
 
-    console.log(`[Hikvision Cross-Sync] Starting user profile cross-sync across ${devices.length} devices...`);
+    console.log(`[Hikvision Cross-Sync] Starting biometrics cross-sync across ${devices.length} devices...`);
 
     // 1️⃣ Fetch enrolled users from all active terminals
     const deviceUserMap = new Map();
-    const allUsers = new Map();
+    const allUsersMap = new Map();
 
     for (const dev of devices) {
       const uList = await fetchHikvisionUsers(dev);
       deviceUserMap.set(dev.id, uList);
+      console.log(`[Hikvision Cross-Sync] ${dev.name} (${dev.ipAddress}) has ${uList.length} user(s), ${uList.filter(u => (u.numOfFP || 0) > 0).length} with FP.`);
       uList.forEach((u) => {
-        if (u.employeeNo) {
-          allUsers.set(String(u.employeeNo).trim(), u.name || `User ${u.employeeNo}`);
+        const empNo = String(u.employeeNo).trim();
+        if (empNo && !allUsersMap.has(empNo)) {
+          allUsersMap.set(empNo, {
+            employeeNo: empNo,
+            name: u.name || `User ${empNo}`,
+            userType: u.userType || "normal",
+            Valid: u.Valid,
+            sourceDevice: dev,
+          });
         }
       });
     }
 
     // 2️⃣ Cross-push missing user profiles so all terminals contain every user
-    let pushedCount = 0;
-    for (const [employeeNo, name] of allUsers.entries()) {
+    let pushedUsers = 0;
+    for (const [employeeNo, uInfo] of allUsersMap.entries()) {
       for (const dev of devices) {
         const devUsers = deviceUserMap.get(dev.id) || [];
         const exists = devUsers.some((u) => String(u.employeeNo).trim() === employeeNo);
         if (!exists) {
-          console.log(`[Hikvision Cross-Sync] Copying user ${name} (${employeeNo}) -> ${dev.name} (${dev.ipAddress}:${dev.port})`);
-          await pushUserToHikvision(dev, { biometricId: employeeNo, name });
-          pushedCount++;
+          console.log(`[Hikvision Cross-Sync] Copying user ${uInfo.name} (${employeeNo}) -> ${dev.name}`);
+          const pushed = await pushUserToHikvision(dev, {
+            biometricId: employeeNo,
+            name: uInfo.name,
+          });
+          if (pushed) {
+            pushedUsers++;
+            devUsers.push({ employeeNo, name: uInfo.name, numOfFP: 0 });
+          }
         }
       }
     }
 
-    console.log(`[Hikvision Cross-Sync] Completed. ${pushedCount} profile(s) synced across devices.`);
-    return { success: true, pushedCount };
+    // 3️⃣ Cross-sync missing fingerprints across terminals
+    let pushedFPs = 0;
+    for (const [employeeNo, uInfo] of allUsersMap.entries()) {
+      let donorDev = null;
+      const targetDevs = [];
+
+      for (const dev of devices) {
+        const devUsers = deviceUserMap.get(dev.id) || [];
+        const u = devUsers.find((x) => String(x.employeeNo).trim() === employeeNo);
+        if (u && (u.numOfFP || 0) > 0) {
+          if (!donorDev) donorDev = dev;
+        } else {
+          targetDevs.push(dev);
+        }
+      }
+
+      if (donorDev && targetDevs.length > 0) {
+        const fps = await fetchHikvisionFingerprints(donorDev, employeeNo);
+        if (fps && fps.length > 0) {
+          for (const targetDev of targetDevs) {
+            for (const fp of fps) {
+              const ok = await pushHikvisionFingerprint(targetDev, employeeNo, fp);
+              if (ok) {
+                console.log(`[Hikvision Cross-Sync] Cloned FP for emp ${employeeNo} (${uInfo.name}) from ${donorDev.name} -> ${targetDev.name}`);
+                pushedFPs++;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`[Hikvision Cross-Sync] Completed. ${pushedUsers} user(s) and ${pushedFPs} fingerprint(s) synced.`);
+    return { success: true, pushedUsers, pushedFPs };
   } catch (error) {
     console.error("[Hikvision Cross-Sync Error]:", error.message);
     return { success: false, error: error.message };
@@ -617,6 +768,8 @@ module.exports = {
   startHikvisionStream,
   initHikvisionStreams,
   fetchHikvisionUsers,
+  fetchHikvisionFingerprints,
+  pushHikvisionFingerprint,
   fetchHikvisionAcsEvents,
   syncHikvisionDeviceLogs,
   syncBiometricsAcrossDevices,

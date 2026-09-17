@@ -498,30 +498,35 @@ export const Dashboard: React.FC = () => {
         const loc = await locationAPI.getLocations();
         setLocations(loc.data);
       } else {
-        const userData = await dashboardAPI.getUserDashboard(formattedDate);
-
-        setEmployeeTaskStats(
-          userData.taskStats || {
-            total: 0,
-            active: 0,
-            completed: 0,
-            overdue: 0,
-          }
-        );
-
-        setWeeklyTasks(userData.weeklyTasks || []);
-        setWeeklyAttendance(userData.weeklyAttendance || []);
-        setCompanyName(userData.companyName || "");
-        setLeaves(userData.leaves || []);
-        setOvertimes(userData.overtimes || []);
-        setLeaveBalances(userData.leaveBalances || []);
-        setPayrollSummaryData(userData.payrollSummary || null);
-        setUpcomingHolidayData(userData.upcomingHoliday || null);
-        setIsTodayOff(Boolean(userData.isTodayOff));
-
+        // Always fetch today's real-time attendance status first (reliable endpoint)
         const statusRes = await attendanceAPI.getTodayStatus().catch(() => null);
         if (statusRes) {
           setTodayStatusState(statusRes);
+        }
+
+        try {
+          const userData = await dashboardAPI.getUserDashboard(formattedDate);
+
+          setEmployeeTaskStats(
+            userData.taskStats || {
+              total: 0,
+              active: 0,
+              completed: 0,
+              overdue: 0,
+            }
+          );
+
+          setWeeklyTasks(userData.weeklyTasks || []);
+          setWeeklyAttendance(userData.weeklyAttendance || []);
+          setCompanyName(userData.companyName || "");
+          setLeaves(userData.leaves || []);
+          setOvertimes(userData.overtimes || []);
+          setLeaveBalances(userData.leaveBalances || []);
+          setPayrollSummaryData(userData.payrollSummary || null);
+          setUpcomingHolidayData(userData.upcomingHoliday || null);
+          setIsTodayOff(Boolean(userData.isTodayOff));
+        } catch (userDashErr) {
+          console.error("User dashboard data error:", userDashErr);
         }
       }
     } catch (error) {
@@ -563,16 +568,27 @@ export const Dashboard: React.FC = () => {
   const getTodayRecord = () => {
     const todayStr = new Date().toDateString();
 
+    // 1. Prioritize todayStatusState (from dedicated /attendance/today-status endpoint)
+    if (todayStatusState && (todayStatusState.clockedIn || todayStatusState.clockedOut || todayStatusState.checkInTime)) {
+      return {
+        checkInTime: todayStatusState.checkInTime,
+        checkOutTime: todayStatusState.checkOutTime,
+        status: todayStatusState.clockedOut ? "CLOCKED_OUT" : "PRESENT",
+        totalWorkedMinutes: todayStatusState.totalWorkedMinutes || 0,
+        totalBreakMinutes: todayStatusState.totalBreakMinutes || 0,
+      };
+    }
+
     if (weeklyAttendance && weeklyAttendance.length > 0) {
-      // 1. Check by checkInTime
+      // 2. Check by checkInTime matching today
       const byCheckIn = weeklyAttendance.find(
         (att: any) => att.checkInTime && new Date(att.checkInTime).toDateString() === todayStr
       );
       if (byCheckIn) return byCheckIn;
 
-      // 2. Check by date (+12h UTC offset buffer)
+      // 3. Check by date (+12h UTC offset buffer) — only if checkInTime exists
       const byDate = weeklyAttendance.find((att: any) => {
-        if (!att.date) return false;
+        if (!att.date || !att.checkInTime) return false;
         const d1 = new Date(att.date).toDateString();
         if (d1 === todayStr) return true;
         const adjustedDate = new Date(new Date(att.date).getTime() + 12 * 3600 * 1000).toDateString();
@@ -580,19 +596,9 @@ export const Dashboard: React.FC = () => {
       });
       if (byDate) return byDate;
 
-      // 3. Fallback to active unclosed record
+      // 4. Fallback to active unclosed record
       const activeUnclosed = weeklyAttendance.find((att: any) => att.checkInTime && !att.checkOutTime);
       if (activeUnclosed) return activeUnclosed;
-    }
-
-    // 4. Fallback to todayStatusState
-    if (todayStatusState && (todayStatusState.clockedIn || todayStatusState.checkInTime)) {
-      return {
-        checkInTime: todayStatusState.checkInTime,
-        checkOutTime: todayStatusState.checkOutTime,
-        status: todayStatusState.clockedOut ? "CLOCKED_OUT" : "PRESENT",
-        totalWorkedMinutes: todayStatusState.totalWorkedMinutes || 0,
-      };
     }
 
     return null;

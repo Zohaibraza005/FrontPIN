@@ -204,7 +204,7 @@ const getFormattedDateStr = (d: any) => {
 const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
   if (!Array.isArray(attendanceList) || attendanceList.length === 0) return undefined;
 
-  return attendanceList.find((a: any) => {
+  const matches = attendanceList.filter((a: any) => {
     if (!a) return false;
     if (a.reportDate && a.reportDate === targetDateStr) return true;
     if (a.dateStr && a.dateStr === targetDateStr) return true;
@@ -216,6 +216,24 @@ const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
     if (a.checkOutTime && typeof a.checkOutTime === "string" && a.checkOutTime.slice(0, 10) === targetDateStr) return true;
     return false;
   });
+
+  if (matches.length === 0) return undefined;
+  if (matches.length === 1) return matches[0];
+
+  // Prefer record with valid checkInTime, non-ABSENT status, and highest worked minutes
+  matches.sort((a, b) => {
+    const aHasCheckIn = a.checkInTime ? 1 : 0;
+    const bHasCheckIn = b.checkInTime ? 1 : 0;
+    if (aHasCheckIn !== bHasCheckIn) return bHasCheckIn - aHasCheckIn;
+
+    const aNotAbsent = a.status && a.status !== "ABSENT" && a.status !== "OFF_DAY" && a.status !== "UPCOMING_DAY" ? 1 : 0;
+    const bNotAbsent = b.status && b.status !== "ABSENT" && b.status !== "OFF_DAY" && b.status !== "UPCOMING_DAY" ? 1 : 0;
+    if (aNotAbsent !== bNotAbsent) return bNotAbsent - aNotAbsent;
+
+    return (Number(b.totalWorkedMinutes) || 0) - (Number(a.totalWorkedMinutes) || 0);
+  });
+
+  return matches[0];
 };
 
 export const isScheduleOffDay = (schedules: any, date: Date | string): boolean => {
@@ -818,8 +836,13 @@ export const Attendance: React.FC = () => {
 
     const targetDateStr = format(selectedDate, "yyyy-MM-dd");
     report.forEach(emp => {
-      const rec = findAttendanceRecord(emp.Attendance, targetDateStr);
-      const st = rec?.status?.toUpperCase() || "ABSENT";
+      const rec = findAttendanceRecord(emp.Attendance || emp.attendance, targetDateStr);
+      let st = rec?.status?.toUpperCase();
+      if (rec?.checkInTime && (!st || st === "ABSENT" || st === "OFF_DAY" || st === "UPCOMING_DAY")) {
+        st = rec.isLate ? "LATE" : "PRESENT";
+      } else if (!st) {
+        st = "ABSENT";
+      }
       const isOff = isScheduleOffDay(emp?.Schedule, selectedDate) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
 
       if (st === "PRESENT") present++;
@@ -851,7 +874,7 @@ export const Attendance: React.FC = () => {
       let totalMinutes = 0;
       totalMinutes = days.reduce((sum: number, day: Date) => {
         const dayStr = format(day, "yyyy-MM-dd");
-        const record = findAttendanceRecord(emp.Attendance, dayStr);
+        const record = findAttendanceRecord(emp.Attendance || emp.attendance, dayStr);
 
         const cellDate = new Date(`${dayStr}T00:00:00`);
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
@@ -889,7 +912,7 @@ export const Attendance: React.FC = () => {
           <div className="flex flex-wrap gap-2.5 p-4 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm justify-start">
             {days.map((day) => {
               const dayStr = format(day, "yyyy-MM-dd");
-              const record = findAttendanceRecord(emp.Attendance, dayStr);
+              const record = findAttendanceRecord(emp.Attendance || emp.attendance, dayStr);
 
               return (
                 <div 
@@ -980,7 +1003,7 @@ export const Attendance: React.FC = () => {
               {report.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
-                  const record = findAttendanceRecord(emp.Attendance, dayStr);
+                  const record = findAttendanceRecord(emp.Attendance || emp.attendance, dayStr);
 
                   const cellDate = new Date(`${dayStr}T00:00:00`);
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
@@ -1022,7 +1045,7 @@ export const Attendance: React.FC = () => {
   
                     {/* Date cells */}
                     {days.map((day) => {
-                      const record = findAttendanceRecord(emp.Attendance, format(day, "yyyy-MM-dd"));
+                      const record = findAttendanceRecord(emp.Attendance || emp.attendance, format(day, "yyyy-MM-dd"));
   
                       return (
                         <td
@@ -1311,7 +1334,7 @@ export const Attendance: React.FC = () => {
                   <TableBody>
                     {paginatedDailyReport.map(emp => {
                       const targetDateStr = format(selectedDate, "yyyy-MM-dd");
-                      const record = findAttendanceRecord(emp.Attendance, targetDateStr);
+                      const record = findAttendanceRecord(emp.Attendance || emp.attendance, targetDateStr);
 
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
@@ -1327,7 +1350,9 @@ export const Attendance: React.FC = () => {
                       }
 
                       let rawStatus = record?.status;
-                      if (!rawStatus || rawStatus === "ABSENT") {
+                      if (record?.checkInTime && (!rawStatus || rawStatus === "ABSENT" || rawStatus === "OFF_DAY" || rawStatus === "UPCOMING_DAY")) {
+                        rawStatus = record.isLate ? "LATE" : "PRESENT";
+                      } else if (!rawStatus || rawStatus === "ABSENT") {
                         rawStatus = defaultStatus;
                       }
                       if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {

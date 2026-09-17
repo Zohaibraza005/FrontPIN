@@ -37,6 +37,7 @@ async function login({ identifier, password }) {
       username: true,
       email: true,
       password: true,
+      pin: true,
       role: true,
       roleId: true,
       appRole: true,
@@ -56,19 +57,21 @@ async function login({ identifier, password }) {
   }
 
   // 🔥 CHECK LOGIN PERMISSION
-  if (!user.canLogin) {
+  if (user.canLogin === false) {
     const err = new Error("Login is disabled for this employee");
     err.statusCode = 403;
     throw err;
   }
 
-  if (!user.password) {
+  const hashedPassword = user.password || user.pin;
+
+  if (!hashedPassword) {
     const err = new Error("Login credentials not set");
     err.statusCode = 403;
     throw err;
   }
 
-  const match = await bcrypt.compare(password, user.password);
+  const match = await bcrypt.compare(password, hashedPassword);
 
   if (!match) {
     const err = new Error("Invalid credentials");
@@ -170,7 +173,7 @@ async function checkIdentifier(identifier) {
 
   console.log("Matched by:", matchedField);
 
-  if (!user.canLogin) {
+  if (user.canLogin === false) {
     const err = new Error("Login disabled for this employee");
     err.statusCode = 403;
     throw err;

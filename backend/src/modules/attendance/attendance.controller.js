@@ -1046,7 +1046,60 @@ exports.getAttendanceReport = async (req, res) => {
         }
 
         keys.forEach(k => {
-          attendanceMap[k] = att;
+          const prev = attendanceMap[k];
+          if (!prev) {
+            attendanceMap[k] = att;
+            return;
+          }
+
+          // 🛡️ Never let a record with actual check-in be overwritten by an empty/absent one
+          const prevHasIn = Boolean(prev.checkInTime);
+          const currHasIn = Boolean(att.checkInTime);
+
+          if (!prevHasIn && currHasIn) {
+            attendanceMap[k] = att;
+            return;
+          }
+          if (prevHasIn && !currHasIn) {
+            return;
+          }
+
+          const prevNotAbsent = prev.status && prev.status !== "ABSENT" && prev.status !== "OFF_DAY";
+          const currNotAbsent = att.status && att.status !== "ABSENT" && att.status !== "OFF_DAY";
+          if (!prevNotAbsent && currNotAbsent) {
+            attendanceMap[k] = att;
+            return;
+          }
+          if (prevNotAbsent && !currNotAbsent) {
+            return;
+          }
+
+          const prevWorked = Number(prev.totalWorkedMinutes) || 0;
+          const currWorked = Number(att.totalWorkedMinutes) || 0;
+          if (currWorked > prevWorked) {
+            attendanceMap[k] = att;
+            return;
+          }
+          if (prevWorked > currWorked) {
+            return;
+          }
+
+          const empTz = emp.company?.timezone || "Asia/Karachi";
+          const prevDateMatch = (prev.date && moment(prev.date).tz(empTz).format("YYYY-MM-DD") === k) ||
+                                (prev.checkInTime && moment(prev.checkInTime).tz(empTz).format("YYYY-MM-DD") === k);
+          const currDateMatch = (att.date && moment(att.date).tz(empTz).format("YYYY-MM-DD") === k) ||
+                                (att.checkInTime && moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD") === k);
+          if (!prevDateMatch && currDateMatch) {
+            attendanceMap[k] = att;
+            return;
+          }
+          if (prevDateMatch && !currDateMatch) {
+            return;
+          }
+
+          if (att.id > prev.id) {
+            attendanceMap[k] = att;
+          }
         });
       });
 
@@ -1208,7 +1261,8 @@ exports.getAttendanceReport = async (req, res) => {
 
       return {
         ...emp,
-        Attendance: fullAttendance
+        Attendance: fullAttendance,
+        attendance: fullAttendance
       };
     });
 

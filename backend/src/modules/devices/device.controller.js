@@ -231,10 +231,10 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
       if (activeRecent && activeRecent.checkInTime) {
         const diffHoursFromCheckIn = pTime.diff(moment(activeRecent.checkInTime), "hours", true);
-        if (diffHoursFromCheckIn < 15) {
+        if (diffHoursFromCheckIn >= 0 && diffHoursFromCheckIn < 15) {
           // Still within 15-hour window of the previous shift
           attendance = activeRecent;
-        } else {
+        } else if (diffHoursFromCheckIn >= 15) {
           // Auto-close past unclosed attendance at 15 hours limit
           const autoOutTime = moment(activeRecent.checkInTime).add(15, "hours").toDate();
           await prisma.attendance.update({
@@ -299,10 +299,23 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   }
 
   // 2️⃣ Attendance already exists for this shift
-  const inTimeMoment = moment(attendance.checkInTime || punchDate);
+  let inTimeMoment = moment(attendance.checkInTime || punchDate);
 
-  // If incoming punch is EARLIER than currently recorded checkInTime, update checkInTime!
-  if (pTime.isBefore(inTimeMoment)) {
+  // If attendance.checkInTime is from a different calendar day, reset it to today's punchDate
+  if (attendance.checkInTime && !moment(attendance.checkInTime).tz(timezone).isSame(pTime, "day")) {
+    attendance = await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: {
+        checkInTime: punchDate,
+        checkInMethod: punchMethod,
+        checkInDevice: deviceTag,
+      },
+    });
+    inTimeMoment = moment(punchDate);
+  }
+
+  // If incoming punch is EARLIER than currently recorded checkInTime AND on the same calendar day, update checkInTime!
+  if (pTime.isBefore(inTimeMoment) && pTime.isSame(inTimeMoment, "day")) {
     const { isLate, lateMinutes, status } = calcLateness(pTime);
 
     attendance = await prisma.attendance.update({
@@ -325,8 +338,8 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const diffMinutesFromIn = pTime.diff(inTimeMoment, "minutes", true);
   const diffHoursFromIn = pTime.diff(inTimeMoment, "hours", true);
 
-  // If > 15 hours passed since Check-In, auto-close previous shift and create new attendance for today
-  if (diffHoursFromIn >= 15) {
+  // If > 15 hours passed since Check-In of a PREVIOUS shift (yesterday), auto-close it and create new attendance for today
+  if (diffHoursFromIn >= 15 && moment(attendance.date).isBefore(todayStart)) {
     if (!attendance.checkOutTime) {
       await prisma.attendance.update({
         where: { id: attendance.id },
@@ -394,8 +407,9 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   await recordPunch(attendance.id, "CHECK_OUT", punchDate);
 
   if (isLatestOut) {
-    // Calculate complete shift time from First Punch (checkInTime) to this Last Punch
-    const totalWorkedMinutes = Math.max(0, Math.round(pTime.diff(inTimeMoment, "minutes")));
+    // Calculate complete shift time from First Punch (checkInTime) to this Last Punch (cap at 15h max)
+    const rawWorkedMinutes = Math.max(0, Math.round(pTime.diff(inTimeMoment, "minutes")));
+    const totalWorkedMinutes = Math.min(900, rawWorkedMinutes);
 
     // Calculate Overtime based on scheduled shift duration
     let scheduledDurationMinutes = 540; // Default 9 hours
@@ -735,6 +749,28 @@ exports.pushUsersToDevices = async (req, res) => {
   }
 };
 
+/**
+ * Manually triggers a complete cross-device biometrics and user sync
+ */
+exports.triggerBiometricsCrossSync = async (req, res) => {
+  try {
+    const { syncBiometricsAcrossDevices } = require("./hikvision.service");
+    // Run in background and respond immediately so the request doesn't timeout
+    syncBiometricsAcrossDevices(prisma).then((result) => {
+      console.log("[Biometrics Cross-Sync API result]:", result);
+    }).catch((e) => {
+      console.error("[Biometrics Cross-Sync API error]:", e.message);
+    });
+
+    return res.json({
+      success: true,
+      message: "Biometric cross-device synchronization initiated in background across all connected terminals.",
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   processBiometricPunch,
   handleHikvisionEvent: exports.handleHikvisionEvent,
@@ -745,5 +781,6 @@ module.exports = {
   testDeviceConnection: exports.testDeviceConnection,
   syncDeviceLogs: exports.syncDeviceLogs,
   pushUsersToDevices: exports.pushUsersToDevices,
+  triggerBiometricsCrossSync: exports.triggerBiometricsCrossSync,
 };
 

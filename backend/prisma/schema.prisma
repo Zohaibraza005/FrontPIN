@@ -161,16 +161,16 @@ model Employee {
   maritalStatus String?
   religion      String?
 
-  canLogin Boolean @default(true) // 🔥 New field
+  canLogin Boolean? @default(true) // 🔥 New field
 
-  role RoleType @default(USER)
+  role RoleType? @default(USER)
 
   // Relations
-  organizationId Int
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  companyId Int
-  company   Company @relation(fields: [companyId], references: [id])
+  companyId Int?
+  company   Company? @relation(fields: [companyId], references: [id])
 
   departmentId Int?
   department   Department? @relation(fields: [departmentId], references: [id])
@@ -698,19 +698,19 @@ model Attendance {
   checkOutMethod String?
   checkOutDevice String?
 
-  isLate      Boolean @default(false)
-  lateMinutes Int     @default(0)
+  isLate      Boolean? @default(false)
+  lateMinutes Int?     @default(0)
 
-  isEarlyOut      Boolean @default(false)
-  earlyOutMinutes Int     @default(0)
+  isEarlyOut      Boolean? @default(false)
+  earlyOutMinutes Int?     @default(0)
 
-  overtimeMinutes    Int @default(0)
-  totalWorkedMinutes Int @default(0)
-  totalBreakMinutes  Int @default(0)
+  overtimeMinutes    Int? @default(0)
+  totalWorkedMinutes Int? @default(0)
+  totalBreakMinutes  Int? @default(0)
 
-  status String
+  status String?
 
-  autoClockedOut Boolean @default(false)
+  autoClockedOut Boolean? @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

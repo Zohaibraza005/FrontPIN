@@ -19,6 +19,7 @@ router.delete("/:id", protect, controller.deleteDevice);
 router.post("/:id/test", protect, controller.testDeviceConnection);
 router.post("/:id/sync", protect, controller.syncDeviceLogs);
 router.post("/push-users", protect, controller.pushUsersToDevices);
+router.post("/sync-biometrics", protect, controller.triggerBiometricsCrossSync);
 
 module.exports = router;
 
