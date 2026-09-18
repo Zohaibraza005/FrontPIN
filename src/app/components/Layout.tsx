@@ -631,6 +631,7 @@ export const Layout: React.FC = () => {
       setIsOnBreak(true);
       updateBreakData(res);
       setShowBreakConfirmModal(false);
+      window.dispatchEvent(new CustomEvent('attendance-updated'));
       toast.success(`Break ${res.currentBreakNumber || currentBreakNumber} started`);
     } catch (err: any) {
       toast.error(err.message || "Failed to start break");
@@ -653,6 +654,7 @@ export const Layout: React.FC = () => {
         setIsOnBreak(false);
         setActiveBreakSeconds(0);
         updateBreakData(res);
+        window.dispatchEvent(new CustomEvent('attendance-updated'));
         toast.success("Break ended");
       } else {
         const usedMins = totalUsedBreakMinutes;

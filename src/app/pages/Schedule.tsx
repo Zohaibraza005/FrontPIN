@@ -59,6 +59,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Copy,
 } from "lucide-react";
 import {
   Tooltip,
@@ -102,8 +103,8 @@ const SHIFT_TYPES: {
   {
     id: "night",
     label: "Night",
-    defaultStart: "23:00",
-    defaultEnd: "07:00",
+    defaultStart: "19:00",
+    defaultEnd: "04:00",
     icon: Moon,
     activeClass: "bg-slate-800 text-white border-slate-900 ring-2 ring-slate-700/50",
     badgeClass: "bg-slate-800 text-white border-slate-700",
@@ -202,6 +203,9 @@ export const Schedule: React.FC = () => {
     Thursday: { startTime: "09:00", endTime: "18:00" },
     Friday: { startTime: "09:00", endTime: "18:00" },
   });
+
+  const [sameTimeForAll, setSameTimeForAll] = useState(false);
+  const [editSameTimeForAll, setEditSameTimeForAll] = useState(false);
 
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("18:00");
@@ -432,15 +436,96 @@ export const Schedule: React.FC = () => {
     }
   };
 
-  // Handle Per-Day Time Editing
+  // Handle Per-Day Time Editing (Create Modal)
   const handleUpdateDayTime = (dayFull: string, field: "startTime" | "endTime", value: string) => {
-    setDaySchedules((prev) => ({
-      ...prev,
-      [dayFull]: {
-        ...(prev[dayFull] || { startTime: "09:00", endTime: "18:00" }),
-        [field]: value,
-      },
-    }));
+    setDaySchedules((prev) => {
+      const currentDaySched = prev[dayFull] || {
+        startTime: currentShiftConfig.defaultStart,
+        endTime: currentShiftConfig.defaultEnd,
+      };
+      const newTiming = { ...currentDaySched, [field]: value };
+
+      if (sameTimeForAll) {
+        const updated: Record<string, { startTime: string; endTime: string }> = {};
+        selectedDays.forEach((d) => {
+          updated[d] = { ...newTiming };
+        });
+        return { ...prev, ...updated };
+      }
+
+      return {
+        ...prev,
+        [dayFull]: newTiming,
+      };
+    });
+  };
+
+  // Apply single day timing (or first day timing) to ALL selected working days (Create Modal)
+  const handleApplyTimeToAllDays = (sourceDay?: string) => {
+    const defaultTiming = {
+      startTime: currentShiftConfig.defaultStart,
+      endTime: currentShiftConfig.defaultEnd,
+    };
+
+    let targetTiming = defaultTiming;
+
+    if (sourceDay && daySchedules[sourceDay]) {
+      targetTiming = { ...daySchedules[sourceDay] };
+    } else if (selectedDays.length > 0 && daySchedules[selectedDays[0]]) {
+      targetTiming = { ...daySchedules[selectedDays[0]] };
+    }
+
+    const updated: Record<string, { startTime: string; endTime: string }> = {};
+    selectedDays.forEach((d) => {
+      updated[d] = { ...targetTiming };
+    });
+    setDaySchedules((prev) => ({ ...prev, ...updated }));
+    toast.success(`Applied ${targetTiming.startTime} - ${targetTiming.endTime} to all working days`);
+  };
+
+  // Handle Per-Day Time Editing (Edit Modal)
+  const handleUpdateEditDayTime = (dayFull: string, field: "startTime" | "endTime", value: string) => {
+    setEditDaySchedules((prev) => {
+      const currentDaySched = prev[dayFull] || {
+        startTime: editStartTime || "09:00",
+        endTime: editEndTime || "18:00",
+      };
+      const newTiming = { ...currentDaySched, [field]: value };
+
+      if (editSameTimeForAll) {
+        const updated: Record<string, { startTime: string; endTime: string }> = {};
+        editDays.forEach((d) => {
+          updated[d] = { ...newTiming };
+        });
+        return { ...prev, ...updated };
+      }
+
+      return {
+        ...prev,
+        [dayFull]: newTiming,
+      };
+    });
+  };
+
+  // Apply single day timing (or first day timing) to ALL selected working days (Edit Modal)
+  const handleApplyTimeToAllEditDays = (sourceDay?: string) => {
+    let targetTiming = {
+      startTime: editStartTime || "09:00",
+      endTime: editEndTime || "18:00",
+    };
+
+    if (sourceDay && editDaySchedules[sourceDay]) {
+      targetTiming = { ...editDaySchedules[sourceDay] };
+    } else if (editDays.length > 0 && editDaySchedules[editDays[0]]) {
+      targetTiming = { ...editDaySchedules[editDays[0]] };
+    }
+
+    const updated: Record<string, { startTime: string; endTime: string }> = {};
+    editDays.forEach((d) => {
+      updated[d] = { ...targetTiming };
+    });
+    setEditDaySchedules((prev) => ({ ...prev, ...updated }));
+    toast.success(`Applied ${targetTiming.startTime} - ${targetTiming.endTime} to all working days`);
   };
 
   // Filter schedules based on search and location, strictly 1 schedule per employee
@@ -977,9 +1062,41 @@ export const Schedule: React.FC = () => {
 
                 {/* Weekly Schedule Cards */}
                 <div className="space-y-3 pt-2">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                    <Clock className="size-4 text-gray-500" />
-                    <span>Weekly Schedule</span>
+                  <div className="flex items-center justify-between flex-wrap gap-2 text-sm font-semibold text-gray-800">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-4 text-gray-500" />
+                      <span>Weekly Schedule</span>
+                    </div>
+
+                    {selectedDays.length > 1 && (
+                      <div className="flex items-center gap-2.5">
+                        <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 font-medium cursor-pointer select-none bg-gray-50 px-2.5 py-1 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={sameTimeForAll}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setSameTimeForAll(checked);
+                              if (checked) {
+                                handleApplyTimeToAllDays();
+                              }
+                            }}
+                            className="rounded border-gray-300 text-sky-600 focus:ring-sky-500 size-3.5"
+                          />
+                          <span>Same time for all days</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplyTimeToAllDays()}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors"
+                          title="Apply timing to all working days"
+                        >
+                          <Copy className="size-3" />
+                          <span>Apply to All</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {selectedDays.length === 0 ? (
@@ -1006,11 +1123,24 @@ export const Schedule: React.FC = () => {
                                   {dayObj.full}
                                 </span>
                               </div>
-                              <span
-                                className={`px-3 py-0.5 rounded-full text-xs font-semibold border ${currentShiftConfig.badgeClass}`}
-                              >
-                                {currentShiftConfig.label}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                {selectedDays.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyTimeToAllDays(dayObj.full)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 rounded-md transition-colors"
+                                    title={`Apply ${dayObj.full}'s timing to all selected working days`}
+                                  >
+                                    <Copy className="size-3" />
+                                    <span>Apply to all</span>
+                                  </button>
+                                )}
+                                <span
+                                  className={`px-3 py-0.5 rounded-full text-xs font-semibold border ${currentShiftConfig.badgeClass}`}
+                                >
+                                  {currentShiftConfig.label}
+                                </span>
+                              </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -2119,10 +2249,43 @@ export const Schedule: React.FC = () => {
 
                 {/* Weekly Schedule Cards */}
                 <div className="space-y-2.5">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-700">
-                    <Clock className="size-3.5 text-gray-500" />
-                    <span>Weekly Schedule</span>
+                  <div className="flex items-center justify-between flex-wrap gap-2 text-xs font-semibold text-gray-700">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-3.5 text-gray-500" />
+                      <span>Weekly Schedule</span>
+                    </div>
+
+                    {editDays.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium cursor-pointer select-none bg-gray-50 px-2 py-0.5 rounded border border-gray-200 hover:bg-gray-100 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={editSameTimeForAll}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setEditSameTimeForAll(checked);
+                              if (checked) {
+                                handleApplyTimeToAllEditDays();
+                              }
+                            }}
+                            className="rounded border-gray-300 text-sky-600 focus:ring-sky-500 size-3"
+                          />
+                          <span>Same time for all days</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplyTimeToAllEditDays()}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded transition-colors"
+                          title="Apply timing to all working days"
+                        >
+                          <Copy className="size-3" />
+                          <span>Apply to All</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
+
                   <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                     {DAYS_LIST.filter((d) => editDays.includes(d.full)).map((dayObj) => {
                       const daySched = editDaySchedules[dayObj.full] || { startTime: editStartTime, endTime: editEndTime };
@@ -2136,9 +2299,22 @@ export const Schedule: React.FC = () => {
                               <IconComp className="size-3.5 text-amber-500" />
                               <span className="font-bold text-gray-900 text-xs">{dayObj.full}</span>
                             </div>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${stConfig.badgeClass}`}>
-                              {stConfig.label}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {editDays.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplyTimeToAllEditDays(dayObj.full)}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 rounded transition-colors"
+                                  title={`Apply ${dayObj.full}'s timing to all selected working days`}
+                                >
+                                  <Copy className="size-2.5" />
+                                  <span>Apply to all</span>
+                                </button>
+                              )}
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${stConfig.badgeClass}`}>
+                                {stConfig.label}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-2 gap-3">
@@ -2147,12 +2323,7 @@ export const Schedule: React.FC = () => {
                               <Input
                                 type="time"
                                 value={daySched.startTime}
-                                onChange={(e) => {
-                                  setEditDaySchedules((prev) => ({
-                                    ...prev,
-                                    [dayObj.full]: { ...(prev[dayObj.full] || { startTime: editStartTime, endTime: editEndTime }), startTime: e.target.value },
-                                  }));
-                                }}
+                                onChange={(e) => handleUpdateEditDayTime(dayObj.full, "startTime", e.target.value)}
                                 className="h-8 text-xs bg-gray-50/50"
                               />
                             </div>
@@ -2161,12 +2332,7 @@ export const Schedule: React.FC = () => {
                               <Input
                                 type="time"
                                 value={daySched.endTime}
-                                onChange={(e) => {
-                                  setEditDaySchedules((prev) => ({
-                                    ...prev,
-                                    [dayObj.full]: { ...(prev[dayObj.full] || { startTime: editStartTime, endTime: editEndTime }), endTime: e.target.value },
-                                  }));
-                                }}
+                                onChange={(e) => handleUpdateEditDayTime(dayObj.full, "endTime", e.target.value)}
                                 className="h-8 text-xs bg-gray-50/50"
                               />
                             </div>

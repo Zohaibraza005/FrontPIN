@@ -564,19 +564,30 @@ export const Dashboard: React.FC = () => {
   }));
 
   // ── Employee-specific helpers and timers ──
-  // ── Employee-specific helpers and timers ──
   const getTodayRecord = () => {
     const todayStr = new Date().toDateString();
 
     // 1. Prioritize todayStatusState (from dedicated /attendance/today-status endpoint)
     if (todayStatusState && (todayStatusState.clockedIn || todayStatusState.clockedOut || todayStatusState.checkInTime)) {
-      return {
-        checkInTime: todayStatusState.checkInTime,
-        checkOutTime: todayStatusState.checkOutTime,
-        status: todayStatusState.clockedOut ? "CLOCKED_OUT" : "PRESENT",
-        totalWorkedMinutes: todayStatusState.totalWorkedMinutes || 0,
-        totalBreakMinutes: todayStatusState.totalBreakMinutes || 0,
-      };
+      // Verify checkInTime actually belongs to today
+      if (todayStatusState.checkInTime && new Date(todayStatusState.checkInTime).toDateString() !== todayStr) {
+        // Old state from previous day
+      } else {
+        const weeklyMatch = (weeklyAttendance || []).find((att: any) => {
+          if (att.checkInTime && new Date(att.checkInTime).toDateString() === todayStr) return true;
+          if (att.date && new Date(att.date).toDateString() === todayStr) return true;
+          return false;
+        });
+
+        return {
+          checkInTime: todayStatusState.checkInTime,
+          checkOutTime: todayStatusState.checkOutTime,
+          status: todayStatusState.clockedOut ? "CLOCKED_OUT" : "PRESENT",
+          totalWorkedMinutes: todayStatusState.totalWorkedMinutes || weeklyMatch?.totalWorkedMinutes || 0,
+          totalBreakMinutes: todayStatusState.totalBreakMinutes || weeklyMatch?.totalBreakMinutes || 0,
+          punches: todayStatusState.punches || weeklyMatch?.punches || [],
+        };
+      }
     }
 
     if (weeklyAttendance && weeklyAttendance.length > 0) {
@@ -596,8 +607,11 @@ export const Dashboard: React.FC = () => {
       });
       if (byDate) return byDate;
 
-      // 4. Fallback to active unclosed record
-      const activeUnclosed = weeklyAttendance.find((att: any) => att.checkInTime && !att.checkOutTime);
+      // 4. Fallback to active unclosed record ONLY IF checkInTime is TODAY
+      const activeUnclosed = weeklyAttendance.find((att: any) => {
+        if (!att.checkInTime || att.checkOutTime) return false;
+        return new Date(att.checkInTime).toDateString() === todayStr;
+      });
       if (activeUnclosed) return activeUnclosed;
     }
 
@@ -616,7 +630,7 @@ export const Dashboard: React.FC = () => {
         setTodayElapsedMinutes(workedMin);
       };
       updateTimer();
-      const interval = setInterval(updateTimer, 60000);
+      const interval = setInterval(updateTimer, 1000);
       return () => clearInterval(interval);
     } else if (todayRecord) {
       setTodayElapsedMinutes(todayRecord.totalWorkedMinutes || 0);

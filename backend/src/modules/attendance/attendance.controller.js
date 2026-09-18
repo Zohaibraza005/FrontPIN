@@ -279,6 +279,9 @@ exports.getTodayStatus = async (req, res) => {
           orderBy: { startTime: "asc" },
           include: { task: true },
         },
+        punches: {
+          orderBy: { punchTime: "asc" },
+        },
       },
     });
 
@@ -290,6 +293,7 @@ exports.getTodayStatus = async (req, res) => {
         isOffDay: isTodayOff,
         clockedIn: false,
         clockedOut: false,
+        punches: [],
         ...breakStats,
       });
     }
@@ -303,6 +307,7 @@ exports.getTodayStatus = async (req, res) => {
         checkInTime: attendance.checkInTime,
         checkOutTime: attendance.checkOutTime,
         totalWorkedMinutes: attendance.totalWorkedMinutes,
+        punches: attendance.punches || [],
         ...breakStats,
       });
     }
@@ -326,6 +331,7 @@ exports.getTodayStatus = async (req, res) => {
             startTime: activeActivity.startTime,
           }
         : null,
+      punches: attendance.punches || [],
       ...breakStats,
     });
 
@@ -670,6 +676,17 @@ exports.startBreak = async (req, res) => {
       },
     });
 
+    await prisma.attendancePunch.create({
+      data: {
+        attendanceId: attendance.id,
+        employeeId,
+        type: "BREAK_START",
+        punchTime: new Date(),
+        ip: req.ip,
+        method: "PIN",
+      },
+    });
+
     // Update attendance record status to BREAK in database
     await prisma.attendance.update({
       where: { id: attendance.id },
@@ -728,6 +745,17 @@ exports.endBreak = async (req, res) => {
       data: {
         endTime: now,
         durationMinutes: duration,
+      },
+    });
+
+    await prisma.attendancePunch.create({
+      data: {
+        attendanceId: breakActivity.attendanceId,
+        employeeId,
+        type: "BREAK_END",
+        punchTime: now,
+        ip: req.ip,
+        method: "PIN",
       },
     });
 
@@ -1037,13 +1065,6 @@ exports.getAttendanceReport = async (req, res) => {
             try { keys.add(moment(att.checkInTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
           }
         }
-        if (att.checkOutTime) {
-          keys.add(moment(att.checkOutTime).format("YYYY-MM-DD"));
-          keys.add(moment.utc(att.checkOutTime).format("YYYY-MM-DD"));
-          if (emp.company?.timezone) {
-            try { keys.add(moment(att.checkOutTime).tz(emp.company.timezone).format("YYYY-MM-DD")); } catch (e) {}
-          }
-        }
 
         keys.forEach(k => {
           const prev = attendanceMap[k];
@@ -1183,7 +1204,15 @@ exports.getAttendanceReport = async (req, res) => {
         const isDayOff = isOffDay(emp.Schedule, dateStr);
         let finalStatus = existing.status;
 
-        if (isDayOff && !existing.checkInTime && existing.status !== "PRESENT" && existing.status !== "LATE" && existing.status !== "TARDY") {
+        const empTz = emp.company?.timezone || "Asia/Karachi";
+        const hasActualCheckInOnThisDate = Boolean(
+          existing.checkInTime && (
+            moment(existing.checkInTime).tz(empTz).format("YYYY-MM-DD") === dateStr ||
+            moment(existing.checkInTime).format("YYYY-MM-DD") === dateStr
+          ) && Number(existing.totalWorkedMinutes || 0) > 0
+        );
+
+        if (isDayOff && !hasActualCheckInOnThisDate && existing.status !== "LEAVE") {
           finalStatus = "OFF_DAY";
           totalWorkedMinutes = 0;
         } else if (!existing.checkInTime && existing.status !== "PRESENT" && existing.status !== "LATE" && existing.status !== "TARDY") {

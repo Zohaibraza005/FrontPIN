@@ -212,8 +212,6 @@ const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
     if (a.date && getFormattedDateStr(a.date) === targetDateStr) return true;
     if (a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr) return true;
     if (a.checkInTime && typeof a.checkInTime === "string" && a.checkInTime.slice(0, 10) === targetDateStr) return true;
-    if (a.checkOutTime && getFormattedDateStr(a.checkOutTime) === targetDateStr) return true;
-    if (a.checkOutTime && typeof a.checkOutTime === "string" && a.checkOutTime.slice(0, 10) === targetDateStr) return true;
     return false;
   });
 
@@ -499,19 +497,25 @@ export const Attendance: React.FC = () => {
 
     const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
 
+    const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+    const hasActualCheckInOnThisDate = Boolean(
+      record?.checkInTime &&
+      checkInDateStr === cellDateStr &&
+      (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
+    );
+
     let defaultStatus = "ABSENT";
-    if (isEmpDayOff) {
+    if (isEmpDayOff && !hasActualCheckInOnThisDate) {
       defaultStatus = "OFF_DAY";
-    } else if (isFutureDay) {
+    } else if (isFutureDay && !hasActualCheckInOnThisDate) {
       defaultStatus = "UPCOMING_DAY";
     }
 
     let rawStatus = record?.status;
-    if (!rawStatus || rawStatus === "ABSENT") {
-      rawStatus = defaultStatus;
-    }
-    if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
+    if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
       rawStatus = "OFF_DAY";
+    } else if (!rawStatus || rawStatus === "ABSENT") {
+      rawStatus = defaultStatus;
     }
 
     const finalRecord = {
@@ -534,8 +538,8 @@ export const Attendance: React.FC = () => {
     }
 
     const status = finalRecord.status?.toUpperCase();
-    const hasWorked = status === "PRESENT" || status === "LATE" || status === "TARDY" || (Number(finalRecord.totalWorkedMinutes) > 0);
-    const isOff = !hasWorked && (status === "OFF_DAY" || status === "OFF" || (isEmpDayOff && status !== "LEAVE"));
+    const isOff = status === "OFF_DAY" || status === "OFF" || (isEmpDayOff && !hasActualCheckInOnThisDate && status !== "LEAVE");
+    const hasWorked = !isOff && (status === "PRESENT" || status === "LATE" || status === "TARDY" || (Number(finalRecord.totalWorkedMinutes) > 0));
     const isUpcoming = !hasWorked && !isOff && (isFutureDay || status === "UPCOMING_DAY" || status === "UPCOMING");
     const isLeave = status === "LEAVE";
     const isAbsent = !hasWorked && !isOff && !isUpcoming && !isLeave;
@@ -879,11 +883,17 @@ export const Attendance: React.FC = () => {
         const cellDate = new Date(`${dayStr}T00:00:00`);
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
         const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
+        const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+        const hasActualCheckInOnThisDate = Boolean(
+          record?.checkInTime &&
+          checkInDateStr === dayStr &&
+          (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
+        );
 
         let rawStatus = record?.status?.toUpperCase();
-        if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
+        if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
           rawStatus = "OFF_DAY";
-        } else if (isFutureDay && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE" && rawStatus !== "OFF_DAY") {
+        } else if (isFutureDay && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
           rawStatus = "UPCOMING_DAY";
         }
 
@@ -1008,11 +1018,17 @@ export const Attendance: React.FC = () => {
                   const cellDate = new Date(`${dayStr}T00:00:00`);
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
                   const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
+                  const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+                  const hasActualCheckInOnThisDate = Boolean(
+                    record?.checkInTime &&
+                    checkInDateStr === dayStr &&
+                    (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
+                  );
 
                   let rawStatus = record?.status?.toUpperCase();
-                  if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
+                  if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
                     rawStatus = "OFF_DAY";
-                  } else if (isFutureDay && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE" && rawStatus !== "OFF_DAY") {
+                  } else if (isFutureDay && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
                     rawStatus = "UPCOMING_DAY";
                   }
 
@@ -1342,21 +1358,27 @@ export const Attendance: React.FC = () => {
                       const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate);
                       const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
 
+                      const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+                      const hasActualCheckInOnThisDate = Boolean(
+                        record?.checkInTime &&
+                        checkInDateStr === targetDateStr &&
+                        (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
+                      );
+
                       let defaultStatus = "ABSENT";
-                      if (isEmpDayOff) {
+                      if (isEmpDayOff && !hasActualCheckInOnThisDate) {
                         defaultStatus = "OFF_DAY";
-                      } else if (isFutureDate) {
+                      } else if (isFutureDate && !hasActualCheckInOnThisDate) {
                         defaultStatus = "UPCOMING_DAY";
                       }
 
                       let rawStatus = record?.status;
-                      if (record?.checkInTime && (!rawStatus || rawStatus === "ABSENT" || rawStatus === "OFF_DAY" || rawStatus === "UPCOMING_DAY")) {
+                      if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
+                        rawStatus = "OFF_DAY";
+                      } else if (record?.checkInTime && (!rawStatus || rawStatus === "ABSENT" || rawStatus === "OFF_DAY" || rawStatus === "UPCOMING_DAY")) {
                         rawStatus = record.isLate ? "LATE" : "PRESENT";
                       } else if (!rawStatus || rawStatus === "ABSENT") {
                         rawStatus = defaultStatus;
-                      }
-                      if (isEmpDayOff && rawStatus !== "PRESENT" && rawStatus !== "LATE" && rawStatus !== "TARDY" && rawStatus !== "LEAVE") {
-                        rawStatus = "OFF_DAY";
                       }
 
                       // Compute real-time elapsed minutes if actively on shift today
