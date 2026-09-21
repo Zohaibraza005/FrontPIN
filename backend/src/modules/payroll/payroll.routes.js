@@ -19,6 +19,7 @@ router.get("/run", protect, controller.getRuns);
 router.get("/run/:id", protect, controller.getSingleRun);
 
 router.get("/", protect, controller.getPayrolls);
+router.post("/generate", protect, controller.createPayroll);
 router.post("/generate-bulk", protect, controller.generateBulkPayroll);
 router.get("/:id", protect, controller.getSinglePayroll);
 router.put("/:id", protect, controller.updatePayroll);

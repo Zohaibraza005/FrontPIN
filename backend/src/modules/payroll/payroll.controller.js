@@ -22,17 +22,27 @@ exports.createPayroll = async (req, res) => {
       return res.status(404).json({ message: "Employee payroll settings not found" });
     }
 
-    const { payoutType, rate, currency, cycleDate } = employee.payroll;
+    const { payoutType, rate, currency, cycleDate: rawCycleDate } = employee.payroll;
+    const cycleDate = Number(rawCycleDate) || 1;
 
     // 🔹 Calculate Payroll Period
-    const periodEnd = moment({ year, month: month - 1, day: cycleDate });
-    const periodStart = periodEnd.clone().subtract(1, "month");
+    let periodStart, periodEnd;
+    if (cycleDate <= 1) {
+      periodStart = moment({ year: Number(year), month: Number(month) - 1 }).startOf("month");
+      periodEnd = moment({ year: Number(year), month: Number(month) - 1 }).endOf("month");
+    } else {
+      periodEnd = moment({ year: Number(year), month: Number(month) - 1 }).date(cycleDate - 1).endOf("day");
+      periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
+    }
 
     // 🔹 Hiring Date Adjustment
     if (employee.jobInfo?.hiringDate) {
       const hiringDate = moment(employee.jobInfo.hiringDate);
-      if (hiringDate.isBetween(periodStart, periodEnd)) {
-        periodStart = hiringDate.clone();
+      if (hiringDate.isAfter(periodEnd)) {
+        return res.status(400).json({ message: "Employee hired after payroll period" });
+      }
+      if (hiringDate.isAfter(periodStart) && hiringDate.isSameOrBefore(periodEnd)) {
+        periodStart = hiringDate.clone().startOf("day");
       }
     }
 
@@ -40,8 +50,19 @@ exports.createPayroll = async (req, res) => {
     const existingPayroll = await prisma.payroll.findFirst({
       where: {
         employeeId: Number(employeeId),
-        periodStart: periodStart.toDate(),
-        periodEnd: periodEnd.toDate()
+        deletedAt: null,
+        OR: [
+          {
+            periodStart: periodStart.toDate(),
+            periodEnd: periodEnd.toDate()
+          },
+          {
+            periodStart: {
+              gte: periodStart.clone().startOf("day").toDate(),
+              lte: periodStart.clone().endOf("day").toDate()
+            }
+          }
+        ]
       }
     });
 
@@ -79,76 +100,99 @@ exports.createPayroll = async (req, res) => {
       }
     });
 
-    const overtimeHours = overtimes.reduce((sum, o) => sum + o.hours, 0);
+    const overtimeHours = overtimes.reduce((sum, o) => sum + (Number(o.hours) || 0), 0);
     const overtimeAmount = overtimes.reduce(
-      (sum, o) => sum + (o.hours * rate * (o.rate || 1)),
+      (sum, o) => sum + ((Number(o.hours) || 0) * rate * (Number(o.rate) || 1)),
       0
     );
 
     // 🔹 Day Calculation
-    const totalDays = periodEnd.diff(periodStart, "days");
+    const totalDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
     const presentDays = attendances.filter(a => a.status === "PRESENT").length;
     const lateDays = attendances.filter(a => a.isLate).length;
 
     let leaveDays = 0;
     leaves.forEach(l => {
-      leaveDays += moment(l.endDate).diff(moment(l.startDate), "days") + 1;
+      leaveDays += Number(l.days) || (moment(l.endDate).diff(moment(l.startDate), "days") + 1);
     });
 
-    const absentDays = totalDays - presentDays - leaveDays;
+    const absentDays = Math.max(0, totalDays - presentDays - leaveDays);
 
     // 🔹 Salary Calculation
-    let grossSalary = 0;
+    let grossSalary = Number(rate) || 0;
 
     if (payoutType === "daily") {
       grossSalary = rate * presentDays;
-    }
-
-    if (payoutType === "hourly") {
+    } else if (payoutType === "hourly") {
       const totalMinutes = attendances.reduce(
-        (sum, a) => sum + a.totalWorkedMinutes,
+        (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
         0
       );
       const hoursWorked = totalMinutes / 60;
       grossSalary = rate * hoursWorked;
-    }
-
-    if (payoutType === "monthly") {
-      grossSalary = rate;
+    } else {
+      // monthly
+      const dailyRate = rate / totalDays;
+      const deduction = absentDays * dailyRate;
+      grossSalary = Math.max(0, rate - deduction);
     }
 
     grossSalary += overtimeAmount;
     grossSalary += Number(bonus);
     grossSalary -= Number(deductions);
+    grossSalary = Math.max(0, grossSalary);
 
     const payroll = await prisma.payroll.create({
       data: {
         employeeId: Number(employeeId),
-        organizationId: req.user.orgId,
+        organizationId: employee.organizationId || req.user.orgId,
         periodStart: periodStart.toDate(),
         periodEnd: periodEnd.toDate(),
-        payoutType,
-        rate,
-        currency,
+        payoutType: payoutType || "monthly",
+        rate: Number(rate) || 0,
+        currency: currency || "PKR",
         workingDays: totalDays,
         presentDays,
         absentDays,
         leaveDays,
         lateDays,
         overtimeHours,
-        overtimeAmount,
-        bonus: Number(bonus),
-        deductions: Number(deductions),
         grossSalary,
         netSalary: grossSalary,
+        status: "GENERATED",
         createdById: req.user.id
       }
     });
 
+    // Add bonus/deduction components if provided
+    if (Number(bonus) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "BONUS",
+          title: "Bonus",
+          amount: Number(bonus),
+          createdById: req.user.id
+        }
+      });
+    }
+
+    if (Number(deductions) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "DEDUCTION",
+          title: "General Deduction",
+          amount: Number(deductions),
+          createdById: req.user.id
+        }
+      });
+    }
+
     res.json({ success: true, payroll });
 
   } catch (error) {
-    console.error(error);
+    console.error("Create Payroll Error:", error);
     res.status(500).json({ message: "Payroll generation failed" });
   }
 };
@@ -172,26 +216,27 @@ exports.generateBulkPayroll = async (req, res) => {
     const baseInclude = {
       payroll: true,
       jobInfo: true,
-      Schedule: true
+      Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } }
     };
 
     if (type === "INDIVIDUAL") {
       employees = await prisma.employee.findMany({
-        where: { id: { in: employeeIds || [] }, deletedAt: null },
+        where: { id: { in: (employeeIds || []).map(Number) }, deletedAt: null, organizationId: user.orgId },
         include: baseInclude
       });
-    }
-
-    if (type === "DEPARTMENT") {
+    } else if (type === "DEPARTMENT") {
       employees = await prisma.employee.findMany({
-        where: { departmentId: { in: departmentIds || [] }, deletedAt: null },
+        where: { departmentId: { in: (departmentIds || []).map(Number) }, deletedAt: null, organizationId: user.orgId },
         include: baseInclude
       });
-    }
-
-    if (type === "LOCATION") {
+    } else if (type === "LOCATION") {
       employees = await prisma.employee.findMany({
-        where: { companyId: { in: locationIds || [] }, deletedAt: null },
+        where: { companyId: { in: (locationIds || []).map(Number) }, deletedAt: null, organizationId: user.orgId },
+        include: baseInclude
+      });
+    } else {
+      employees = await prisma.employee.findMany({
+        where: { deletedAt: null, organizationId: user.orgId },
         include: baseInclude
       });
     }
@@ -199,19 +244,19 @@ exports.generateBulkPayroll = async (req, res) => {
     let generated = 0;
     let skipped = 0;
 
-    //////////////////////////////////////////////////////
-    // LOOP EACH EMPLOYEE
-    //////////////////////////////////////////////////////
-    console.log(employees)
-
     for (const emp of employees) {
-
       if (!emp.payroll) continue;
 
-      const cycleDate = emp.payroll.cycleDate;
+      const cycleDate = Number(emp.payroll.cycleDate) || 1;
+      let periodStart, periodEnd;
 
-      let periodEnd = moment({ year, month: month - 1 }).date(cycleDate);
-      let periodStart = periodEnd.clone().subtract(1, "month");
+      if (cycleDate <= 1) {
+        periodStart = moment({ year: Number(year), month: Number(month) - 1 }).startOf("month");
+        periodEnd = moment({ year: Number(year), month: Number(month) - 1 }).endOf("month");
+      } else {
+        periodEnd = moment({ year: Number(year), month: Number(month) - 1 }).date(cycleDate - 1).endOf("day");
+        periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
+      }
 
       const hiringDate = emp.jobInfo?.hiringDate
         ? moment(emp.jobInfo.hiringDate)
@@ -224,17 +269,27 @@ exports.generateBulkPayroll = async (req, res) => {
       }
 
       // 🔥 Prorate start date
-      if (hiringDate && hiringDate.isAfter(periodStart)) {
-        periodStart = hiringDate.clone();
+      if (hiringDate && hiringDate.isAfter(periodStart) && hiringDate.isSameOrBefore(periodEnd)) {
+        periodStart = hiringDate.clone().startOf("day");
       }
 
       // 🔁 Prevent duplicate
       const existing = await prisma.payroll.findFirst({
         where: {
           employeeId: emp.id,
-          periodStart: periodStart.toDate(),
-          periodEnd: periodEnd.toDate(),
-          deletedAt: null
+          deletedAt: null,
+          OR: [
+            {
+              periodStart: periodStart.toDate(),
+              periodEnd: periodEnd.toDate()
+            },
+            {
+              periodStart: {
+                gte: periodStart.clone().startOf("day").toDate(),
+                lte: periodStart.clone().endOf("day").toDate()
+              }
+            }
+          ]
         }
       });
 
@@ -250,7 +305,8 @@ exports.generateBulkPayroll = async (req, res) => {
       const attendance = await prisma.attendance.findMany({
         where: {
           employeeId: emp.id,
-          date: { gte: periodStart.toDate(), lte: periodEnd.toDate() }
+          date: { gte: periodStart.toDate(), lte: periodEnd.toDate() },
+          deletedAt: null
         }
       });
 
@@ -269,7 +325,10 @@ exports.generateBulkPayroll = async (req, res) => {
 
       const rawScheduleDays = emp.Schedule?.[0]?.days || [];
       const scheduleDays = Array.isArray(rawScheduleDays)
-        ? rawScheduleDays.map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || "")).map(s => s.trim().toLowerCase())
+        ? rawScheduleDays
+            .map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || ""))
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean)
         : [];
 
       let workingDays = 0;
@@ -278,10 +337,22 @@ exports.generateBulkPayroll = async (req, res) => {
       while (cursor.isSameOrBefore(periodEnd)) {
         const dShort = cursor.format("ddd").toLowerCase();
         const dFull = cursor.format("dddd").toLowerCase();
-        if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
-          workingDays++;
+        if (scheduleDays.length > 0) {
+          if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
+            workingDays++;
+          }
+        } else {
+          // Standard weekdays Mon-Fri
+          const dayOfWeek = cursor.day();
+          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            workingDays++;
+          }
         }
         cursor.add(1, "day");
+      }
+
+      if (workingDays <= 0) {
+        workingDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
       }
 
       //////////////////////////////////////////////////////
@@ -300,8 +371,9 @@ exports.generateBulkPayroll = async (req, res) => {
       let unpaidLeaves = 0;
 
       for (const leave of leaves) {
-        if (leave.payType === "PAID") paidLeaves += leave.days;
-        if (leave.payType === "UNPAID") unpaidLeaves += leave.days;
+        const dCount = Number(leave.days) || 1;
+        if (leave.payType === "PAID") paidLeaves += dCount;
+        if (leave.payType === "UNPAID") unpaidLeaves += dCount;
       }
 
       //////////////////////////////////////////////////////
@@ -317,57 +389,35 @@ exports.generateBulkPayroll = async (req, res) => {
         _sum: { hours: true, amount: true }
       });
 
-      const overtimeHours = overtime._sum.hours || 0;
-      const overtimeAmount = overtime._sum.amount || 0;
+      const overtimeHours = Number(overtime._sum.hours || 0);
+      const overtimeAmount = Number(overtime._sum.amount || 0);
 
       //////////////////////////////////////////////////////
       // SALARY LOGIC
       //////////////////////////////////////////////////////
 
-      let grossSalary = 0;
-      let dailyRate = 0;
+      const rate = Number(emp.payroll.rate) || 0;
+      let grossSalary = rate;
+      let dailyRate = rate / (workingDays || 30);
 
       if (emp.payroll.payoutType === "daily") {
-
-        dailyRate = emp.payroll.rate;
-
-        grossSalary =
-          (presentDays + paidLeaves) * dailyRate;
-
-        const deduction =
-          (absentDays + unpaidLeaves) * dailyRate;
-
-        grossSalary -= deduction;
-      }
-
-      if (emp.payroll.payoutType === "hourly") {
-
+        dailyRate = rate;
+        grossSalary = Math.max(0, (presentDays + paidLeaves) * dailyRate - (absentDays + unpaidLeaves) * dailyRate);
+      } else if (emp.payroll.payoutType === "hourly") {
         const totalMinutes = attendance.reduce(
-          (sum, a) => sum + (a.totalWorkedMinutes || 0),
+          (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
           0
         );
-
         const totalHours = totalMinutes / 60;
-
-        grossSalary = totalHours * emp.payroll.rate;
-      }
-
-      if (emp.payroll.payoutType === "monthly") {
-
-        dailyRate = emp.payroll.rate / workingDays;
-
-        grossSalary =
-          (presentDays + paidLeaves) * dailyRate;
-
-        const deduction =
-          (absentDays + unpaidLeaves) * dailyRate;
-
-        grossSalary -= deduction;
+        grossSalary = totalHours * rate;
+      } else {
+        // Monthly
+        const deduction = (absentDays + unpaidLeaves) * dailyRate;
+        grossSalary = Math.max(0, rate - deduction);
       }
 
       grossSalary += overtimeAmount;
-
-      const netSalary = grossSalary;
+      const netSalary = Math.max(0, grossSalary);
 
       //////////////////////////////////////////////////////
       // CREATE PAYROLL
@@ -376,12 +426,12 @@ exports.generateBulkPayroll = async (req, res) => {
       await prisma.payroll.create({
         data: {
           employeeId: emp.id,
-          organizationId: emp.organizationId,
+          organizationId: emp.organizationId || user.orgId,
           periodStart: periodStart.toDate(),
           periodEnd: periodEnd.toDate(),
-          payoutType: emp.payroll.payoutType,
-          rate: emp.payroll.rate,
-          currency: emp.payroll.currency,
+          payoutType: emp.payroll.payoutType || "monthly",
+          rate,
+          currency: emp.payroll.currency || "PKR",
           workingDays,
           presentDays,
           absentDays,
@@ -390,6 +440,7 @@ exports.generateBulkPayroll = async (req, res) => {
           overtimeHours,
           grossSalary,
           netSalary,
+          status: "GENERATED",
           createdById: user.id
         }
       });
@@ -400,51 +451,66 @@ exports.generateBulkPayroll = async (req, res) => {
     res.json({ success: true, generated, skipped });
 
   } catch (err) {
-    console.error(err);
+    console.error("Bulk Payroll Error:", err);
     res.status(500).json({ message: "Payroll generation failed" });
   }
 };
+
 exports.getPayrolls = async (req, res) => {
   try {
     const { month, year, status } = req.query;
-    // const monthNum = Number(month);
-    // const yearNum = Number(year);
-
-    // if (!month || !year || isNaN(monthNum) || isNaN(yearNum)) {
-    //   return res.json({
-    //     totalGross: 0,
-    //     totalNet: 0,
-    //     totalOvertime: 0,
-    //     totalAbsentDays: 0,
-    //     totalLeaveDays: 0,
-    //     headcount: 0,
-    //     averageCostPerEmployee: 0,
-    //     variancePercent: 0,
-    //     departmentBreakdown: []
-    //   });
-    // }
-    
 
     const where = {
       organizationId: req.user.orgId,
-      deletedAt: null
+      deletedAt: null,
+      employee: {
+        deletedAt: null
+      }
     };
 
     if (req.user.role !== "ADMIN") {
       where.employeeId = req.user.id;
     }
 
-    if (month && year) {
+    if (month && year && String(month).toLowerCase() !== "all") {
       const startDate = moment({ year: Number(year), month: Number(month) - 1 })
         .startOf("month")
         .toDate();
 
       const endDate = moment(startDate).endOf("month").toDate();
 
-      where.periodStart = {
-        gte: startDate,
-        lte: endDate
-      };
+      where.OR = [
+        {
+          periodStart: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        {
+          periodEnd: {
+            gt: startDate,
+            lte: endDate
+          }
+        }
+      ];
+    } else if (year && String(year).toLowerCase() !== "all") {
+      const startYear = moment({ year: Number(year) }).startOf("year").toDate();
+      const endYear = moment({ year: Number(year) }).endOf("year").toDate();
+
+      where.OR = [
+        {
+          periodStart: {
+            gte: startYear,
+            lte: endYear
+          }
+        },
+        {
+          periodEnd: {
+            gt: startYear,
+            lte: endYear
+          }
+        }
+      ];
     }
 
     if (status && status !== "all") {
@@ -456,8 +522,17 @@ exports.getPayrolls = async (req, res) => {
       include: {
         employee: {
           select: {
+            id: true,
             firstName: true,
-            lastName: true
+            lastName: true,
+            email: true,
+            profileImage: true,
+            department: {
+              select: {
+                id: true,
+                title: true
+              }
+            }
           }
         },
         components: true
@@ -470,23 +545,23 @@ exports.getPayrolls = async (req, res) => {
     const formatted = payrolls.map(p => {
       const baseSalary = Number(p.rate || p.grossSalary || 0);
 
-      const extraEarnings = p.components
+      const extraEarnings = (p.components || [])
         .filter(c =>
           ["BASIC","ALLOWANCE","BONUS","COMMISSION","OVERTIME","INCREMENT","KPIS","BOUNTY","ARREARS"].includes(String(c.type || "").toUpperCase())
         )
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const extraDeductions = p.components
+      const extraDeductions = (p.components || [])
         .filter(c =>
           ["TAX","LOAN","DEDUCTION","TARDIES","UNPAID","FOOD","CT","GYM","ADVANCE"].includes(String(c.type || "").toUpperCase())
         )
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const overtimeAmount = p.components
+      const overtimeAmount = (p.components || [])
         .filter(c => String(c.type).toUpperCase() === "OVERTIME")
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const bonus = p.components
+      const bonus = (p.components || [])
         .filter(c => String(c.type).toUpperCase() === "BONUS")
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
@@ -519,7 +594,7 @@ exports.getPayrolls = async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Get Payrolls Error:", error);
     res.status(500).json({ message: "Failed to fetch payrolls" });
   }
 };
@@ -555,7 +630,8 @@ exports.getSinglePayroll = async (req, res) => {
     // CALCULATE WORKING DAYS FROM SCHEDULE
     //////////////////////////////////////////////////////
 
-    const rawScheduleDays = payroll.employee.Schedule?.[0]?.days || [];
+    const activeSchedule = (payroll.employee?.Schedule || []).find(s => !s.deletedAt) || payroll.employee?.Schedule?.[0];
+    const rawScheduleDays = activeSchedule?.days || [];
     const scheduleDays = Array.isArray(rawScheduleDays)
       ? rawScheduleDays.map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || "")).map(s => s.trim().toLowerCase())
       : [];
@@ -566,10 +642,21 @@ exports.getSinglePayroll = async (req, res) => {
     while (cursor.isSameOrBefore(payroll.periodEnd)) {
       const dShort = cursor.format("ddd").toLowerCase();
       const dFull = cursor.format("dddd").toLowerCase();
-      if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
-        workingDaysCalculated++;
+      if (scheduleDays.length > 0) {
+        if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
+          workingDaysCalculated++;
+        }
+      } else {
+        const dow = cursor.day();
+        if (dow !== 0 && dow !== 6) {
+          workingDaysCalculated++;
+        }
       }
       cursor.add(1, "day");
+    }
+
+    if (workingDaysCalculated <= 0) {
+      workingDaysCalculated = Math.max(1, moment(payroll.periodEnd).diff(moment(payroll.periodStart), "days") + 1);
     }
 
     //////////////////////////////////////////////////////
@@ -1186,10 +1273,21 @@ exports.getPayrollStats = async (req, res) => {
       where: {
         organizationId: orgId,
         deletedAt: null,
-        periodStart: {
-          gte: periodStart,
-          lte: periodEnd
-        }
+        employee: { deletedAt: null },
+        OR: [
+          {
+            periodStart: {
+              gte: periodStart,
+              lte: periodEnd
+            }
+          },
+          {
+            periodEnd: {
+              gt: periodStart,
+              lte: periodEnd
+            }
+          }
+        ]
       },
       include: {
         employee: {
@@ -1200,11 +1298,11 @@ exports.getPayrollStats = async (req, res) => {
       }
     });
 
-    const totalGross = payrolls.reduce((s, p) => s + p.grossSalary, 0);
-    const totalNet = payrolls.reduce((s, p) => s + p.netSalary, 0);
-    const totalOvertime = payrolls.reduce((s, p) => s + p.overtimeHours * p.rate, 0);
-    const totalAbsentDays = payrolls.reduce((s, p) => s + p.absentDays, 0);
-    const totalLeaveDays = payrolls.reduce((s, p) => s + p.leaveDays, 0);
+    const totalGross = payrolls.reduce((s, p) => s + (p.grossSalary || 0), 0);
+    const totalNet = payrolls.reduce((s, p) => s + (p.netSalary || 0), 0);
+    const totalOvertime = payrolls.reduce((s, p) => s + ((p.overtimeHours || 0) * (p.rate || 0)), 0);
+    const totalAbsentDays = payrolls.reduce((s, p) => s + (p.absentDays || 0), 0);
+    const totalLeaveDays = payrolls.reduce((s, p) => s + (p.leaveDays || 0), 0);
 
     const headcount = payrolls.length;
     const averageCostPerEmployee =
@@ -1224,10 +1322,21 @@ exports.getPayrollStats = async (req, res) => {
       where: {
         organizationId: orgId,
         deletedAt: null,
-        periodStart: {
-          gte: lastMonthStart,
-          lte: lastMonthEnd
-        }
+        employee: { deletedAt: null },
+        OR: [
+          {
+            periodStart: {
+              gte: lastMonthStart,
+              lte: lastMonthEnd
+            }
+          },
+          {
+            periodEnd: {
+              gt: lastMonthStart,
+              lte: lastMonthEnd
+            }
+          }
+        ]
       }
     });
 
@@ -1376,10 +1485,21 @@ const yearNum = Number(year);
       where: {
         organizationId: orgId,
         deletedAt: null,
-        periodStart: {
-          gte: start.toDate(),
-          lte: end.toDate()
-        }
+        employee: { deletedAt: null },
+        OR: [
+          {
+            periodStart: {
+              gte: start.toDate(),
+              lte: end.toDate()
+            }
+          },
+          {
+            periodEnd: {
+              gt: start.toDate(),
+              lte: end.toDate()
+            }
+          }
+        ]
       },
       include: {
         employee: { include: { department: true } }
@@ -1390,7 +1510,7 @@ const yearNum = Number(year);
 
     payrolls.forEach(p => {
       const dept = p.employee?.department?.title || "No Department";
-      deptMap[dept] = (deptMap[dept] || 0) + p.netSalary;
+      deptMap[dept] = (deptMap[dept] || 0) + (p.netSalary || 0);
     });
 
     const result = Object.keys(deptMap).map(key => ({
@@ -1450,22 +1570,31 @@ exports.getAttendanceImpact = async (req, res) => {
 
     const start = moment({ year, month: month - 1 }).startOf("month");
     const end = moment(start).endOf("month");
-    console.log(start)
-    console.log(end)
 
     const payrolls = await prisma.payroll.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
-        periodStart: {
-          gte: start.toDate(),
-          lte: end.toDate()
-        }
+        employee: { deletedAt: null },
+        OR: [
+          {
+            periodStart: {
+              gte: start.toDate(),
+              lte: end.toDate()
+            }
+          },
+          {
+            periodEnd: {
+              gt: start.toDate(),
+              lte: end.toDate()
+            }
+          }
+        ]
       }
     });
 
-    const totalAbsentDays = payrolls.reduce((s, p) => s + p.absentDays, 0);
-    const totalLeaveDays = payrolls.reduce((s, p) => s + p.leaveDays, 0);
+    const totalAbsentDays = payrolls.reduce((s, p) => s + (p.absentDays || 0), 0);
+    const totalLeaveDays = payrolls.reduce((s, p) => s + (p.leaveDays || 0), 0);
 
     res.json({
       totalAbsentDays,
@@ -1505,10 +1634,21 @@ exports.getRiskAlerts = async (req, res) => {
       where: {
         organizationId: orgId,
         deletedAt: null,
-        periodStart: {
-          gte: start.toDate(),
-          lte: end.toDate()
-        }
+        employee: { deletedAt: null },
+        OR: [
+          {
+            periodStart: {
+              gte: start.toDate(),
+              lte: end.toDate()
+            }
+          },
+          {
+            periodEnd: {
+              gt: start.toDate(),
+              lte: end.toDate()
+            }
+          }
+        ]
       }
     });
 

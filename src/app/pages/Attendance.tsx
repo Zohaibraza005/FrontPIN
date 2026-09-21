@@ -204,22 +204,38 @@ const getFormattedDateStr = (d: any) => {
 const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
   if (!Array.isArray(attendanceList) || attendanceList.length === 0) return undefined;
 
+  // 1. First priority: exact match on reportDate or dateStr
+  const reportMatches = attendanceList.filter((a: any) => {
+    if (!a) return false;
+    return a.reportDate === targetDateStr || a.dateStr === targetDateStr;
+  });
+  if (reportMatches.length > 0) {
+    if (reportMatches.length === 1) return reportMatches[0];
+    reportMatches.sort((a, b) => {
+      const aHasCheckIn = a.checkInTime ? 1 : 0;
+      const bHasCheckIn = b.checkInTime ? 1 : 0;
+      if (aHasCheckIn !== bHasCheckIn) return bHasCheckIn - aHasCheckIn;
+      return (Number(b.totalWorkedMinutes) || 0) - (Number(a.totalWorkedMinutes) || 0);
+    });
+    return reportMatches[0];
+  }
+
+  // 2. Secondary fallback for raw attendance records without reportDate
   const matches = attendanceList.filter((a: any) => {
     if (!a) return false;
-    if (a.reportDate && a.reportDate === targetDateStr) return true;
-    if (a.dateStr && a.dateStr === targetDateStr) return true;
-    if (typeof a.date === "string" && a.date.slice(0, 10) === targetDateStr) return true;
-    if (a.date && getFormattedDateStr(a.date) === targetDateStr) return true;
     if (a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr) return true;
-    if (a.checkInTime && typeof a.checkInTime === "string" && a.checkInTime.slice(0, 10) === targetDateStr) return true;
+    if (a.date && getFormattedDateStr(a.date) === targetDateStr) return true;
     return false;
   });
 
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0];
 
-  // Prefer record with valid checkInTime, non-ABSENT status, and highest worked minutes
   matches.sort((a, b) => {
+    const aOnTarget = a.checkInTime && getFormattedDateStr(a.checkInTime) === targetDateStr ? 1 : 0;
+    const bOnTarget = b.checkInTime && getFormattedDateStr(b.checkInTime) === targetDateStr ? 1 : 0;
+    if (aOnTarget !== bOnTarget) return bOnTarget - aOnTarget;
+
     const aHasCheckIn = a.checkInTime ? 1 : 0;
     const bHasCheckIn = b.checkInTime ? 1 : 0;
     if (aHasCheckIn !== bHasCheckIn) return bHasCheckIn - aHasCheckIn;
@@ -251,6 +267,41 @@ export const isScheduleOffDay = (schedules: any, date: Date | string): boolean =
     return String(item || "").trim().toLowerCase();
   });
   return !daysArr.includes(dStr) && !daysArr.includes(dFull);
+};
+
+export const getEmployeeDailyStatus = (emp: any, date: Date | string): string => {
+  const targetDateStr = getFormattedDateStr(date);
+  const record = findAttendanceRecord(emp?.Attendance || emp?.attendance, targetDateStr);
+  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, date);
+  const isFutureDate = isAfter(startOfDay(new Date(date)), startOfDay(new Date()));
+
+  const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+  const hasActualCheckInOnThisDate = Boolean(
+    record?.checkInTime &&
+    checkInDateStr === targetDateStr &&
+    (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(String(record.status).toUpperCase())))
+  );
+
+  let defaultStatus = "ABSENT";
+  if (isEmpDayOff && !hasActualCheckInOnThisDate) {
+    defaultStatus = "OFF_DAY";
+  } else if (isFutureDate && !hasActualCheckInOnThisDate) {
+    defaultStatus = "UPCOMING_DAY";
+  }
+
+  let rawStatus = record?.status;
+  if (rawStatus === "LATE") rawStatus = "TARDY";
+  if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
+    rawStatus = "OFF_DAY";
+  } else if (record?.checkInTime && (!rawStatus || rawStatus === "ABSENT" || rawStatus === "OFF_DAY" || rawStatus === "UPCOMING_DAY")) {
+    rawStatus = record.isLate ? "TARDY" : "PRESENT";
+  } else if (!rawStatus || rawStatus === "ABSENT") {
+    rawStatus = defaultStatus;
+  }
+
+  const isOffDayRow = rawStatus === "OFF_DAY" || (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE");
+  const finalStatus = isOffDayRow ? "OFF_DAY" : (rawStatus?.toUpperCase() || defaultStatus);
+  return finalStatus === "LATE" ? "TARDY" : finalStatus === "OFF" ? "OFF_DAY" : finalStatus;
 };
 
 const calculateShiftDuration = (startStr?: string, endStr?: string) => {
@@ -406,6 +457,7 @@ export const Attendance: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Pagination state for Daily View table
   const [currentPage, setCurrentPage] = useState(1);
@@ -413,7 +465,7 @@ export const Attendance: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId]);
+  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId, statusFilter]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -435,6 +487,7 @@ export const Attendance: React.FC = () => {
         departmentId,
         locationId,
         employeeId: selectedEmployeeId !== "all" ? selectedEmployeeId : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
       });
       toast.success("Excel exported successfully!", { id: "export-excel" });
     } catch (err: any) {
@@ -518,19 +571,23 @@ export const Attendance: React.FC = () => {
       rawStatus = defaultStatus;
     }
 
+    const isOffCell = rawStatus === "OFF_DAY" || (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE");
+    const cellCheckIn = (isOffCell || checkInDateStr !== cellDateStr) ? null : (record?.checkInTime ?? null);
+    const cellCheckOut = (isOffCell || (record?.checkOutTime && getFormattedDateStr(record.checkOutTime) !== cellDateStr)) ? null : (record?.checkOutTime ?? null);
+
     const finalRecord = {
       id: record?.id ?? null,
       date: record?.date ?? day,
-      checkInTime: record?.checkInTime ?? null,
-      checkOutTime: record?.checkOutTime ?? null,
-      totalWorkedMinutes: record?.totalWorkedMinutes ?? 0,
-      totalBreakMinutes: record?.totalBreakMinutes ?? 0,
+      checkInTime: cellCheckIn,
+      checkOutTime: cellCheckOut,
+      totalWorkedMinutes: isOffCell ? 0 : (record?.totalWorkedMinutes ?? 0),
+      totalBreakMinutes: isOffCell ? 0 : (record?.totalBreakMinutes ?? 0),
       employeeId: record?.employeeId ?? emp.id,
-      overtimeAmount: record?.overtimeAmount ?? 0,
+      overtimeAmount: isOffCell ? 0 : (record?.overtimeAmount ?? 0),
       ...record,
-      status: rawStatus,
-      overtimeHours: otHours,
-      overtimeMinutes: otMins,
+      status: isOffCell ? "OFF_DAY" : (rawStatus === "LATE" ? "TARDY" : rawStatus),
+      overtimeHours: isOffCell ? 0 : otHours,
+      overtimeMinutes: isOffCell ? 0 : otMins,
     };
 
     if (!finalRecord) {
@@ -842,8 +899,9 @@ export const Attendance: React.FC = () => {
     report.forEach(emp => {
       const rec = findAttendanceRecord(emp.Attendance || emp.attendance, targetDateStr);
       let st = rec?.status?.toUpperCase();
+      if (st === "LATE") st = "TARDY";
       if (rec?.checkInTime && (!st || st === "ABSENT" || st === "OFF_DAY" || st === "UPCOMING_DAY")) {
-        st = rec.isLate ? "LATE" : "PRESENT";
+        st = rec.isLate ? "TARDY" : "PRESENT";
       } else if (!st) {
         st = "ABSENT";
       }
@@ -960,7 +1018,7 @@ export const Attendance: React.FC = () => {
                 >
                   <div className="flex items-center gap-2">
                     <User className="w-4 h-4 text-gray-400" />
-                    <span>Employee ({report.length})</span>
+                    <span>Employee ({filteredReport.length})</span>
                   </div>
                 </th>
   
@@ -1010,7 +1068,7 @@ export const Attendance: React.FC = () => {
             </thead>
   
             <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
-              {report.map((emp) => {
+              {filteredReport.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
                   const record = findAttendanceRecord(emp.Attendance || emp.attendance, dayStr);
@@ -1088,7 +1146,7 @@ export const Attendance: React.FC = () => {
           </table>
         </div>
   
-        {report.length === 0 && (
+        {filteredReport.length === 0 && (
           <div className="py-12 text-center text-gray-500 flex flex-col items-center justify-center gap-2">
             <AlertCircle className="w-8 h-8 text-gray-400" />
             <p className="font-medium text-base">No attendance records found for this period</p>
@@ -1099,19 +1157,51 @@ export const Attendance: React.FC = () => {
     );
   };
 
+  // Filtered report calculation based on statusFilter
+  const filteredReport = useMemo(() => {
+    if (!statusFilter || statusFilter === "all") {
+      return report;
+    }
+    const filterUpper = statusFilter.toUpperCase();
+
+    return report.filter((emp) => {
+      if (activeTab === "daily") {
+        const empStatus = getEmployeeDailyStatus(emp, selectedDate);
+        if (filterUpper === "TARDY") return empStatus === "TARDY" || empStatus === "LATE";
+        if (filterUpper === "OFF_DAY") return empStatus === "OFF_DAY" || empStatus === "OFF";
+        return empStatus === filterUpper;
+      }
+
+      // For weekly & monthly views: check if employee has this status on any day of the period, or on selectedDate
+      const records = emp.Attendance || emp.attendance || [];
+      const hasStatusInRecords = records.some((r: any) => {
+        const s = (r.status || "").toUpperCase();
+        if (filterUpper === "TARDY") return s === "TARDY" || s === "LATE";
+        if (filterUpper === "OFF_DAY") return s === "OFF_DAY" || s === "OFF";
+        return s === filterUpper;
+      });
+      if (hasStatusInRecords) return true;
+
+      const dailyStatus = getEmployeeDailyStatus(emp, selectedDate);
+      if (filterUpper === "TARDY") return dailyStatus === "TARDY" || dailyStatus === "LATE";
+      if (filterUpper === "OFF_DAY") return dailyStatus === "OFF_DAY" || dailyStatus === "OFF";
+      return dailyStatus === filterUpper;
+    });
+  }, [report, statusFilter, activeTab, selectedDate]);
+
   // Daily View pagination calculations
-  const totalEmployees = report.length;
+  const totalEmployees = filteredReport.length;
   const totalPages = Math.max(1, Math.ceil(totalEmployees / itemsPerPage));
   const validPage = Math.min(currentPage, totalPages);
   const startIndex = (validPage - 1) * itemsPerPage;
   const endIndex = Math.min(startIndex + itemsPerPage, totalEmployees);
   const paginatedDailyReport = useMemo(() => {
-    return report.slice(startIndex, endIndex);
-  }, [report, startIndex, endIndex]);
+    return filteredReport.slice(startIndex, endIndex);
+  }, [filteredReport, startIndex, endIndex]);
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
-      {/* Simple Header with Refresh */}
+      {/* Simple Header with Refresh & Export Excel */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Attendance Management</h2>
@@ -1120,155 +1210,169 @@ export const Attendance: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={refreshing}
-          onClick={() => loadReport(true)}
-          className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl"
-          title="Real-time live refresh"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
-          <span>Refresh</span>
-        </Button>
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={refreshing}
+            onClick={() => loadReport(true)}
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl"
+            title="Real-time live refresh"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
+            <span>Refresh</span>
+          </Button>
+
+          <Button
+            variant="default"
+            size="sm"
+            disabled={exporting}
+            onClick={handleExportExcel}
+            className="shrink-0 h-9 px-3 text-xs font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-xl transition-all whitespace-nowrap"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Export Excel</span>
+          </Button>
+        </div>
       </div>
 
       {/* Main Filter & Content Card */}
       <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
-        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3.5 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            
-            {/* Left Controls: Date Navigation & DatePicker in one neat group */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
-                  onClick={handlePrevDate}
-                  title="Previous Period"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
-                  onClick={handleNextDate}
-                  disabled={isNextDisabled}
-                  title="Next Period"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
-              </div>
-
-              {/* DatePicker Input Box */}
-              <div className="relative w-48 sm:w-56">
-                <DatePicker
-                  selected={selectedDate}
-                  maxDate={new Date()}
-                  onChange={(date: Date) => {
-                    if (!date) return;
-                    if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
-                    setSelectedDate(date);
-                    if (activeTab === "weekly") setWeekOffset(0);
-                    if (activeTab === "monthly") setMonthOffset(0);
-                  }}
-                  showMonthYearPicker={activeTab === "monthly"}
-                  highlightDates={
-                    activeTab === "weekly"
-                      ? [
-                          {
-                            "react-datepicker__day--highlighted-custom-1": eachDayOfInterval({
-                              start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
-                              end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
-                            }),
-                          },
-                        ]
-                      : undefined
-                  }
-                  dateFormat={
-                    activeTab === "daily"
-                      ? "PPP"
-                      : activeTab === "weekly"
-                      ? "'Week of' MMM d, yyyy"
-                      : "MMMM yyyy"
-                  }
-                  className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-1.5 h-9 text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Right Controls: Filter Selects + Export Excel in a single line */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-              {user?.role === "ADMIN" && (
-                <>
-                  <SearchableSelect
-                    className="w-36 sm:w-40"
-                    icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
-                    placeholder="Department"
-                    searchPlaceholder="Search department..."
-                    value={departmentId}
-                    onValueChange={setDepartmentId}
-                    options={[
-                      { value: "all", label: "All Departments" },
-                      ...departments.map((d) => ({
-                        value: String(d.id),
-                        label: d.title,
-                      })),
-                    ]}
-                  />
-
-                  <SearchableSelect
-                    className="w-36 sm:w-40"
-                    icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
-                    placeholder="Location"
-                    searchPlaceholder="Search location..."
-                    value={locationId}
-                    onValueChange={(val) => {
-                      setLocationId(val);
-                      localStorage.setItem("selectedLocation", val);
-                      localStorage.setItem("dashboard-selected-location", val);
-                      window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
-                    }}
-                    options={[
-                      { value: "all", label: "All Locations" },
-                      ...locations.map((l) => ({
-                        value: String(l.id),
-                        label: l.name,
-                      })),
-                    ]}
-                  />
-
-                  <SearchableSelect
-                    className="w-40 sm:w-44"
-                    icon={<User className="w-3.5 h-3.5 text-gray-400" />}
-                    placeholder="All Employees"
-                    searchPlaceholder="Search employee..."
-                    value={selectedEmployeeId}
-                    onValueChange={setSelectedEmployeeId}
-                    options={[
-                      { value: "all", label: "All Employees" },
-                      ...employees.map((emp) => ({
-                        value: String(emp.id),
-                        label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
-                      })),
-                    ]}
-                  />
-                </>
-              )}
-
-              <Button
-                variant="default"
-                size="sm"
-                disabled={exporting}
-                onClick={handleExportExcel}
-                className="shrink-0 h-9 px-3 text-xs font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-xl transition-all whitespace-nowrap"
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            {/* Date Navigation */}
+            <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
+                onClick={handlePrevDate}
+                title="Previous Period"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Export Excel</span>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
+                onClick={handleNextDate}
+                disabled={isNextDisabled}
+                title="Next Period"
+              >
+                <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
+
+            {/* DatePicker Input Box */}
+            <div className="relative w-44 sm:w-48 shrink-0">
+              <DatePicker
+                selected={selectedDate}
+                maxDate={new Date()}
+                onChange={(date: Date) => {
+                  if (!date) return;
+                  if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
+                  setSelectedDate(date);
+                  if (activeTab === "weekly") setWeekOffset(0);
+                  if (activeTab === "monthly") setMonthOffset(0);
+                }}
+                showMonthYearPicker={activeTab === "monthly"}
+                highlightDates={
+                  activeTab === "weekly"
+                    ? [
+                        {
+                          "react-datepicker__day--highlighted-custom-1": eachDayOfInterval({
+                            start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
+                            end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
+                          }),
+                        },
+                      ]
+                    : undefined
+                }
+                dateFormat={
+                  activeTab === "daily"
+                    ? "PPP"
+                    : activeTab === "weekly"
+                    ? "'Week of' MMM d, yyyy"
+                    : "MMMM yyyy"
+                }
+                className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-1.5 h-9 text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {user?.role === "ADMIN" && (
+              <>
+                <SearchableSelect
+                  className="w-32 sm:w-36 shrink-0"
+                  icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Department"
+                  searchPlaceholder="Search department..."
+                  value={departmentId}
+                  onValueChange={setDepartmentId}
+                  options={[
+                    { value: "all", label: "All Departments" },
+                    ...departments.map((d) => ({
+                      value: String(d.id),
+                      label: d.title,
+                    })),
+                  ]}
+                />
+
+                <SearchableSelect
+                  className="w-32 sm:w-36 shrink-0"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Location"
+                  searchPlaceholder="Search location..."
+                  value={locationId}
+                  onValueChange={(val) => {
+                    setLocationId(val);
+                    localStorage.setItem("selectedLocation", val);
+                    localStorage.setItem("dashboard-selected-location", val);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                  }}
+                  options={[
+                    { value: "all", label: "All Locations" },
+                    ...locations.map((l) => ({
+                      value: String(l.id),
+                      label: l.name,
+                    })),
+                  ]}
+                />
+
+                <SearchableSelect
+                  className="w-36 sm:w-40 shrink-0"
+                  icon={<User className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="All Employees"
+                  searchPlaceholder="Search employee..."
+                  value={selectedEmployeeId}
+                  onValueChange={setSelectedEmployeeId}
+                  options={[
+                    { value: "all", label: "All Employees" },
+                    ...employees.map((emp) => ({
+                      value: String(emp.id),
+                      label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
+                    })),
+                  ]}
+                />
+              </>
+            )}
+
+            {/* Attendance Status Filter */}
+            <SearchableSelect
+              className="w-32 sm:w-36 shrink-0"
+              icon={<Filter className="w-3.5 h-3.5 text-gray-400" />}
+              placeholder="All Statuses"
+              searchPlaceholder="Filter status..."
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              options={[
+                { value: "all", label: "All Statuses" },
+                { value: "PRESENT", label: "Present" },
+                { value: "ABSENT", label: "Absent" },
+                { value: "TARDY", label: "Tardy" },
+                { value: "LEAVE", label: "Leave" },
+                { value: "OFF_DAY", label: "Off Day" },
+              ]}
+            />
           </div>
         </CardHeader>
 
@@ -1373,10 +1477,11 @@ export const Attendance: React.FC = () => {
                       }
 
                       let rawStatus = record?.status;
+                      if (rawStatus === "LATE") rawStatus = "TARDY";
                       if (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE") {
                         rawStatus = "OFF_DAY";
                       } else if (record?.checkInTime && (!rawStatus || rawStatus === "ABSENT" || rawStatus === "OFF_DAY" || rawStatus === "UPCOMING_DAY")) {
-                        rawStatus = record.isLate ? "LATE" : "PRESENT";
+                        rawStatus = record.isLate ? "TARDY" : "PRESENT";
                       } else if (!rawStatus || rawStatus === "ABSENT") {
                         rawStatus = defaultStatus;
                       }
@@ -1392,22 +1497,26 @@ export const Attendance: React.FC = () => {
                         }
                       }
 
+                      const isOffDayRow = rawStatus === "OFF_DAY" || (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE");
+                      const validCheckIn = (!isOffDayRow && checkInDateStr === targetDateStr) ? (record?.checkInTime ?? null) : null;
+                      const validCheckOut = (!isOffDayRow && record?.checkOutTime && getFormattedDateStr(record.checkOutTime) === targetDateStr) ? record.checkOutTime : null;
+
                       const finalRecord = {
+                        ...record,
                         id: record?.id ?? null,
                         date: record?.date ?? selectedDate,
-                        checkInTime: record?.checkInTime ?? null,
-                        checkOutTime: record?.checkOutTime ?? null,
-                        totalWorkedMinutes: workedMins,
-                        totalBreakMinutes: record?.totalBreakMinutes ?? 0,
+                        checkInTime: validCheckIn,
+                        checkOutTime: validCheckOut,
+                        totalWorkedMinutes: isOffDayRow ? 0 : workedMins,
+                        totalBreakMinutes: isOffDayRow ? 0 : (record?.totalBreakMinutes ?? 0),
                         employeeId: record?.employeeId ?? emp.id,
                         employee: emp,
                         schedule: emp?.Schedule,
                         shiftStartTime: record?.shiftStartTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.startTime : emp?.Schedule?.startTime),
                         shiftEndTime: record?.shiftEndTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.endTime : emp?.Schedule?.endTime),
-                        ...record,
-                        status: rawStatus,
-                        overtimeHours: otHours,
-                        overtimeMinutes: otMins,
+                        status: isOffDayRow ? "OFF_DAY" : rawStatus,
+                        overtimeHours: isOffDayRow ? 0 : otHours,
+                        overtimeMinutes: isOffDayRow ? 0 : otMins,
                       };
 
                       const statusCfg = STATUS_CONFIG[finalRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"];
@@ -1517,7 +1626,7 @@ export const Attendance: React.FC = () => {
                       );
                     })}
 
-                    {report.length === 0 && (
+                    {filteredReport.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={8} className="py-12 text-center text-gray-500">
                           No attendance data found for the selected filter and date.
@@ -1676,16 +1785,21 @@ export const Attendance: React.FC = () => {
                         : ""
                     }
                     onChange={(e) => {
-                      if (!e.target.value) return;
+                      if (!e.target.value) {
+                        setSelectedRecord((prev: any) => ({
+                          ...prev,
+                          checkInTime: null,
+                          totalWorkedMinutes: 0
+                        }));
+                        return;
+                      }
                       const [hours, minutes] = e.target.value.split(":");
                       const newDate = new Date(selectedRecord.date);
-                      newDate.setHours(Number(hours));
-                      newDate.setMinutes(Number(minutes));
-                      newDate.setSeconds(0);
+                      newDate.setHours(Number(hours), Number(minutes), 0, 0);
 
                       const inIso = newDate.toISOString();
                       setSelectedRecord((prev: any) => {
-                        let worked = prev.totalWorkedMinutes || 0;
+                        let worked = 0;
                         if (prev.checkOutTime) {
                           const inT = newDate.getTime();
                           const outT = new Date(prev.checkOutTime).getTime();
@@ -1715,16 +1829,21 @@ export const Attendance: React.FC = () => {
                         : ""
                     }
                     onChange={(e) => {
-                      if (!e.target.value) return;
+                      if (!e.target.value) {
+                        setSelectedRecord((prev: any) => ({
+                          ...prev,
+                          checkOutTime: null,
+                          totalWorkedMinutes: 0
+                        }));
+                        return;
+                      }
                       const [hours, minutes] = e.target.value.split(":");
                       const newDate = new Date(selectedRecord.date);
-                      newDate.setHours(Number(hours));
-                      newDate.setMinutes(Number(minutes));
-                      newDate.setSeconds(0);
+                      newDate.setHours(Number(hours), Number(minutes), 0, 0);
 
                       const outIso = newDate.toISOString();
                       setSelectedRecord((prev: any) => {
-                        let worked = prev.totalWorkedMinutes || 0;
+                        let worked = 0;
                         if (prev.checkInTime) {
                           const inT = new Date(prev.checkInTime).getTime();
                           const outT = newDate.getTime();
@@ -1783,17 +1902,7 @@ export const Attendance: React.FC = () => {
                         let cOut = prev.checkOutTime;
                         let worked = prev.totalWorkedMinutes || 0;
 
-                        if ((statusVal === "PRESENT" || statusVal === "LATE" || statusVal === "TARDY") && (!cIn || !cOut)) {
-                          const base = new Date(prev.date || new Date());
-                          const dIn = new Date(base);
-                          dIn.setHours(9, 0, 0, 0);
-                          const dOut = new Date(base);
-                          dOut.setHours(17, 0, 0, 0);
-
-                          cIn = cIn || dIn.toISOString();
-                          cOut = cOut || dOut.toISOString();
-                          worked = Math.max(0, 480 - (prev.totalBreakMinutes || 0));
-                        } else if (statusVal === "ABSENT" || statusVal === "OFF_DAY" || statusVal === "OFF" || statusVal === "LEAVE") {
+                        if (statusVal === "ABSENT" || statusVal === "OFF_DAY" || statusVal === "OFF" || statusVal === "LEAVE") {
                           cIn = null;
                           cOut = null;
                           worked = 0;

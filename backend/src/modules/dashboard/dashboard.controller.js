@@ -164,8 +164,8 @@ const getAdminDashboard = async (req, res) => {
         );
         if (attendance.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (attendance.isLate || attendance.status === "LATE") {
-          status = "LATE";
+        } else if (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") {
+          status = "TARDY";
         } else {
           status = "PRESENT";
         }
@@ -189,11 +189,11 @@ const getAdminDashboard = async (req, res) => {
     const totalEmployees = employees.length;
 
     const presentToday = attendanceWidget.filter((e) =>
-      ["PRESENT", "LATE", "BREAK"].includes(e.status)
+      ["PRESENT", "LATE", "TARDY", "BREAK"].includes(e.status)
     ).length;
 
     const lateToday = attendanceWidget.filter(
-      (e) => e.isLate || e.status === "LATE"
+      (e) => e.isLate || e.status === "LATE" || e.status === "TARDY"
     ).length;
 
     const overtimeRequests = await prisma.overtime.count({
@@ -687,7 +687,7 @@ const getSupervisorDashboard = async (req, res) => {
         if (attendance.status === "BREAK") {
           status = "BREAK";
         } else if (attendance.checkInTime) {
-          status = attendance.isLate ? "LATE" : "PRESENT";
+          status = attendance.isLate ? "TARDY" : "PRESENT";
         }
       }
 
@@ -707,7 +707,7 @@ const getSupervisorDashboard = async (req, res) => {
     const totalEmployees = employees.length;
 
     const presentToday = attendanceWidget.filter((e) =>
-      ["PRESENT", "LATE", "BREAK"].includes(e.status)
+      ["PRESENT", "LATE", "TARDY", "BREAK"].includes(e.status)
     ).length;
 
     const onLeave = leaveEmployeeIds.length;
@@ -716,7 +716,7 @@ const getSupervisorDashboard = async (req, res) => {
       (e) => e.status === "ABSENT"
     ).length;
 
-    const lateToday = attendanceWidget.filter((e) => e.status === "LATE").length;
+    const lateToday = attendanceWidget.filter((e) => e.status === "LATE" || e.status === "TARDY").length;
 
     // 7️⃣ Projects & Tasks
     const projPriv = rawPrivs.find((p) => p.module === "PROJECT");
@@ -1214,7 +1214,7 @@ const getAdminDashboardGraphs = async (req, res) => {
       const present = attendance.filter(
         (a) =>
           new Date(a.date).toDateString() === day.toDateString() &&
-          ["PRESENT", "LATE", "BREAK"].includes(a.status)
+          ["PRESENT", "LATE", "TARDY", "BREAK"].includes(a.status)
       ).length;
 
       const absent = attendance.filter(
@@ -1508,7 +1508,7 @@ const getStatsDetails = async (req, res) => {
         if (att.checkOutTime) {
           clockOut = moment(att.checkOutTime).format("hh:mm A");
         }
-        isLate = Boolean(att.isLate || att.status === "LATE");
+        isLate = Boolean(att.isLate || att.status === "LATE" || att.status === "TARDY");
         lateMinutes = att.lateMinutes || 0;
 
         const hasOpenBreak = att.activities?.some(
@@ -1517,7 +1517,7 @@ const getStatsDetails = async (req, res) => {
         if (att.status === "BREAK" || hasOpenBreak) {
           status = "break";
         } else if (isLate) {
-          status = "late";
+          status = "tardy";
         } else {
           status = "present";
         }
@@ -1535,7 +1535,7 @@ const getStatsDetails = async (req, res) => {
         clockOut,
         isLate,
         lateMinutes,
-        late: isLate ? `${lateMinutes} min late` : "On time",
+        late: isLate ? `${lateMinutes} min tardy` : "On time",
         activities: att?.activities || [],
         jobInfo: emp.jobInfo || {},
         leaveType: leave?.leaveType?.name,

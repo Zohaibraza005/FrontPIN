@@ -42,6 +42,37 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
   return { startTime, endTime };
 }
 
+function isOffDay(schedules, date, timezone = null) {
+  if (!schedules) return false;
+  const list = Array.isArray(schedules) ? schedules : [schedules];
+  const activeSchedule = list.find((s) => s && !s.deletedAt) || list[0];
+  if (!activeSchedule || !Array.isArray(activeSchedule.days) || activeSchedule.days.length === 0) {
+    return false;
+  }
+  let mDate;
+  if (typeof date === "string") {
+    const clean = date.slice(0, 10);
+    mDate = timezone ? moment.tz(clean, "YYYY-MM-DD", timezone) : moment(clean, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  }
+
+  const shortDay = mDate.format("ddd").toLowerCase();
+  const fullDay = mDate.format("dddd").toLowerCase();
+
+  const daysArr = activeSchedule.days.map((d) => {
+    if (typeof d === "object" && d !== null) {
+      return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+    }
+    return String(d).trim().toLowerCase();
+  });
+
+  const isWorkingDay = daysArr.includes(shortDay) || daysArr.includes(fullDay);
+  return !isWorkingDay;
+}
+
 /**
  * Helper to match an employee by Biometric ID, Employee ID, or Machine Name
  */
@@ -157,6 +188,10 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   };
 
   const calcLateness = (mPunch) => {
+    if (isOffDay(employee.Schedule, todayDateString, timezone)) {
+      return { isLate: false, lateMinutes: 0, status: "OFF_DAY" };
+    }
+
     const shiftStartLocal = moment.tz(
       `${todayDateString} ${schedule.startTime}`,
       "YYYY-MM-DD HH:mm",
@@ -165,15 +200,18 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     const shiftStartUTC = shiftStartLocal.clone().utc();
     const punchUTC = mPunch.clone().utc();
 
+    const graceMinutes = schedule.allowEarlyIn ? (Number(schedule.earlyInMinutes) || 0) : 0;
+    const lateThresholdUTC = shiftStartUTC.clone().add(graceMinutes, "minutes");
+
     let isLate = false;
     let lateMinutes = 0;
     let status = "PRESENT";
 
-    if (punchUTC.isAfter(shiftStartUTC)) {
+    if (punchUTC.isAfter(lateThresholdUTC)) {
       lateMinutes = punchUTC.diff(shiftStartUTC, "minutes");
       if (lateMinutes > 0) {
         isLate = true;
-        status = "LATE";
+        status = "TARDY";
       }
     }
     return { isLate, lateMinutes, status };
@@ -400,6 +438,23 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     return { success: true, type: "DUPLICATE_CHECK_IN_STORED", employee, attendance };
   }
 
+  // If this punch is within 2 minutes of an existing CHECK_IN punch (or matches one), it is NOT a checkout
+  const anyCheckInPunch = await prisma.attendancePunch.findFirst({
+    where: {
+      attendanceId: attendance.id,
+      employeeId: employee.id,
+      type: "CHECK_IN",
+      punchTime: {
+        gte: moment(punchDate).subtract(2, "minutes").toDate(),
+        lte: moment(punchDate).add(2, "minutes").toDate(),
+      },
+    },
+  });
+  if (anyCheckInPunch) {
+    console.log(`[Biometric Punch] Punch at ${punchDate.toISOString()} matches/is near existing CHECK_IN (${anyCheckInPunch.punchTime.toISOString()}). Ignoring checkout.`);
+    return { success: true, type: "DUPLICATE_CHECK_IN_IGNORED", employee, attendance };
+  }
+
   // 3️⃣ Valid subsequent punch (> 2 minutes after Check-In):
   const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
   const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment);
@@ -428,6 +483,39 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       overtimeMinutes = totalWorkedMinutes - scheduledDurationMinutes;
     }
 
+    // Calculate Early Out taking schedule.allowEarlyOut & earlyOutMinutes into account
+    let isEarlyOut = false;
+    let earlyOutMinutes = 0;
+
+    if (schedule.startTime && schedule.endTime) {
+      const shiftStartLocal = moment.tz(
+        `${todayDateString} ${schedule.startTime}`,
+        "YYYY-MM-DD HH:mm",
+        timezone
+      );
+      let shiftEndLocal = moment.tz(
+        `${todayDateString} ${schedule.endTime}`,
+        "YYYY-MM-DD HH:mm",
+        timezone
+      );
+      if (shiftEndLocal.isBefore(shiftStartLocal)) {
+        shiftEndLocal.add(1, "day");
+      }
+
+      const shiftEndUTC = shiftEndLocal.clone().utc();
+      const punchUTC = pTime.clone().utc();
+
+      const allowedEarlyOutMins = schedule.allowEarlyOut ? (Number(schedule.earlyOutMinutes) || 0) : 0;
+      const earlyOutThresholdUTC = shiftEndUTC.clone().subtract(allowedEarlyOutMins, "minutes");
+
+      if (punchUTC.isBefore(earlyOutThresholdUTC)) {
+        earlyOutMinutes = Math.max(0, shiftEndUTC.diff(punchUTC, "minutes"));
+        if (earlyOutMinutes > 0) {
+          isEarlyOut = true;
+        }
+      }
+    }
+
     attendance = await prisma.attendance.update({
       where: { id: attendance.id },
       data: {
@@ -436,6 +524,8 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         checkOutDevice: deviceTag,
         totalWorkedMinutes,
         overtimeMinutes,
+        isEarlyOut,
+        earlyOutMinutes,
         autoClockedOut: false,
       },
     });

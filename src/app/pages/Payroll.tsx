@@ -56,16 +56,17 @@ const DEDUCTIONS_TITLES = [
 export const Payroll: React.FC = () => {
   const [generateOpen, setGenerateOpen] = useState(false);
   const navigate = useNavigate();
-  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
-  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const now = moment();
+
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(now.month() + 1);
+  const [selectedYear, setSelectedYear] = useState<number | null>(now.year());
   const [type, setType] = useState<'INDIVIDUAL' | 'DEPARTMENT' | 'LOCATION'>('INDIVIDUAL');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [summary, setSummary] = useState(null);
+  const [generateResult, setGenerateResult] = useState<any>(null);
+  const [payrollSummary, setPayrollSummary] = useState<any>(null);
   const [targetSearch, setTargetSearch] = useState('');
 
-
-  
   const [selectedEmployees, setSelectedEmployees] = useState<number[]>([]);
   const [selectedDepartments, setSelectedDepartments] = useState<number[]>([]);
   const [selectedLocations, setSelectedLocations] = useState<number[]>(() => {
@@ -89,12 +90,12 @@ export const Payroll: React.FC = () => {
     };
   }, []);
   const [stats, setStats] = useState<any>(null);
-const [trend, setTrend] = useState<any[]>([]);
-const [overtimeTrend, setOvertimeTrend] = useState<any[]>([]);
-const [departmentBreakdown, setDepartmentBreakdown] = useState<any[]>([]);
-const [headcount, setHeadcount] = useState<any>(null);
-const [attendanceImpact, setAttendanceImpact] = useState<any>(null);
-const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
+  const [trend, setTrend] = useState<any[]>([]);
+  const [overtimeTrend, setOvertimeTrend] = useState<any[]>([]);
+  const [departmentBreakdown, setDepartmentBreakdown] = useState<any[]>([]);
+  const [headcount, setHeadcount] = useState<any>(null);
+  const [attendanceImpact, setAttendanceImpact] = useState<any>(null);
+  const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
   const currentYear = new Date().getFullYear();
 
   const years = Array.from({ length: 21 }, (_, i) => currentYear - 10 + i);
@@ -103,25 +104,32 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
     label: m,
     value: i + 1
   }));
+
+  const filterMonths = [
+    { label: "All Months", value: "all" },
+    ...months.map((m) => ({
+      label: m.label,
+      value: m.value.toString()
+    }))
+  ];
   // Mock data (replace with API)
-  const [employees,setEmployees] = useState([]);
+  const [employees,setEmployees] = useState<any[]>([]);
 
-  const [departments,setDepartments] = useState([]);
+  const [departments,setDepartments] = useState<any[]>([]);
 
-  const [locations,setLocations] = useState([]);
+  const [locations,setLocations] = useState<any[]>([]);
 
   const toggleSelection = (id: number, list: number[], setList: any) => {
     if (list.includes(id)) {
-      setList(list?.filter(i => i !== id));
+      setList(list?.filter((i: number) => i !== id));
     } else {
       setList([...list, id]);
     }
   };
 
-  const [payrolls, setPayrolls] = useState([]);
-  const now = moment();
+  const [payrolls, setPayrolls] = useState<any[]>([]);
 
-  const [filterMonth, setFilterMonth] = useState<number>(now.month() + 1);
+  const [filterMonth, setFilterMonth] = useState<number | string>(now.month() + 1);
   const [filterYear, setFilterYear] = useState<number>(now.year());
   const [filterStatus, setFilterStatus] = useState('all');
 
@@ -221,12 +229,12 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
       setAdjustAmount('');
       
       const res = await payrollAPI.getAll({
-        month: filterMonth || undefined,
+        month: filterMonth !== "all" ? Number(filterMonth) : undefined,
         year: filterYear || undefined,
         status: filterStatus !== "all" ? filterStatus : undefined
       });
-      setPayrolls(res.data);
-      setSummary(res.summary);
+      setPayrolls(res.data || []);
+      setPayrollSummary(res.summary);
 
       const updatedPayroll = res.data?.find((p: any) => p.id === editingPayroll.id);
       if (updatedPayroll) {
@@ -248,12 +256,12 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
       toast.success('Adjustment deleted');
 
       const res = await payrollAPI.getAll({
-        month: filterMonth || undefined,
+        month: filterMonth !== "all" ? Number(filterMonth) : undefined,
         year: filterYear || undefined,
         status: filterStatus !== "all" ? filterStatus : undefined
       });
-      setPayrolls(res.data);
-      setSummary(res.summary);
+      setPayrolls(res.data || []);
+      setPayrollSummary(res.summary);
 
       const updatedPayroll = res.data?.find((p: any) => p.id === editingPayroll.id);
       if (updatedPayroll) {
@@ -304,8 +312,11 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
   //   if (filterStatus !== 'all' && payroll.status !== filterStatus) return false;
   //   return true;
   // });
-  const loadAnalytics = async () => {
+  const loadAnalytics = async (m = filterMonth, y = filterYear) => {
     try {
+      const monthParam = m !== "all" ? Number(m) : undefined;
+      const yearParam = y ? Number(y) : undefined;
+
       const [
         statsRes,
         trendRes,
@@ -316,23 +327,23 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
         riskRes
       ] = await Promise.all([
         payrollAPI.getStats({
-          month: filterMonth !== "all" ? filterMonth : undefined,
-          year: filterYear ?? undefined
+          month: monthParam,
+          year: yearParam
         }),
         payrollAPI.getTrend(),
         payrollAPI.getOvertimeTrend(),
         payrollAPI.getDepartmentBreakdown({
-          month: filterMonth !== "all" ? filterMonth : undefined,
-          year: filterYear ?? undefined
+          month: monthParam,
+          year: yearParam
         }),
         payrollAPI.getHeadcount(),
         payrollAPI.getAttendanceImpact({
-          month: filterMonth !== "all" ? filterMonth : undefined,
-          year: filterYear ?? undefined
+          month: monthParam,
+          year: yearParam
         }),
         payrollAPI.getRiskAlerts({
-          month: filterMonth !== "all" ? filterMonth : undefined,
-          year: filterYear ?? undefined
+          month: monthParam,
+          year: yearParam
         }),
       ]);
   
@@ -349,55 +360,66 @@ const [riskAlerts, setRiskAlerts] = useState<any[]>([]);
     }
   };
   
-  const loadPayrolls = async () => {
+  const loadPayrolls = async (m = filterMonth, y = filterYear, s = filterStatus) => {
     try {
       const res = await payrollAPI.getAll({
-        month: filterMonth || undefined,
-        year: filterYear || undefined,
-        status: filterStatus !== "all" ? filterStatus : undefined
+        month: m !== "all" ? Number(m) : undefined,
+        year: y ? Number(y) : undefined,
+        status: s !== "all" ? s : undefined
       });
   
-      setPayrolls(res.data);
-      setSummary(res.summary);
+      setPayrolls(res.data || []);
+      setPayrollSummary(res.summary);
     } catch {
       toast.error("Failed to load payrolls");
     }
   };
   
-  const loadInfo = async ()=>{
-    const res = await employeeAPI.getActiveEmployees();
-    setEmployees(res.data)
-    const res1 = await departmentAPI.getDepartments();
-    setDepartments(res1.data)
-    const res2 = await locationAPI.getLocations();
-    setLocations(res2.data)
-  }
+  const loadInfo = async () => {
+    try {
+      const res = await employeeAPI.getActiveEmployees();
+      setEmployees(res.data || []);
+      const res1 = await departmentAPI.getDepartments();
+      setDepartments(res1.data || []);
+      const res2 = await locationAPI.getLocations();
+      setLocations(res2.data || []);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
-    loadPayrolls();
-    loadAnalytics();
+    loadPayrolls(filterMonth, filterYear, filterStatus);
+    loadAnalytics(filterMonth, filterYear);
   }, [filterMonth, filterYear, filterStatus]);
+
   useEffect(() => {
     loadInfo();
-    
   }, []);
 
-  const totalPayroll = summary?.totalPayroll || 0;
-const totalPaid = summary?.totalPaid || 0;
+  const totalPayroll = payrollSummary?.totalPayroll || 0;
+  const totalPaid = payrollSummary?.totalPaid || 0;
 
   const handleDelete = async (id: number) => {
     try {
       await payrollAPI.delete(id);
-  
-      // UI se immediately remove karo
       setPayrolls(prev => prev?.filter(p => p.id !== id));
-  
       toast.success("Payroll deleted successfully");
+      loadAnalytics(filterMonth, filterYear);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Delete failed");
     }
   };
-  const handleGeneratePayroll = async () => {
 
+  const handleOpenGenerate = () => {
+    setSelectedMonth(filterMonth !== "all" ? Number(filterMonth) : (now.month() + 1));
+    setSelectedYear(Number(filterYear) || now.year());
+    setGenerateResult(null);
+    setProgress(0);
+    setGenerateOpen(true);
+  };
+
+  const handleGeneratePayroll = async () => {
     if (!selectedMonth || !selectedYear) {
       return toast.error("Select month and year");
     } 
@@ -420,19 +442,38 @@ const totalPaid = summary?.totalPaid || 0;
         employeeIds: selectedEmployees,
         departmentIds: selectedDepartments,
         locationIds: selectedLocations
-      }
+      };
+
       const res = await payrollAPI.generateBulk(payload);
       setProgress(100);
-      setSummary(res);
-      toast.success("Payroll generated successfully");
+      setGenerateResult(res);
+
+      const generatedCount = res?.generated ?? 0;
+      const skippedCount = res?.skipped ?? 0;
+
+      if (generatedCount > 0) {
+        toast.success(`Successfully generated ${generatedCount} payroll record${generatedCount > 1 ? "s" : ""}!`);
+      } else if (skippedCount > 0) {
+        toast.info(`Payroll already generated for ${skippedCount} employee${skippedCount > 1 ? "s" : ""}.`);
+      } else {
+        toast.info("No payroll records were generated.");
+      }
+
       setGenerateOpen(false);
+
+      // Instantly switch view to the generated month & year and reload realtime
+      setFilterMonth(selectedMonth);
+      setFilterYear(selectedYear);
+      await loadPayrolls(selectedMonth, selectedYear, filterStatus);
+      await loadAnalytics(selectedMonth, selectedYear);
 
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Generation failed");
-    }finally {
+    } finally {
       setLoading(false);
     }
   };
+
   const handleSelectAllTargets = () => {
     if (type === "INDIVIDUAL") {
       if (selectedEmployees.length === employees.length) {
@@ -450,6 +491,7 @@ const totalPaid = summary?.totalPaid || 0;
       if (selectedLocations.length === locations.length) {
         setSelectedLocations([]);
       } else {
+        setSelectedLocations(locations.map(l => l.id));
       }
     }
   };
@@ -481,7 +523,7 @@ const totalPaid = summary?.totalPaid || 0;
           <p className="text-xs text-gray-500 mt-0.5">Manage and generate monthly employee salary records.</p>
         </div>
 
-        <Button onClick={() => setGenerateOpen(true)} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-xs shadow-xs px-4">
+        <Button onClick={handleOpenGenerate} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-xs shadow-xs px-4">
           <Plus className="mr-1.5 size-4" />
           Generate Payroll
         </Button>
@@ -520,15 +562,15 @@ const totalPaid = summary?.totalPaid || 0;
             )}
 
             {/* Summary notification */}
-            {summary && (
+            {generateResult && (
               <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1">
                 <p className="font-bold text-emerald-950 flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   Payroll Generation Complete
                 </p>
                 <div className="flex items-center gap-4 text-emerald-800 pt-1">
-                  <span>Generated Records: <strong>{summary.generated || 0}</strong></span>
-                  <span>Skipped Duplicates: <strong>{summary.skipped || 0}</strong></span>
+                  <span>Generated Records: <strong>{generateResult.generated || 0}</strong></span>
+                  <span>Skipped Duplicates: <strong>{generateResult.skipped || 0}</strong></span>
                 </div>
               </div>
             )}
@@ -835,11 +877,8 @@ const totalPaid = summary?.totalPaid || 0;
                 placeholder="Month"
                 searchPlaceholder="Search month..."
                 value={filterMonth.toString()}
-                onValueChange={(v) => setFilterMonth(Number(v))}
-                options={months.map((m) => ({
-                  value: m.value.toString(),
-                  label: m.label,
-                }))}
+                onValueChange={(v) => setFilterMonth(v === "all" ? "all" : Number(v))}
+                options={filterMonths}
               />
 
               <SearchableSelect

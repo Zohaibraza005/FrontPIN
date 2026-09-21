@@ -24,7 +24,35 @@ import {
 import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Plus, Check, X, Eye, Trash2, Pencil, Calendar } from "lucide-react";
+import { Plus, Check, X, Eye, Trash2, Pencil, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+
+const getPaginationRange = (current: number, total: number) => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const delta = 1;
+  const range: (number | string)[] = [];
+
+  for (
+    let i = Math.max(2, current - delta);
+    i <= Math.min(total - 1, current + delta);
+    i++
+  ) {
+    range.push(i);
+  }
+
+  if (current - delta > 2) {
+    range.unshift("...");
+  }
+  if (current + delta < total - 1) {
+    range.push("...");
+  }
+
+  range.unshift(1);
+  range.push(total);
+
+  return range;
+};
 
 export const Leave: React.FC = () => {
   const { user } = useAuth();
@@ -274,6 +302,20 @@ const calculateDays = (start: string, end: string) => {
     return true;
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedLocation, dateFilter, customStartDate, customEndDate]);
+
+  const totalItems = filteredLeaves.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+  const validPage = Math.min(currentPage, totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+  const paginatedLeaves = filteredLeaves.slice(startIndex, endIndex);
+
   return (
     <div className="space-y-6">
       {/* Header + Request Button */}
@@ -487,7 +529,7 @@ const calculateDays = (start: string, end: string) => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredLeaves?.map((leave) => (
+                  paginatedLeaves?.map((leave) => (
                     <TableRow key={leave.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
                       <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
                         <div className="flex items-center gap-2.5">
@@ -573,6 +615,99 @@ const calculateDays = (start: string, end: string) => {
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination Footer */}
+          {totalItems > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span>
+                  Showing <strong className="text-gray-700 dark:text-gray-200">{startIndex + 1}</strong> to{" "}
+                  <strong className="text-gray-700 dark:text-gray-200">{endIndex}</strong> of{" "}
+                  <strong className="text-gray-700 dark:text-gray-200">{totalItems}</strong> leave requests
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden sm:inline text-gray-500 dark:text-gray-400">Rows per page:</span>
+                  <Select
+                    value={String(itemsPerPage)}
+                    onValueChange={(val) => {
+                      setItemsPerPage(Number(val));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[72px] text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent side="top">
+                      {[10, 20, 50, 100].map((size) => (
+                        <SelectItem key={size} value={String(size)} className="text-xs">
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                    if (item === "...") {
+                      return (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                        >
+                          ...
+                        </span>
+                      );
+                    }
+
+                    const pageNum = Number(item);
+                    const isActive = pageNum === validPage;
+
+                    return (
+                      <Button
+                        key={`page-${pageNum}`}
+                        variant={isActive ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                          isActive
+                            ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                            : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        }`}
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
