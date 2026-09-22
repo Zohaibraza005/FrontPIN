@@ -1075,21 +1075,7 @@ export const Schedule: React.FC = () => {
 
                     {selectedDays.length > 1 && (
                       <div className="flex items-center gap-2.5">
-                        <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 font-medium cursor-pointer select-none bg-gray-50 px-2.5 py-1 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={sameTimeForAll}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setSameTimeForAll(checked);
-                              if (checked) {
-                                handleApplyTimeToAllDays();
-                              }
-                            }}
-                            className="rounded border-gray-300 text-sky-600 focus:ring-sky-500 size-3.5"
-                          />
-                          <span>Same time for all days</span>
-                        </label>
+                        
 
                         <button
                           type="button"
@@ -2264,21 +2250,7 @@ export const Schedule: React.FC = () => {
 
                     {editDays.length > 1 && (
                       <div className="flex items-center gap-2">
-                        <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium cursor-pointer select-none bg-gray-50 px-2 py-0.5 rounded border border-gray-200 hover:bg-gray-100 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={editSameTimeForAll}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setEditSameTimeForAll(checked);
-                              if (checked) {
-                                handleApplyTimeToAllEditDays();
-                              }
-                            }}
-                            className="rounded border-gray-300 text-sky-600 focus:ring-sky-500 size-3"
-                          />
-                          <span>Same time for all days</span>
-                        </label>
+                        
 
                         <button
                           type="button"
