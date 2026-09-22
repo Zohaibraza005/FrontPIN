@@ -1096,10 +1096,10 @@ exports.getAttendanceReport = async (req, res) => {
 
       sortedAttendance.forEach(att => {
         let key = null;
-        if (att.checkInTime) {
-          key = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
-        } else if (att.date) {
+        if (att.date) {
           key = moment(att.date).tz(empTz).format("YYYY-MM-DD");
+        } else if (att.checkInTime) {
+          key = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
         if (!key) return;
 
@@ -1237,6 +1237,13 @@ exports.getAttendanceReport = async (req, res) => {
           totalBreakMinutes = Math.floor(calculatedBreak);
         }
 
+        const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+        const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
+        const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
+        const eTime = dayShift.endTime || activeSched?.endTime || "18:00";
+        const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
+        const allowedEarlyOutMins = activeSched?.allowEarlyOut ? (Number(activeSched.earlyOutMinutes) || 0) : 0;
+
         let finalStatus = existing.status;
         if (finalStatus === "LATE") finalStatus = "TARDY";
 
@@ -1244,6 +1251,44 @@ exports.getAttendanceReport = async (req, res) => {
         let finalCheckOut = (checkOutDateMatch || (checkInDateMatch && existing.checkOutTime)) ? existing.checkOutTime : null;
 
         const hasWorkedShift = Boolean(checkInDateMatch && (totalWorkedMinutes > 0 || finalCheckOut));
+
+        let isLate = false;
+        let lateMinutes = 0;
+        let isEarlyOut = false;
+        let earlyOutMinutes = 0;
+
+        if (finalCheckIn && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
+          const checkInMoment = moment(finalCheckIn).tz(empTz);
+          const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+          const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
+
+          if (checkInMoment.isAfter(lateThreshold)) {
+            isLate = true;
+            lateMinutes = checkInMoment.diff(shiftStartLocal, "minutes");
+            finalStatus = "TARDY";
+          } else {
+            isLate = false;
+            lateMinutes = 0;
+            if (finalStatus === "TARDY" || finalStatus === "LATE" || !finalStatus || finalStatus === "ABSENT") {
+              finalStatus = "PRESENT";
+            }
+          }
+        }
+
+        if (finalCheckIn && finalCheckOut && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
+          const checkOutMoment = moment(finalCheckOut).tz(empTz);
+          const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+          let shiftEndLocal = moment.tz(`${dateStr} ${eTime}`, "YYYY-MM-DD HH:mm", empTz);
+          if (shiftEndLocal.isBefore(shiftStartLocal)) {
+            shiftEndLocal.add(1, "day");
+          }
+          const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
+
+          if (checkOutMoment.isBefore(earlyOutThreshold) && checkOutMoment.isAfter(shiftStartLocal)) {
+            earlyOutMinutes = Math.max(0, shiftEndLocal.diff(checkOutMoment, "minutes"));
+            if (earlyOutMinutes > 0) isEarlyOut = true;
+          }
+        }
 
         if (isDayOff && !hasWorkedShift && existing.status !== "LEAVE") {
           finalStatus = "OFF_DAY";
@@ -1269,9 +1314,6 @@ exports.getAttendanceReport = async (req, res) => {
             totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
           }
         } else if (!finalCheckIn && (existing.status === "PRESENT" || existing.status === "LATE" || existing.status === "TARDY") && (!totalWorkedMinutes || totalWorkedMinutes === 0)) {
-          const activeSched = emp.Schedule?.find(s => !s.deletedAt);
-          const sTime = activeSched?.startTime || "09:00";
-          const eTime = activeSched?.endTime || "18:00";
           const [sh, sm] = sTime.split(":").map(Number);
           const [eh, em] = eTime.split(":").map(Number);
           const startMins = (sh || 9) * 60 + (sm || 0);
@@ -1283,6 +1325,28 @@ exports.getAttendanceReport = async (req, res) => {
           }
         }
 
+        // Asynchronously persist any corrected schedule/lateness fields to the DB
+        if (existing?.id && finalCheckIn && (
+          existing.isLate !== isLate ||
+          existing.lateMinutes !== lateMinutes ||
+          existing.status !== finalStatus ||
+          existing.shiftStartTime !== sTime ||
+          existing.shiftEndTime !== eTime
+        )) {
+          prisma.attendance.update({
+            where: { id: existing.id },
+            data: {
+              isLate,
+              lateMinutes,
+              status: finalStatus,
+              shiftStartTime: sTime,
+              shiftEndTime: eTime,
+              isEarlyOut,
+              earlyOutMinutes,
+            }
+          }).catch(err => console.error("[Report Sync Attendance Error]", err.message));
+        }
+
         const tasks = existing.activities
           ? existing.activities
               .filter(log => log.type === "TASK")
@@ -1290,9 +1354,6 @@ exports.getAttendanceReport = async (req, res) => {
           : [];
 
         // Scheduled shift duration
-        const activeSched = emp.Schedule?.find(s => !s.deletedAt);
-        const sTime = activeSched?.startTime || "09:00";
-        const eTime = activeSched?.endTime || "18:00";
         const [sh, sm] = sTime.split(":").map(Number);
         const [eh, em] = eTime.split(":").map(Number);
         const startMins = (sh || 9) * 60 + (sm || 0);
@@ -1315,8 +1376,12 @@ exports.getAttendanceReport = async (req, res) => {
           checkInTime: finalCheckIn,
           checkOutTime: finalCheckOut,
           status: finalStatus,
-          isLate: (finalStatus === "OFF_DAY" ? false : Boolean(existing.isLate)),
-          lateMinutes: (finalStatus === "OFF_DAY" ? 0 : (existing.lateMinutes || 0)),
+          isLate: (finalStatus === "OFF_DAY" ? false : isLate),
+          lateMinutes: (finalStatus === "OFF_DAY" ? 0 : lateMinutes),
+          isEarlyOut,
+          earlyOutMinutes,
+          shiftStartTime: sTime,
+          shiftEndTime: eTime,
           overtimeHours: finalOtHours,
           overtimeMinutes: finalOtMinutes,
           overtimeAmount: overtime?.amount || 0,
@@ -2105,6 +2170,23 @@ exports.exportAttendanceExcel = async (req, res) => {
         }
 
         let st = (existing.status || "").toUpperCase();
+        if (existing.checkInTime && st !== "LEAVE" && st !== "OFF_DAY") {
+          const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+          const empTz = emp.company?.timezone || "Asia/Karachi";
+          const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
+          const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
+          const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
+          const checkInMoment = moment(existing.checkInTime).tz(empTz);
+          const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+          const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
+
+          if (checkInMoment.isAfter(lateThreshold)) {
+            st = "TARDY";
+          } else if (st === "TARDY" || st === "LATE" || st === "ABSENT" || !st) {
+            st = "PRESENT";
+          }
+        }
+
         if (dayOff && st !== "PRESENT" && st !== "LATE" && st !== "TARDY") {
           return { code: "OFF", type: "OFF_DAY" };
         }

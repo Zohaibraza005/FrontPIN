@@ -387,7 +387,8 @@ export const Schedule: React.FC = () => {
       const id = item.id;
       let label = "";
       if (scopeType === "individual") {
-        label = `${item.firstName || ""} ${item.lastName || ""}`.trim();
+        const bioBadge = item.biometricId ? ` (#${item.biometricId})` : "";
+        label = `${item.firstName || ""} ${item.lastName || ""}${bioBadge}`.trim();
       } else if (scopeType === "department") {
         label = item.title || item.name || "";
       } else {
@@ -558,9 +559,13 @@ export const Schedule: React.FC = () => {
       const locName = (companyObj?.name || '').toLowerCase();
       const query = searchQuery.toLowerCase().trim();
 
+      const bioId = String(schedule.employee?.biometricId || '').toLowerCase();
+      const empCode = String(schedule.employee?.employeeId || '').toLowerCase();
       const matchesSearch =
         !query ||
         empName.includes(query) ||
+        bioId.includes(query) ||
+        empCode.includes(query) ||
         locName.includes(query) ||
         (Array.isArray(schedule.days) && schedule.days.some((d: any) => {
           const dStr = typeof d === 'object' && d !== null ? `${d.day || ''} ${d.dayFull || ''}` : String(d || '');
@@ -1765,7 +1770,7 @@ export const Schedule: React.FC = () => {
                                 {empName}
                               </p>
                               <p className="text-xs text-gray-500">
-                                ID: #{schedule.employee?.id || schedule.employeeId}
+                                {schedule.employee?.biometricId ? `ID: #${schedule.employee.biometricId}` : ""}
                               </p>
                             </div>
                           </div>
@@ -2037,7 +2042,7 @@ export const Schedule: React.FC = () => {
                   <h4 className="font-bold text-gray-900 text-base">
                     {viewingSchedule.employee?.firstName} {viewingSchedule.employee?.lastName}
                   </h4>
-                  <p className="text-xs text-gray-500">Employee ID: #{viewingSchedule.employee?.id || viewingSchedule.employeeId}</p>
+                  <p className="text-xs text-gray-500">{viewingSchedule.employee?.biometricId ? `ID: #${viewingSchedule.employee.biometricId}` : ""}</p>
                 </div>
               </div>
 
@@ -2157,9 +2162,11 @@ export const Schedule: React.FC = () => {
                     {editingSchedule.employee?.firstName} {editingSchedule.employee?.lastName}
                   </p>
                 </div>
-                <Badge variant="outline" className="bg-white text-gray-700">
-                  ID: #{editingSchedule.employee?.id || editingSchedule.employeeId}
-                </Badge>
+                {editingSchedule.employee?.biometricId && (
+                  <Badge variant="outline" className="bg-white text-gray-700">
+                    ID: #{editingSchedule.employee.biometricId}
+                  </Badge>
+                )}
               </div>
 
               {/* Working Schedule Section */}

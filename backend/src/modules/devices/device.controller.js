@@ -91,7 +91,7 @@ async function findEmployee(biometricId, employeeName) {
       },
       include: {
         company: true,
-        Schedule: { where: { deletedAt: null } },
+        Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
         jobInfo: true,
       },
     });
@@ -105,7 +105,7 @@ async function findEmployee(biometricId, employeeName) {
       where: { deletedAt: null },
       include: {
         company: true,
-        Schedule: { where: { deletedAt: null } },
+        Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
         jobInfo: true,
       },
     });
@@ -178,9 +178,25 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const todayStart = pTime.clone().startOf("day").utc().toDate();
   const todayEnd = pTime.clone().endOf("day").utc().toDate();
 
-  // Shift snapshot
   const rawSchedule = employee.Schedule?.find((s) => !s.deletedAt) || { startTime: "09:00", endTime: "18:00" };
-  const dayShift = getScheduleShiftForDay(rawSchedule, todayDateString, timezone);
+
+  // Check if schedule is a night / cross-midnight shift (e.g. 19:00 to 04:00)
+  const [testSh, testSm] = (rawSchedule.startTime || "09:00").split(":").map(Number);
+  const [testEh, testEm] = (rawSchedule.endTime || "18:00").split(":").map(Number);
+  const isNightShift = ((testSh || 0) * 60 + (testSm || 0)) > ((testEh || 0) * 60 + (testEm || 0));
+
+  // If night shift and punch happens in the morning before noon (< 12:00 PM),
+  // this punch belongs to yesterday's night shift!
+  let shiftDateMoment = pTime.clone();
+  if (isNightShift && pTime.hour() < 12) {
+    shiftDateMoment = pTime.clone().subtract(1, "day");
+  }
+
+  const shiftDateString = shiftDateMoment.format("YYYY-MM-DD");
+  const shiftStartUtc = shiftDateMoment.clone().startOf("day").utc().toDate();
+  const shiftEndUtc = shiftDateMoment.clone().endOf("day").utc().toDate();
+
+  const dayShift = getScheduleShiftForDay(rawSchedule, shiftDateString, timezone);
   const schedule = {
     ...rawSchedule,
     startTime: dayShift.startTime || "09:00",
@@ -188,31 +204,28 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   };
 
   const calcLateness = (mPunch) => {
-    if (isOffDay(employee.Schedule, todayDateString, timezone)) {
+    if (isOffDay(employee.Schedule, shiftDateString, timezone)) {
       return { isLate: false, lateMinutes: 0, status: "OFF_DAY" };
     }
 
     const shiftStartLocal = moment.tz(
-      `${todayDateString} ${schedule.startTime}`,
+      `${shiftDateString} ${schedule.startTime}`,
       "YYYY-MM-DD HH:mm",
       timezone
     );
-    const shiftStartUTC = shiftStartLocal.clone().utc();
-    const punchUTC = mPunch.clone().utc();
-
+    const punchLocal = mPunch.clone().tz(timezone);
     const graceMinutes = schedule.allowEarlyIn ? (Number(schedule.earlyInMinutes) || 0) : 0;
-    const lateThresholdUTC = shiftStartUTC.clone().add(graceMinutes, "minutes");
+    const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
 
     let isLate = false;
     let lateMinutes = 0;
     let status = "PRESENT";
 
-    if (punchUTC.isAfter(lateThresholdUTC)) {
-      lateMinutes = punchUTC.diff(shiftStartUTC, "minutes");
-      if (lateMinutes > 0) {
-        isLate = true;
-        status = "TARDY";
-      }
+    if (punchLocal.isAfter(lateThreshold)) {
+      const rawDiffMins = punchLocal.diff(shiftStartLocal, "minutes");
+      isLate = true;
+      lateMinutes = rawDiffMins;
+      status = "TARDY";
     }
     return { isLate, lateMinutes, status };
   };
@@ -249,8 +262,8 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       where: {
         employeeId: employee.id,
         date: {
-          gte: todayStart,
-          lte: todayEnd,
+          gte: shiftStartUtc,
+          lte: shiftEndUtc,
         },
       },
       orderBy: { checkInTime: "asc" },
@@ -295,12 +308,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         where: {
           employeeId_date: {
             employeeId: employee.id,
-            date: todayStart,
+            date: shiftStartUtc,
           },
         },
         create: {
           employeeId: employee.id,
-          date: todayStart,
+          date: shiftStartUtc,
           shiftStartTime: schedule.startTime,
           shiftEndTime: schedule.endTime,
           checkInTime: punchDate,
@@ -321,7 +334,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       attendance = await prisma.attendance.findFirst({
         where: {
           employeeId: employee.id,
-          date: { gte: todayStart, lte: todayEnd },
+          date: { gte: shiftStartUtc, lte: shiftEndUtc },
         },
         orderBy: { checkInTime: "asc" },
       });
@@ -339,21 +352,8 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // 2️⃣ Attendance already exists for this shift
   let inTimeMoment = moment(attendance.checkInTime || punchDate);
 
-  // If attendance.checkInTime is from a different calendar day, reset it to today's punchDate
-  if (attendance.checkInTime && !moment(attendance.checkInTime).tz(timezone).isSame(pTime, "day")) {
-    attendance = await prisma.attendance.update({
-      where: { id: attendance.id },
-      data: {
-        checkInTime: punchDate,
-        checkInMethod: punchMethod,
-        checkInDevice: deviceTag,
-      },
-    });
-    inTimeMoment = moment(punchDate);
-  }
-
-  // If incoming punch is EARLIER than currently recorded checkInTime AND on the same calendar day, update checkInTime!
-  if (pTime.isBefore(inTimeMoment) && pTime.isSame(inTimeMoment, "day")) {
+  // If incoming punch is EARLIER than currently recorded checkInTime, update checkInTime!
+  if (pTime.isBefore(inTimeMoment)) {
     const { isLate, lateMinutes, status } = calcLateness(pTime);
 
     attendance = await prisma.attendance.update({
@@ -471,8 +471,11 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     if (schedule.startTime && schedule.endTime) {
       const [sh, sm] = schedule.startTime.split(":").map(Number);
       const [eh, em] = schedule.endTime.split(":").map(Number);
-      const sMins = (sh || 9) * 60 + (sm || 0);
-      const eMins = (eh || 18) * 60 + (em || 0);
+      let sMins = (sh || 9) * 60 + (sm || 0);
+      let eMins = (eh || 18) * 60 + (em || 0);
+      if (eMins < sMins) {
+        eMins += 24 * 60; // Cross-midnight shift
+      }
       if (eMins > sMins) {
         scheduledDurationMinutes = eMins - sMins;
       }
@@ -489,12 +492,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
     if (schedule.startTime && schedule.endTime) {
       const shiftStartLocal = moment.tz(
-        `${todayDateString} ${schedule.startTime}`,
+        `${shiftDateString} ${schedule.startTime}`,
         "YYYY-MM-DD HH:mm",
         timezone
       );
       let shiftEndLocal = moment.tz(
-        `${todayDateString} ${schedule.endTime}`,
+        `${shiftDateString} ${schedule.endTime}`,
         "YYYY-MM-DD HH:mm",
         timezone
       );

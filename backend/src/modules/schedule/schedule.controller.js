@@ -1,4 +1,122 @@
 const prisma = require("../../config/prisma");
+const moment = require("moment-timezone");
+
+function getScheduleShiftForDay(schedule, date, timezone = null) {
+  let startTime = schedule?.startTime || "09:00";
+  let endTime = schedule?.endTime || "18:00";
+
+  if (!schedule || !schedule.days || !Array.isArray(schedule.days)) {
+    return { startTime, endTime };
+  }
+
+  let mDate;
+  if (typeof date === "string") {
+    const cleanStr = date.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(date)) {
+    mDate = timezone ? date.clone().tz(timezone) : date;
+  } else if (date instanceof Date) {
+    mDate = timezone ? moment(date).tz(timezone) : moment(date);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
+  const shortDay = mDate.format("ddd").toLowerCase();
+  const fullDay = mDate.format("dddd").toLowerCase();
+
+  const dayObj = schedule.days.find((d) => {
+    if (typeof d === "object" && d !== null) {
+      const name = String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+      return name === shortDay || name === fullDay;
+    }
+    return false;
+  });
+
+  if (dayObj && typeof dayObj === "object") {
+    if (dayObj.startTime) startTime = dayObj.startTime;
+    if (dayObj.endTime) endTime = dayObj.endTime;
+  }
+
+  return { startTime, endTime };
+}
+
+async function syncEmployeeRecentAttendances(employeeId, updatedSchedule) {
+  try {
+    const employee = await prisma.employee.findUnique({
+      where: { id: Number(employeeId) },
+      include: { company: true },
+    });
+    if (!employee) return;
+    const timezone = employee.company?.timezone || "Asia/Karachi";
+
+    // Recent attendances within 7 days
+    const recentLimit = moment().tz(timezone).subtract(7, "days").startOf("day").toDate();
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        employeeId: Number(employeeId),
+        date: { gte: recentLimit },
+        checkInTime: { not: null },
+      },
+    });
+
+    for (const att of attendances) {
+      const attDateStr = moment(att.checkInTime || att.date).tz(timezone).format("YYYY-MM-DD");
+      const dayShift = getScheduleShiftForDay(updatedSchedule, attDateStr, timezone);
+      const sTime = dayShift.startTime || updatedSchedule.startTime || "09:00";
+      const eTime = dayShift.endTime || updatedSchedule.endTime || "18:00";
+      const graceMinutes = updatedSchedule.allowEarlyIn ? (Number(updatedSchedule.earlyInMinutes) || 0) : 0;
+      const allowedEarlyOutMins = updatedSchedule.allowEarlyOut ? (Number(updatedSchedule.earlyOutMinutes) || 0) : 0;
+
+      const checkInLocal = moment(att.checkInTime).tz(timezone);
+      const shiftStartLocal = moment.tz(`${attDateStr} ${sTime}`, "YYYY-MM-DD HH:mm", timezone);
+      const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
+
+      let isLate = false;
+      let lateMinutes = 0;
+      let status = att.status;
+
+      if (checkInLocal.isAfter(lateThreshold)) {
+        isLate = true;
+        lateMinutes = checkInLocal.diff(shiftStartLocal, "minutes");
+        status = "TARDY";
+      } else {
+        isLate = false;
+        lateMinutes = 0;
+        if (status === "TARDY" || status === "LATE" || status === "PRESENT" || !status) {
+          status = "PRESENT";
+        }
+      }
+
+      let isEarlyOut = false;
+      let earlyOutMinutes = 0;
+      if (att.checkOutTime) {
+        const checkOutLocal = moment(att.checkOutTime).tz(timezone);
+        let shiftEndLocal = moment.tz(`${attDateStr} ${eTime}`, "YYYY-MM-DD HH:mm", timezone);
+        if (shiftEndLocal.isBefore(shiftStartLocal)) shiftEndLocal.add(1, "day");
+        const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
+        if (checkOutLocal.isBefore(earlyOutThreshold) && checkOutLocal.isAfter(shiftStartLocal)) {
+          earlyOutMinutes = Math.max(0, shiftEndLocal.diff(checkOutLocal, "minutes"));
+          if (earlyOutMinutes > 0) isEarlyOut = true;
+        }
+      }
+
+      await prisma.attendance.update({
+        where: { id: att.id },
+        data: {
+          shiftStartTime: sTime,
+          shiftEndTime: eTime,
+          isLate,
+          lateMinutes,
+          isEarlyOut,
+          earlyOutMinutes,
+          status,
+        },
+      });
+    }
+  } catch (err) {
+    console.error(`[Schedule Sync Attendance Error for Emp ${employeeId}]:`, err.message);
+  }
+}
 
 //////////////////////////////////////////////////////
 // CREATE SCHEDULE
@@ -180,6 +298,8 @@ exports.createSchedule = async (req, res) => {
               employee: {
                 select: {
                   id: true,
+                  employeeId: true,
+                  biometricId: true,
                   firstName: true,
                   lastName: true,
                   role: true,
@@ -198,6 +318,13 @@ exports.createSchedule = async (req, res) => {
         )
       );
   
+      // Recalculate attendance for affected employees in real-time
+      for (const s of schedules) {
+        if (s.employeeId) {
+          syncEmployeeRecentAttendances(s.employeeId, s).catch(() => {});
+        }
+      }
+
       return res.json({
         success: true,
         message: "Schedule created successfully",
@@ -251,6 +378,8 @@ exports.getSchedules = async (req, res) => {
         employee: {
           select: {
             id: true,
+            employeeId: true,
+            biometricId: true,
             firstName: true,
             lastName: true,
             role: true,
@@ -355,6 +484,8 @@ exports.updateSchedule = async (req, res) => {
         employee: {
           select: {
             id: true,
+            employeeId: true,
+            biometricId: true,
             firstName: true,
             lastName: true,
             role: true,
@@ -370,6 +501,10 @@ exports.updateSchedule = async (req, res) => {
         company: true
       }
     });
+
+    if (updated.employeeId) {
+      await syncEmployeeRecentAttendances(updated.employeeId, updated);
+    }
 
     res.json({
       success: true,
