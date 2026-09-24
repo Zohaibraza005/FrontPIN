@@ -16,6 +16,7 @@ interface SearchableSelectProps {
   placeholder?: string;
   searchPlaceholder?: string;
   className?: string;
+  popoverClassName?: string;
   disabled?: boolean;
   icon?: React.ReactNode;
 }
@@ -27,6 +28,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   placeholder = "Select...",
   searchPlaceholder = "Search...",
   className,
+  popoverClassName,
   disabled = false,
   icon,
 }) => {
@@ -60,7 +62,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
           <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[220px] p-2 dark:bg-gray-900 dark:border-gray-800" align="start">
+      <PopoverContent className={cn("w-[220px] p-2 dark:bg-gray-900 dark:border-gray-800", popoverClassName)} align="start">
         <div className="relative mb-2">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
           <input

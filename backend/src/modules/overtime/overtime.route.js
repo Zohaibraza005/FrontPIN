@@ -6,6 +6,7 @@ const { protect } = require("../../middleware/auth");
 router.use(protect);
 
 router.get("/", overtime.getOvertimes);
+router.get("/verify-punch", overtime.verifyPunch);
 router.post("/", overtime.createOvertime);
 router.put("/:id", overtime.updateOvertime);
 router.patch("/:id", overtime.updateOvertime);

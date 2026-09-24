@@ -503,6 +503,33 @@ getAdminDashboard: async (companyId?: number | string) => {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+
+  // 🔹 Day Overrides (Turn Off Day ON / Turn On Day OFF)
+  getDayOverrides: async (params?: { startDate?: string; endDate?: string; date?: string }) => {
+    const query = params ? `?${new URLSearchParams(params as any).toString()}` : "";
+    return apiCall(`/attendance/day-overrides${query}`);
+  },
+
+  saveDayOverride: async (data: {
+    date: string;
+    type: "WORK_DAY" | "OFF_DAY";
+    reason: string;
+    scope: "ALL" | "DEPARTMENT" | "LOCATION" | "EMPLOYEE";
+    departmentId?: number | null;
+    companyId?: number | null;
+    employeeId?: number | null;
+  }) => {
+    return apiCall("/attendance/day-overrides", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteDayOverride: async (id: number) => {
+    return apiCall(`/attendance/day-overrides/${id}`, {
+      method: "DELETE",
+    });
+  },
 };
 
 
@@ -842,6 +869,10 @@ export const overtimeAPI = {
       ? `?${new URLSearchParams(filters)}`
       : "";
     return apiCall(`/overtimes${query}`);
+  },
+
+  verifyPunch: async (employeeId: number, date: string) => {
+    return apiCall(`/overtimes/verify-punch?employeeId=${employeeId}&date=${date}`);
   },
 
   createOvertime: async (data: {

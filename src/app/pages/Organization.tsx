@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2, ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { locationAPI, organizationAPI, leaveAPI, invoiceCompanyAPI, API_URL } from "../services/api";
 import { deviceService, BiometricDevice } from "../services/device.service";
 import ReactSelect from 'react-select';
@@ -43,6 +43,7 @@ export default function Organization() {
     username: "admin",
     password: "",
     companyId: "",
+    direction: "CHECK_IN", // "CHECK_IN" | "CHECK_OUT" | "AUTO"
   });
 
   // 🔹 Leave Types state
@@ -132,6 +133,7 @@ export default function Organization() {
       username: device.username || "admin",
       password: "",
       companyId: device.companyId ? String(device.companyId) : "",
+      direction: device.direction || "AUTO",
     });
     setDeviceModalOpen(true);
   };
@@ -149,6 +151,7 @@ export default function Organization() {
         ipAddress: deviceForm.ipAddress.trim(),
         port: Number(deviceForm.port) || (deviceForm.brand === "HIKVISION" ? 8000 : 4370),
         username: deviceForm.username,
+        direction: deviceForm.direction || "AUTO",
         companyId: deviceForm.companyId ? Number(deviceForm.companyId) : undefined,
       };
 
@@ -177,6 +180,7 @@ export default function Organization() {
         username: "admin",
         password: "",
         companyId: "",
+        direction: "CHECK_IN",
       });
       loadDevices();
     } catch (err: any) {
@@ -856,6 +860,7 @@ export default function Organization() {
                         username: "admin",
                         password: "",
                         companyId: "",
+                        direction: "CHECK_IN",
                       });
                       setDeviceModalOpen(true);
                     }}
@@ -891,6 +896,31 @@ export default function Organization() {
                           <SelectItem value="ZKTECO">ZKTeco (Fingerprint & RFID Machine)</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Device Punch Role / Direction</Label>
+                      <Select
+                        value={deviceForm.direction || "CHECK_IN"}
+                        onValueChange={(val) =>
+                          setDeviceForm({
+                            ...deviceForm,
+                            direction: val,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Punch Role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CHECK_IN">Check-In (Always Check In)</SelectItem>
+                          <SelectItem value="CHECK_OUT">Check-Out (Always Check Out)</SelectItem>
+                          <SelectItem value="AUTO">Both / Auto (Dynamic)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Select whether punches from this machine are fixed as Check-In or Check-Out.
+                      </p>
                     </div>
 
                     <div className="space-y-2">
@@ -1000,6 +1030,7 @@ export default function Organization() {
                         username: "admin",
                         password: "",
                         companyId: "",
+                        direction: "CHECK_IN",
                       });
                       setDeviceModalOpen(true);
                     }}
@@ -1015,6 +1046,7 @@ export default function Organization() {
                       <TableHead>Device Name</TableHead>
                       <TableHead>Brand / Protocol</TableHead>
                       <TableHead>IP & Port</TableHead>
+                      <TableHead>Punch Role</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -1041,6 +1073,21 @@ export default function Organization() {
                         </TableCell>
                         <TableCell className="font-mono text-sm">
                           {device.ipAddress}:{device.port}
+                        </TableCell>
+                        <TableCell>
+                          {device.direction === "CHECK_IN" ? (
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 font-bold flex items-center gap-1 w-fit">
+                              <ArrowDownRight className="h-3.5 w-3.5 text-emerald-600" /> Check In
+                            </Badge>
+                          ) : device.direction === "CHECK_OUT" ? (
+                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 font-bold flex items-center gap-1 w-fit">
+                              <ArrowUpRight className="h-3.5 w-3.5 text-blue-600" /> Check Out
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-300 font-medium flex items-center gap-1 w-fit">
+                              Both / Auto
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           {device.status === "ONLINE" ? (

@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from '../components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
-import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2 } from 'lucide-react';
+import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins } from 'lucide-react';
 import { useParams, Link } from 'react-router';
 import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI } from '../services/api';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
@@ -118,7 +118,11 @@ export const EmployeeDetail: React.FC = () => {
     rate: 0,
     overtimeRate: 0,
     cycleDate: 1,
-    annualLeaves: 0,
+    annualLeaves: 17,
+    casualLeaves: 10,
+    suddenLeaves: 12,
+    monthlyLeaves: 3,
+    maxExtraHours: 0,
   });
 
   const [schedule, setSchedule] = useState<any>({
@@ -232,6 +236,21 @@ export const EmployeeDetail: React.FC = () => {
         workMode: emp.workMode || emp.jobInfo?.workMode || 'On-site',
       });
 
+      let extraHoursVal = 0;
+      if (emp.jobInfo?.maxExtraHours !== null && emp.jobInfo?.maxExtraHours !== undefined) {
+        extraHoursVal = Number(emp.jobInfo.maxExtraHours);
+      } else if (emp.Schedule) {
+        const schedList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
+        const aSched = schedList.find((s: any) => s && !s.deletedAt) || schedList[0];
+        if (aSched?.overtimeMinutes) {
+          extraHoursVal = Math.round(Number(aSched.overtimeMinutes) / 60);
+        } else if (aSched?.overtimeAllowed) {
+          extraHoursVal = 2;
+        }
+      } else if (emp.jobInfo?.allowExtraHours) {
+        extraHoursVal = 2;
+      }
+
       setPayroll({
         currency: emp.payroll?.currency || 'PKR',
         rateType: emp.payroll?.payoutType || 'monthly',
@@ -242,6 +261,7 @@ export const EmployeeDetail: React.FC = () => {
         casualLeaves: emp.payroll?.casualLeaves ?? 10,
         suddenLeaves: emp.payroll?.suddenLeaves ?? 12,
         monthlyLeaves: emp.payroll?.monthlyLeaves ?? 3,
+        maxExtraHours: extraHoursVal,
       });
 
       // Populate schedule from emp.Schedule
@@ -460,6 +480,7 @@ export const EmployeeDetail: React.FC = () => {
 
   const handleSavePayroll = async () => {
     try {
+      const extraHrs = Math.max(0, Number(payroll.maxExtraHours) || 0);
       await employeeAPI.updateEmployee(Number(id), {
         payroll: {
           currency: payroll.currency,
@@ -471,10 +492,14 @@ export const EmployeeDetail: React.FC = () => {
           casualLeaves: Number(payroll.casualLeaves),
           suddenLeaves: Number(payroll.suddenLeaves),
           monthlyLeaves: Number(payroll.monthlyLeaves),
+          maxExtraHours: extraHrs,
+          allowExtraHours: extraHrs > 0,
         },
       });
       toast.success('Payroll information updated successfully');
       setIsEditingPayroll(false);
+      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
+      window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { employeeId: id } }));
       fetchEmployee();
     } catch (err: any) {
       console.error("Save Payroll Error:", err);
@@ -525,8 +550,6 @@ export const EmployeeDetail: React.FC = () => {
       toast.error('Failed to update schedule');
     }
   };
-
-
 
   const handleMarkSeparation = () => {
     if (!separationType || !separationDate) {
@@ -1345,90 +1368,345 @@ export const EmployeeDetail: React.FC = () => {
 
         {/* ── PAYROLL ────────────────────────────────────────────────────── */}
         <TabsContent value="payroll">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Payroll Information</CardTitle>
+          <Card className="shadow-xs border-gray-200 rounded-2xl bg-white overflow-hidden">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-gray-100 p-5 sm:p-6 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shadow-2xs">
+                  <Banknote className="size-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-bold text-gray-900">Payroll Information</CardTitle>
+                  <p className="text-xs text-gray-500 mt-0.5">Manage compensation rate, payout frequency, overtime, and leave allocations</p>
+                </div>
+              </div>
               {!isEditingPayroll ? (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingPayroll(true)}>
-                    <Edit className="mr-2 h-4 w-4" /> Edit
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowIncrementModal(true)}
+                    className="rounded-xl border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold h-9 transition-all"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Increment
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowIncrementModal(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Add Increment
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditingPayroll(true)}
+                    className="rounded-xl border-gray-200 hover:bg-gray-50 text-xs font-semibold h-9 text-gray-700"
+                  >
+                    <Edit className="mr-1.5 h-3.5 w-3.5 text-blue-600" /> Edit Payroll
                   </Button>
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingPayroll(false)}>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditingPayroll(false)}
+                    className="rounded-xl border-gray-200 hover:bg-white text-xs font-semibold text-gray-600 h-9"
+                  >
                     Cancel
                   </Button>
-                  <Button size="sm" onClick={handleSavePayroll}>
-                    <Save className="mr-2 h-4 w-4" /> Save
+                  <Button
+                    size="sm"
+                    onClick={handleSavePayroll}
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs h-9"
+                  >
+                    <Save className="mr-1.5 h-3.5 w-3.5" /> Save Changes
                   </Button>
                 </div>
               )}
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <Label>Currency</Label>
-                  <Select disabled={!isEditingPayroll} value={payroll.currency} onValueChange={(v) => setPayroll({ ...payroll, currency: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PKR">PKR</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                    </SelectContent>
-                  </Select>
+            <CardContent className="p-5 sm:p-6 space-y-6">
+              {/* Compensation & Salary Structure */}
+              <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 space-y-4">
+                <div className="flex items-center gap-2 border-b border-gray-200/60 pb-3">
+                  <Coins className="w-4 h-4 text-blue-600" />
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-900">Compensation & Pay Structure</h4>
+                    <p className="text-[11px] text-gray-500">Configure salary payout rate, currency, and cycle schedule</p>
+                  </div>
                 </div>
-                <div>
-                  <Label>Rate Type</Label>
-                  <RadioGroup disabled={!isEditingPayroll} value={payroll.rateType} onValueChange={(v) => setPayroll({ ...payroll, rateType: v as any })}>
-                    <div className="flex gap-6 mt-2">
-                      <div className="flex items-center gap-2">
-                        <RadioGroupItem value="hourly" id="hourly" />
-                        <Label htmlFor="hourly">Hourly</Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <RadioGroupItem value="daily" id="daily" />
-                        <Label htmlFor="daily">Daily</Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <RadioGroupItem value="monthly" id="monthly" />
-                        <Label htmlFor="monthly">Monthly</Label>
-                      </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-1">
+                  {/* Currency */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Currency</Label>
+                    <Select
+                      disabled={!isEditingPayroll}
+                      value={payroll.currency}
+                      onValueChange={(v) => setPayroll({ ...payroll, currency: v })}
+                    >
+                      <SelectTrigger className={`h-10 rounded-xl font-semibold text-sm transition-all ${
+                        !isEditingPayroll
+                          ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                          : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                      }`}>
+                        <SelectValue placeholder="Select Currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {['PKR', 'USD', 'EUR', 'GBP'].map((curr) => (
+                          <SelectItem key={curr} value={curr} className="font-semibold text-xs">
+                            {curr}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Rate Type Selector */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-700">Rate Type</Label>
+                      <span className="text-[10px] font-semibold text-blue-600 capitalize">
+                        {payroll.rateType} payout
+                      </span>
                     </div>
-                  </RadioGroup>
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-white rounded-xl border border-gray-200 shadow-2xs h-10 items-center">
+                      {(['hourly', 'daily', 'monthly'] as const).map((type) => {
+                        const isSelected = payroll.rateType === type;
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            disabled={!isEditingPayroll}
+                            onClick={() => setPayroll({ ...payroll, rateType: type })}
+                            className={`flex items-center justify-center gap-1.5 h-8 px-2 rounded-lg text-xs font-semibold transition-all ${
+                              isSelected
+                                ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50 disabled:hover:bg-transparent disabled:opacity-50'
+                            }`}
+                          >
+                            <span className={`size-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-gray-300'}`} />
+                            <span className="capitalize">{type}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Dynamic Salary Rate Field */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-900">
+                        {payroll.rateType === 'hourly'
+                          ? 'Salary Hourly Rate'
+                          : payroll.rateType === 'daily'
+                          ? 'Salary Daily Rate'
+                          : 'Salary Monthly Rate'}
+                      </Label>
+                      <span className="text-[10px] font-semibold text-gray-500">
+                        {payroll.rateType === 'hourly'
+                          ? 'Per hour'
+                          : payroll.rateType === 'daily'
+                          ? 'Per day'
+                          : 'Per month'}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 select-none">
+                        {payroll.currency}
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.rate}
+                        onChange={(e) => setPayroll({ ...payroll, rate: Number(e.target.value) })}
+                        placeholder="0"
+                        className={`pl-14 pr-16 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        {payroll.rateType === 'hourly'
+                          ? '/ hr'
+                          : payroll.rateType === 'daily'
+                          ? '/ day'
+                          : '/ mo'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <Label>Rate</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.rate} onChange={(e) => setPayroll({ ...payroll, rate: Number(e.target.value) })} />
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 border-t border-gray-200/60">
+                  {/* Overtime Rate */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Overtime Rate</Label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 select-none">
+                        {payroll.currency}
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.overtimeRate}
+                        onChange={(e) => setPayroll({ ...payroll, overtimeRate: Number(e.target.value) })}
+                        placeholder="0"
+                        className={`pl-14 pr-14 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        / hr
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cycle Date */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Pay Cycle Date</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={31}
+                        disabled={!isEditingPayroll}
+                        value={payroll.cycleDate}
+                        onChange={(e) => setPayroll({ ...payroll, cycleDate: Number(e.target.value) })}
+                        placeholder="1"
+                        className={`pr-24 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        day of month
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Max Extra Time Allowed */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-700">Max Extra Time Allowed</Label>
+                      <span className="text-[10px] font-semibold text-blue-600">
+                        {Number(payroll.maxExtraHours) > 0 ? `${Number(payroll.maxExtraHours) * 60} mins limit` : 'None'}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.maxExtraHours ?? 0}
+                        onChange={(e) => setPayroll({ ...payroll, maxExtraHours: Number(e.target.value) })}
+                        placeholder="2"
+                        className={`pr-20 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        hrs / shift
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <Label>Overtime Rate</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.overtimeRate} onChange={(e) => setPayroll({ ...payroll, overtimeRate: Number(e.target.value) })} />
+              {/* Leave Quota Allocations */}
+              <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 space-y-4">
+                <div className="flex items-center gap-2 border-b border-gray-200/60 pb-3">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-900">Leave Quota Allocations</h4>
+                    <p className="text-[11px] text-gray-500">Allocated days for annual, casual, sudden, and monthly leaves</p>
+                  </div>
                 </div>
-                <div>
-                  <Label>Cycle Date</Label>
-                  <Input type="number" disabled={!isEditingPayroll} min={1} max={31} value={payroll.cycleDate} onChange={(e) => setPayroll({ ...payroll, cycleDate: Number(e.target.value) })} />
-                </div>
-                <div>
-                  <Label>Annual Leaves</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.annualLeaves} onChange={(e) => setPayroll({ ...payroll, annualLeaves: Number(e.target.value) })} />
-                </div>
-                <div>
-                  <Label>Casual Leave</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.casualLeaves} onChange={(e) => setPayroll({ ...payroll, casualLeaves: Number(e.target.value) })} />
-                </div>
-                <div>
-                  <Label>Sudden Leaves</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.suddenLeaves} onChange={(e) => setPayroll({ ...payroll, suddenLeaves: Number(e.target.value) })} />
-                </div>
-                <div>
-                  <Label>Monthly Leaves</Label>
-                  <Input type="number" disabled={!isEditingPayroll} value={payroll.monthlyLeaves} onChange={(e) => setPayroll({ ...payroll, monthlyLeaves: Number(e.target.value) })} />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Annual Leaves</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.annualLeaves}
+                        onChange={(e) => setPayroll({ ...payroll, annualLeaves: Number(e.target.value) })}
+                        className={`pr-14 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        days
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Casual Leave</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.casualLeaves}
+                        onChange={(e) => setPayroll({ ...payroll, casualLeaves: Number(e.target.value) })}
+                        className={`pr-14 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        days
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Sudden Leaves</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.suddenLeaves}
+                        onChange={(e) => setPayroll({ ...payroll, suddenLeaves: Number(e.target.value) })}
+                        className={`pr-14 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        days
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-gray-700">Monthly Leaves</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min={0}
+                        disabled={!isEditingPayroll}
+                        value={payroll.monthlyLeaves}
+                        onChange={(e) => setPayroll({ ...payroll, monthlyLeaves: Number(e.target.value) })}
+                        className={`pr-14 h-10 rounded-xl font-bold text-sm transition-all ${
+                          !isEditingPayroll
+                            ? 'bg-white border-gray-200 text-gray-900 disabled:opacity-100 disabled:cursor-default'
+                            : 'bg-white border-gray-300 text-gray-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                        }`}
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 select-none">
+                        days
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -1436,35 +1714,60 @@ export const EmployeeDetail: React.FC = () => {
 
           {/* Increment Modal */}
           <Dialog open={showIncrementModal} onOpenChange={setShowIncrementModal}>
-            <DialogContent>
+            <DialogContent className="rounded-2xl sm:max-w-[425px]">
               <DialogHeader>
-                <DialogTitle>Add Salary Increment</DialogTitle>
+                <DialogTitle className="text-base font-bold text-gray-900">Add Salary Increment</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div>
-                  <Label>Increment Type</Label>
+              <div className="space-y-4 py-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-gray-700">Increment Type</Label>
                   <Select value={incrementType} onValueChange={(v) => setIncrementType(v as any)}>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-10 rounded-xl font-medium border-gray-300">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="percentage">Percentage (%)</SelectItem>
-                      <SelectItem value="amount">Fixed Amount</SelectItem>
+                      <SelectItem value="amount">Fixed Amount ({payroll.currency})</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Value</Label>
-                  <Input type="number" value={incrementValue} onChange={(e) => setIncrementValue(Number(e.target.value))} />
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-gray-700">
+                    {incrementType === 'percentage' ? 'Percentage Value (%)' : `Amount Value (${payroll.currency})`}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder={incrementType === 'percentage' ? 'e.g. 10' : 'e.g. 5000'}
+                    value={incrementValue || ''}
+                    onChange={(e) => setIncrementValue(Number(e.target.value))}
+                    className="h-10 rounded-xl font-semibold border-gray-300"
+                  />
                 </div>
-                <div>
-                  <Label>Apply Date</Label>
-                  <Input type="date" value={incrementDate} onChange={(e) => setIncrementDate(e.target.value)} />
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-gray-700">Effective Date</Label>
+                  <Input
+                    type="date"
+                    value={incrementDate}
+                    onChange={(e) => setIncrementDate(e.target.value)}
+                    className="h-10 rounded-xl font-medium border-gray-300"
+                  />
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setShowIncrementModal(false)}>Cancel</Button>
-                <Button onClick={handleAddIncrement}>Apply Increment</Button>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowIncrementModal(false)}
+                  className="rounded-xl border-gray-200 text-xs font-semibold h-9"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleAddIncrement}
+                  className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs h-9"
+                >
+                  Apply Increment
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

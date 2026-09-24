@@ -2,6 +2,12 @@
 
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
+const {
+  getDayOverrides,
+  createDayOverride,
+  deleteDayOverride,
+  resolveOverrideForEmployee,
+} = require("./dayOverride.service");
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000; // meters
@@ -22,7 +28,13 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function isOffDay(schedules, date, timezone = null) {
+function isOffDay(schedules, date, timezone = null, dayOverride = null) {
+  // If Admin configured an override for this day, that takes absolute precedence!
+  if (dayOverride) {
+    if (dayOverride.type === "WORK_DAY") return false; // Force working day (ON)
+    if (dayOverride.type === "OFF_DAY") return true;   // Force holiday/off-day (OFF)
+  }
+
   if (!schedules) return false;
   const scheduleList = Array.isArray(schedules) ? schedules : [schedules];
   const activeSchedule = scheduleList.find((s) => s && !s.deletedAt);
@@ -228,8 +240,154 @@ function getBreakStats(schedules, attendanceActivities) {
   };
 }
 
+/**
+ * Automatically checks out open attendances whose shift end + 2h allowed overtime has passed.
+ * Capped at scheduled duration + 2 hours (max 11h / 660 mins, overtime 120 mins).
+ */
+async function autoCheckoutOverdueAttendances() {
+  try {
+    const nowUtc = moment.utc();
+    const openAttendances = await prisma.attendance.findMany({
+      where: {
+        checkInTime: { not: null },
+        checkOutTime: null,
+      },
+      include: {
+        employee: {
+          include: {
+            company: true,
+            Schedule: { where: { deletedAt: null } },
+            jobInfo: true,
+          },
+        },
+      },
+    });
+
+    if (!openAttendances || openAttendances.length === 0) {
+      return { count: 0 };
+    }
+
+    let closedCount = 0;
+
+    for (const att of openAttendances) {
+      const emp = att.employee;
+      if (!emp) continue;
+
+      const timezone = emp.company?.timezone || "Asia/Karachi";
+      const activeSchedule = emp.Schedule?.[0] || { startTime: "09:00", endTime: "18:00" };
+
+      const shiftDateMoment = att.date
+        ? moment(att.date).tz(timezone)
+        : moment(att.checkInTime).tz(timezone);
+      const shiftDateString = shiftDateMoment.format("YYYY-MM-DD");
+
+      const shiftStartTime = att.shiftStartTime || activeSchedule.startTime || "09:00";
+      const shiftEndTime = att.shiftEndTime || activeSchedule.endTime || "18:00";
+
+      const shiftStartLocal = moment.tz(
+        `${shiftDateString} ${shiftStartTime}`,
+        "YYYY-MM-DD HH:mm",
+        timezone
+      );
+      let shiftEndLocal = moment.tz(
+        `${shiftDateString} ${shiftEndTime}`,
+        "YYYY-MM-DD HH:mm",
+        timezone
+      );
+      if (shiftEndLocal.isBefore(shiftStartLocal)) {
+        shiftEndLocal.add(1, "day");
+      }
+
+      let maxOtMinutes = 120; // 2 hours allowed extra time by default
+      if (activeSchedule.overtimeAllowed === false) {
+        maxOtMinutes = 0;
+      } else if (activeSchedule.overtimeMinutes && Number(activeSchedule.overtimeMinutes) > 0) {
+        maxOtMinutes = Number(activeSchedule.overtimeMinutes);
+      } else if (emp.jobInfo?.maxExtraHours != null) {
+        maxOtMinutes = Number(emp.jobInfo.maxExtraHours) * 60;
+      }
+
+      const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+      const cutoffUtc = cutoffLocal.clone().utc();
+
+      // If current time has passed the shift end + 2h OT cutoff, auto-checkout!
+      if (nowUtc.isAfter(cutoffUtc)) {
+        const inMoment = moment(att.checkInTime);
+        let effectiveOutMoment = cutoffUtc;
+        if (effectiveOutMoment.isBefore(inMoment)) {
+          effectiveOutMoment = inMoment.clone().add(540, "minutes");
+        }
+
+        let scheduledDurationMinutes = 540;
+        const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
+        if (diffShiftMins > 0) {
+          scheduledDurationMinutes = diffShiftMins;
+        }
+
+        const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutMoment.diff(inMoment, "minutes")));
+        const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
+        const totalWorkedMinutes = Math.min(maxAllowedWorkedMinutes, rawWorkedMinutes);
+
+        let overtimeMinutes = 0;
+        if (maxOtMinutes > 0 && totalWorkedMinutes > scheduledDurationMinutes) {
+          const rawExtra = totalWorkedMinutes - scheduledDurationMinutes;
+          if (rawExtra >= 30) {
+            overtimeMinutes = Math.min(rawExtra, maxOtMinutes);
+          }
+        }
+
+        if (activeSchedule.overtimeAllowed === false) {
+          overtimeMinutes = 0;
+        }
+
+        const cutoffDate = effectiveOutMoment.toDate();
+
+        await prisma.$transaction([
+          prisma.attendance.update({
+            where: { id: att.id },
+            data: {
+              checkOutTime: cutoffDate,
+              checkOutMethod: "SYSTEM",
+              autoClockedOut: true,
+              totalWorkedMinutes,
+              overtimeMinutes,
+              isEarlyOut: false,
+              earlyOutMinutes: 0,
+            },
+          }),
+          prisma.attendancePunch.create({
+            data: {
+              attendanceId: att.id,
+              employeeId: emp.id,
+              type: "AUTO_CLOCK_OUT",
+              punchTime: cutoffDate,
+              method: "SYSTEM",
+              device: "Auto System Checkout",
+            },
+          }),
+        ]);
+
+        closedCount++;
+      }
+    }
+
+    if (closedCount > 0) {
+      console.log(`[Auto-Checkout] Auto-closed ${closedCount} overdue attendance record(s) at shift end + 2h cutoff.`);
+    }
+
+    return { count: closedCount };
+  } catch (err) {
+    console.error("[Auto-Checkout] Error auto-closing overdue attendances:", err.message);
+    return { count: 0, error: err.message };
+  }
+}
+
+exports.autoCheckoutOverdueAttendances = autoCheckoutOverdueAttendances;
+
 exports.getTodayStatus = async (req, res) => {
   try {
+    await autoCheckoutOverdueAttendances();
+
     if (req.user.role === "ADMIN") {
       return res.json({
         success: true,
@@ -390,20 +548,6 @@ exports.clockOut = async (req, res) => {
       return res.status(400).json({ message: "No attendance found" });
     }
 
-    const now = new Date(); // Always UTC
-    const inTime = attendance.checkInTime ? new Date(attendance.checkInTime) : now;
-    const totalWorkedMinutes = Math.max(0, Math.floor((now - inTime) / 60000));
-
-    let scheduledDurationMinutes = 540;
-    if (attendance.shiftStartTime && attendance.shiftEndTime) {
-      const [sh, sm] = attendance.shiftStartTime.split(":").map(Number);
-      const [eh, em] = attendance.shiftEndTime.split(":").map(Number);
-      const sMins = (sh || 9) * 60 + (sm || 0);
-      const eMins = (eh || 18) * 60 + (em || 0);
-      if (eMins > sMins) scheduledDurationMinutes = eMins - sMins;
-    }
-    const overtimeMinutes = totalWorkedMinutes > scheduledDurationMinutes ? totalWorkedMinutes - scheduledDurationMinutes : 0;
-
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
@@ -417,20 +561,62 @@ exports.clockOut = async (req, res) => {
     const shiftStartTime = attendance.shiftStartTime || activeSchedule?.startTime || "09:00";
     const shiftEndTime = attendance.shiftEndTime || activeSchedule?.endTime || "18:00";
 
+    const todayDateStr = moment().tz(timezone).format("YYYY-MM-DD");
+    const shiftStartLocal = moment.tz(`${todayDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
+    let shiftEndLocal = moment.tz(`${todayDateStr} ${shiftEndTime}`, "YYYY-MM-DD HH:mm", timezone);
+    if (shiftEndLocal.isBefore(shiftStartLocal)) {
+      shiftEndLocal.add(1, "day");
+    }
+
+    let scheduledDurationMinutes = 540;
+    const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
+    if (diffShiftMins > 0) {
+      scheduledDurationMinutes = diffShiftMins;
+    }
+
+    let maxOtMinutes = 120;
+    if (activeSchedule?.overtimeAllowed === false) {
+      maxOtMinutes = 0;
+    } else if (activeSchedule?.overtimeMinutes && Number(activeSchedule.overtimeMinutes) > 0) {
+      maxOtMinutes = Number(activeSchedule.overtimeMinutes);
+    } else if (employee?.jobInfo?.maxExtraHours != null) {
+      maxOtMinutes = Number(employee.jobInfo.maxExtraHours) * 60;
+    }
+
+    const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+    const cutoffUTC = cutoffLocal.clone().utc();
+
+    const now = new Date(); // Always UTC
+    const nowMomentUTC = moment.utc(now);
+
+    const isPastCutoff = nowMomentUTC.isAfter(cutoffUTC);
+    const effectiveCheckOutTime = isPastCutoff ? cutoffUTC.toDate() : now;
+    const effectiveOutMoment = isPastCutoff ? cutoffUTC : nowMomentUTC;
+
+    const inTime = attendance.checkInTime ? new Date(attendance.checkInTime) : effectiveCheckOutTime;
+    const inMoment = moment(inTime);
+
+    const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutMoment.diff(inMoment, "minutes")));
+    const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
+    const totalWorkedMinutes = Math.min(maxAllowedWorkedMinutes, rawWorkedMinutes);
+
+    let overtimeMinutes = 0;
+    if (maxOtMinutes > 0 && totalWorkedMinutes > scheduledDurationMinutes) {
+      const rawExtra = totalWorkedMinutes - scheduledDurationMinutes;
+      if (rawExtra >= 30) {
+        overtimeMinutes = Math.min(rawExtra, maxOtMinutes);
+      }
+    }
+
+    if (activeSchedule && activeSchedule.overtimeAllowed === false) {
+      overtimeMinutes = 0;
+    }
+
     let isEarlyOut = false;
     let earlyOutMinutes = 0;
 
     if (shiftStartTime && shiftEndTime) {
-      const todayDateStr = moment(now).tz(timezone).format("YYYY-MM-DD");
-      const shiftStartLocal = moment.tz(`${todayDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
-      let shiftEndLocal = moment.tz(`${todayDateStr} ${shiftEndTime}`, "YYYY-MM-DD HH:mm", timezone);
-      if (shiftEndLocal.isBefore(shiftStartLocal)) {
-        shiftEndLocal.add(1, "day");
-      }
-
       const shiftEndUTC = shiftEndLocal.clone().utc();
-      const nowMomentUTC = moment.utc(now);
-
       const allowEarlyOut = activeSchedule ? activeSchedule.allowEarlyOut : false;
       const allowedEarlyOutMins = allowEarlyOut ? (Number(activeSchedule.earlyOutMinutes) || 0) : 0;
       const earlyOutThresholdUTC = shiftEndUTC.clone().subtract(allowedEarlyOutMins, "minutes");
@@ -446,7 +632,7 @@ exports.clockOut = async (req, res) => {
     await prisma.attendance.update({
       where: { id: attendance.id },
       data: {
-        checkOutTime: now,
+        checkOutTime: effectiveCheckOutTime,
         checkOutIP: req.ip,
         checkOutMethod: "PIN",
         checkOutLat: lat,
@@ -455,6 +641,7 @@ exports.clockOut = async (req, res) => {
         overtimeMinutes,
         isEarlyOut,
         earlyOutMinutes,
+        autoClockedOut: isPastCutoff,
         summary,
       },
     });
@@ -462,7 +649,7 @@ exports.clockOut = async (req, res) => {
     await prisma.attendancePunch.create({
       data: {
         type: "CHECK_OUT",
-        punchTime: now,
+        punchTime: now, // Real physical click time preserved in punch audit log!
         ip: req.ip,
         method: "PIN",
         employeeId,
@@ -593,6 +780,14 @@ exports.clockIn = async (req, res) => {
       "YYYY-MM-DD HH:mm",
       timezone
     );
+
+    const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+    const nowLocal = moment().tz(timezone);
+    if (nowLocal.isBefore(earliestCheckInLocal)) {
+      return res.status(400).json({
+        message: `Clock-in is only allowed within 2 hours before your shift start (${schedule.startTime}). Early check-in opens at ${earliestCheckInLocal.format("hh:mm A")}.`,
+      });
+    }
 
     const shiftStartUTC = shiftStartLocal.clone().utc();
     const nowUTC = moment.utc();
@@ -927,6 +1122,7 @@ exports.changeActivity = async (req, res) => {
   
 exports.getAttendanceReport = async (req, res) => {
   try {
+    await autoCheckoutOverdueAttendances();
     const user = req.user;
     const {
       view = "daily",
@@ -1085,6 +1281,13 @@ exports.getAttendanceReport = async (req, res) => {
 
     const now = new Date();
 
+    /* ⚡ Day Overrides (Admin Forced Working Day / Admin Holiday) */
+    const dayOverrides = await getDayOverrides({
+      organizationId: req.user.organizationId || req.user.orgId,
+      startDate: moment(startDate).format("YYYY-MM-DD"),
+      endDate: moment(endDate).format("YYYY-MM-DD"),
+    });
+
     /* 🧠 Final Formatting */
     const formattedEmployees = employees.map(emp => {
 
@@ -1157,6 +1360,10 @@ exports.getAttendanceReport = async (req, res) => {
         const approvedOtHours = Number(overtime?.hours) || 0;
         const approvedOtMinutes = Math.round(approvedOtHours * 60);
 
+        // Resolve Day Override for this employee on this date
+        const dayOverride = resolveOverrideForEmployee(emp, dateStr, dayOverrides);
+        const isDayOff = isOffDay(emp.Schedule, dateStr, empTz, dayOverride);
+
         /* 🟡 If Leave Exists */
         if (leave) {
           return {
@@ -1177,6 +1384,9 @@ exports.getAttendanceReport = async (req, res) => {
             overtimeAmount: overtime?.amount || 0,
             totalWorkedMinutes: 0,
             totalBreakMinutes: 0,
+            overrideType: dayOverride?.type || null,
+            overrideReason: dayOverride?.reason || null,
+            overrideScope: dayOverride?.scope || null,
             tasks: []
           };
         }
@@ -1185,11 +1395,10 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🔴 No Attendance */
         if (!existing) {
-          const dayOff = isOffDay(emp.Schedule, dateStr);
           const isFutureDay = moment(dateStr, "YYYY-MM-DD").isAfter(moment().startOf("day"));
 
           let defaultStatus = "ABSENT";
-          if (dayOff) {
+          if (isDayOff) {
             defaultStatus = "OFF_DAY";
           } else if (isFutureDay) {
             defaultStatus = "UPCOMING_DAY";
@@ -1208,12 +1417,14 @@ exports.getAttendanceReport = async (req, res) => {
             overtimeAmount: overtime?.amount || 0,
             totalWorkedMinutes: 0,
             totalBreakMinutes: 0,
+            overrideType: dayOverride?.type || null,
+            overrideReason: dayOverride?.reason || null,
+            overrideScope: dayOverride?.scope || null,
             tasks: []
           };
         }
 
         /* 🟢 Attendance Exists */
-        const isDayOff = isOffDay(emp.Schedule, dateStr);
 
         // Verify check-in and check-out actually belong to this date in company timezone
         const checkInDateMatch = existing.checkInTime
@@ -1307,11 +1518,11 @@ exports.getAttendanceReport = async (req, res) => {
         } else if (finalCheckIn && !finalCheckOut) {
           const inT = new Date(finalCheckIn).getTime();
           const diffHours = (now.getTime() - inT) / 1000 / 3600;
-          if (diffHours >= 15) {
-            totalWorkedMinutes = 15 * 60;
+          if (diffHours >= 11) {
+            totalWorkedMinutes = 11 * 60;
           } else {
             const totalMinutes = (now.getTime() - inT) / 1000 / 60;
-            totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
+            totalWorkedMinutes = Math.min(660, Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0));
           }
         } else if (!finalCheckIn && (existing.status === "PRESENT" || existing.status === "LATE" || existing.status === "TARDY") && (!totalWorkedMinutes || totalWorkedMinutes === 0)) {
           const [sh, sm] = sTime.split(":").map(Number);
@@ -1319,7 +1530,7 @@ exports.getAttendanceReport = async (req, res) => {
           const startMins = (sh || 9) * 60 + (sm || 0);
           const endMins = (eh || 18) * 60 + (em || 0);
           if (endMins > startMins) {
-            totalWorkedMinutes = Math.max(endMins - startMins - totalBreakMinutes, 0);
+            totalWorkedMinutes = Math.min(660, Math.max(endMins - startMins - totalBreakMinutes, 0));
           } else {
             totalWorkedMinutes = 540;
           }
@@ -1362,11 +1573,14 @@ exports.getAttendanceReport = async (req, res) => {
 
         let calculatedOtMinutes = 0;
         if (totalWorkedMinutes > scheduledMins) {
-          calculatedOtMinutes = totalWorkedMinutes - scheduledMins;
+          const rawExtra = totalWorkedMinutes - scheduledMins;
+          if (rawExtra >= 30) {
+            calculatedOtMinutes = Math.min(rawExtra, 120);
+          }
         }
 
-        const finalOtMinutes = approvedOtMinutes || existing.overtimeMinutes || calculatedOtMinutes;
-        const finalOtHours = approvedOtHours || (finalOtMinutes / 60);
+        const finalOtMinutes = Math.min(120, approvedOtMinutes || existing.overtimeMinutes || calculatedOtMinutes);
+        const finalOtHours = Number((finalOtMinutes / 60).toFixed(2));
 
         return {
           ...existing,
@@ -1388,6 +1602,9 @@ exports.getAttendanceReport = async (req, res) => {
           totalWorkedMinutes,
           totalBreakMinutes,
           punches: existing.punches || [],
+          overrideType: dayOverride?.type || null,
+          overrideReason: dayOverride?.reason || null,
+          overrideScope: dayOverride?.scope || null,
           tasks
         };
       });
@@ -1455,21 +1672,36 @@ exports.getAttendanceReport = async (req, res) => {
         finalCheckOut = null;
       }
 
-      let totalWorkedMinutes = 0;
-      if (finalCheckIn && finalCheckOut) {
-        const inT = finalCheckIn.getTime();
-        const outT = finalCheckOut.getTime();
-        if (outT > inT) {
-          totalWorkedMinutes = Math.floor((outT - inT) / 60000);
-        }
-      }
-  
       const targetDateStr = typeof date === "string" ? date.slice(0, 10) : moment(date).format("YYYY-MM-DD");
 
       const activeSched = employee?.Schedule?.find(s => !s.deletedAt);
       const timezone = employee?.company?.timezone || "Asia/Karachi";
       const sTime = activeSched?.startTime || "09:00";
       const eTime = activeSched?.endTime || "18:00";
+
+      const [sh, sm] = sTime.split(":").map(Number);
+      const [eh, em] = eTime.split(":").map(Number);
+      let sMins = (sh || 9) * 60 + (sm || 0);
+      let eMins = (eh || 18) * 60 + (em || 0);
+      if (eMins < sMins) eMins += 24 * 60;
+      const scheduledDurationMinutes = eMins > sMins ? eMins - sMins : 540;
+
+      let totalWorkedMinutes = 0;
+      let overtimeMinutes = 0;
+      if (finalCheckIn && finalCheckOut) {
+        const inT = finalCheckIn.getTime();
+        const outT = finalCheckOut.getTime();
+        if (outT > inT) {
+          const rawMins = Math.floor((outT - inT) / 60000);
+          totalWorkedMinutes = Math.min(scheduledDurationMinutes + 120, rawMins);
+          if (totalWorkedMinutes > scheduledDurationMinutes) {
+            const rawExtra = totalWorkedMinutes - scheduledDurationMinutes;
+            if (rawExtra >= 30) {
+              overtimeMinutes = Math.min(rawExtra, 120);
+            }
+          }
+        }
+      }
 
       let isLate = false;
       let lateMinutes = 0;
@@ -1540,6 +1772,7 @@ exports.getAttendanceReport = async (req, res) => {
             checkInTime: finalCheckIn,
             checkOutTime: finalCheckOut,
             totalWorkedMinutes,
+            overtimeMinutes,
             isLate,
             lateMinutes,
             isEarlyOut,
@@ -1562,6 +1795,7 @@ exports.getAttendanceReport = async (req, res) => {
           checkInTime: finalCheckIn,
           checkOutTime: finalCheckOut,
           totalWorkedMinutes,
+          overtimeMinutes,
           isLate,
           lateMinutes,
           isEarlyOut,
@@ -1661,19 +1895,34 @@ exports.getAttendanceReport = async (req, res) => {
         finalCheckOut = null;
       }
 
-      let totalWorkedMinutes = 0;
-      if (finalCheckIn && finalCheckOut) {
-        const inT = finalCheckIn.getTime();
-        const outT = finalCheckOut.getTime();
-        if (outT > inT) {
-          totalWorkedMinutes = Math.floor((outT - inT) / 60000);
-        }
-      }
-
       const activeSched = employee?.Schedule?.find(s => !s.deletedAt);
       const timezone = employee?.company?.timezone || "Asia/Karachi";
       const sTime = activeSched?.startTime || "09:00";
       const eTime = activeSched?.endTime || "18:00";
+
+      const [sh, sm] = sTime.split(":").map(Number);
+      const [eh, em] = eTime.split(":").map(Number);
+      let sMins = (sh || 9) * 60 + (sm || 0);
+      let eMins = (eh || 18) * 60 + (em || 0);
+      if (eMins < sMins) eMins += 24 * 60;
+      const scheduledDurationMinutes = eMins > sMins ? eMins - sMins : 540;
+
+      let totalWorkedMinutes = 0;
+      let overtimeMinutes = 0;
+      if (finalCheckIn && finalCheckOut) {
+        const inT = finalCheckIn.getTime();
+        const outT = finalCheckOut.getTime();
+        if (outT > inT) {
+          const rawMins = Math.floor((outT - inT) / 60000);
+          totalWorkedMinutes = Math.min(scheduledDurationMinutes + 120, rawMins);
+          if (totalWorkedMinutes > scheduledDurationMinutes) {
+            const rawExtra = totalWorkedMinutes - scheduledDurationMinutes;
+            if (rawExtra >= 30) {
+              overtimeMinutes = Math.min(rawExtra, 120);
+            }
+          }
+        }
+      }
 
       let isLate = false;
       let lateMinutes = 0;
@@ -1723,6 +1972,7 @@ exports.getAttendanceReport = async (req, res) => {
             checkInTime: finalCheckIn,
             checkOutTime: finalCheckOut,
             totalWorkedMinutes,
+            overtimeMinutes,
             isLate,
             lateMinutes,
             isEarlyOut,
@@ -1745,6 +1995,7 @@ exports.getAttendanceReport = async (req, res) => {
             checkInTime: finalCheckIn,
             checkOutTime: finalCheckOut,
             totalWorkedMinutes,
+            overtimeMinutes,
             isLate,
             lateMinutes,
             isEarlyOut,
@@ -1770,6 +2021,7 @@ exports.getAttendanceReport = async (req, res) => {
 // 🔥 ADMIN ATTENDANCE DASHBOARD (TODAY)
 exports.getAdminAttendanceDashboard = async (req, res) => {
   try {
+    await autoCheckoutOverdueAttendances();
     const { companyId } = req.query;
     const organizationId = req.user.organizationId;
 
@@ -1907,6 +2159,7 @@ exports.getAdminAttendanceDashboard = async (req, res) => {
 
 exports.exportAttendanceExcel = async (req, res) => {
   try {
+    await autoCheckoutOverdueAttendances();
     const user = req.user;
     const {
       date,
@@ -2327,6 +2580,63 @@ exports.exportAttendanceExcel = async (req, res) => {
   } catch (error) {
     console.error("Export Attendance Excel error:", error);
     res.status(500).json({ success: false, message: "Failed to export Excel report" });
+  }
+};
+
+// 🔹 DAY OVERRIDES (Advance Day Settings: Force Off Day ON / Force On Day OFF)
+exports.getDayOverridesList = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.orgId;
+    const { startDate, endDate, date } = req.query;
+    const list = await getDayOverrides({ organizationId, startDate, endDate, date });
+    res.json({ success: true, overrides: list });
+  } catch (err) {
+    console.error("Error fetching day overrides:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch day overrides" });
+  }
+};
+
+exports.saveDayOverride = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.orgId;
+    const createdById = req.user.id;
+    const { date, type, reason, scope, departmentId, companyId, employeeId } = req.body;
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: "Date is required" });
+    }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: "Reason is required" });
+    }
+
+    const created = await createDayOverride({
+      date,
+      type: type || "WORK_DAY",
+      reason: reason.trim(),
+      scope: scope || "ALL",
+      departmentId,
+      companyId,
+      employeeId,
+      organizationId,
+      createdById,
+    });
+
+    res.json({ success: true, override: created, message: "Day override saved successfully" });
+  } catch (err) {
+    console.error("Error saving day override:", err);
+    res.status(500).json({ success: false, message: "Failed to save day override" });
+  }
+};
+
+exports.removeDayOverride = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.orgId;
+    const { id } = req.params;
+    await deleteDayOverride(id, organizationId);
+    res.json({ success: true, message: "Day override removed successfully" });
+  } catch (err) {
+    console.error("Error removing day override:", err);
+    res.status(500).json({ success: false, message: "Failed to remove day override" });
   }
 };
 

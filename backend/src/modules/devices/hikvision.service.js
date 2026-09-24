@@ -27,6 +27,8 @@ const VALID_MINOR_CODES = new Set([
   83,  // Card, fingerprint, and password passed
   84,  // Card, face, and password passed
   85,  // Card, face, fingerprint, and password passed
+  86,  // Face authentication pass
+  87,  // Face comparison pass
   113, // Bluetooth passed
   115, // QR code verification / Access granted
   120, // Iris passed
@@ -269,11 +271,19 @@ function startHikvisionStream(device, processPunchCallback) {
     port: targetPort,
     path: path,
     method: "GET",
+    agent: false,
+    headers: {
+      Connection: "close",
+    },
   };
 
   const req = http.request(options, (res) => {
-    if (res.statusCode === 401 && res.headers["www-authenticate"]) {
-      const authHeader = res.headers["www-authenticate"];
+    res.resume(); // Drain probe response
+    const authHeader = res.headers["www-authenticate"];
+
+    if (res.statusCode === 401 && authHeader) {
+      req.destroy();
+
       const realmMatch = authHeader.match(/realm="([^"]+)"/);
       const nonceMatch = authHeader.match(/nonce="([^"]+)"/);
       const qopMatch = authHeader.match(/qop="([^"]+)"/);
@@ -291,50 +301,102 @@ function startHikvisionStream(device, processPunchCallback) {
       const digestHeader = `Digest username="${username || "admin"}", realm="${realm}", nonce="${nonce}", uri="${path}", response="${responseHash}", qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
 
       const streamOptions = {
-        ...options,
+        hostname: ipAddress,
+        port: targetPort,
+        path: path,
+        method: "GET",
+        agent: false,
         headers: {
           Authorization: digestHeader,
         },
       };
 
       const streamReq = http.request(streamOptions, (streamRes) => {
-        console.log(`[Hikvision Stream] Real-time socket connected to ${name} (${ipAddress}) [HTTP ${streamRes.statusCode}]`);
+        if (streamRes.statusCode !== 200) {
+          console.warn(
+            `[Hikvision Stream] ${name} (${ipAddress}) stream rejected [HTTP ${streamRes.statusCode}]. Will retry in 25s...`
+          );
+          streamRes.resume();
+          streamReq.destroy();
+          activeStreams.delete(id);
+          setTimeout(() => startHikvisionStream(device, processPunchCallback), 25000);
+          return;
+        }
+
+        console.log(`[Hikvision Stream] Real-time alert stream CONNECTED to ${name} (${ipAddress}) [HTTP 200 OK]`);
         activeStreams.set(id, streamReq);
 
         let streamBuffer = "";
 
         streamRes.on("data", (chunk) => {
-          streamBuffer += chunk.toString();
+          streamBuffer += chunk.toString("utf8");
 
-          // Process parts split by MIME boundary
-          const boundaryIdx = streamBuffer.indexOf("--");
-          if (boundaryIdx !== -1) {
-            const rawPart = streamBuffer.slice(0, boundaryIdx);
-            streamBuffer = streamBuffer.slice(boundaryIdx + 2);
+          // Extract and process any complete JSON objects in the stream buffer
+          while (true) {
+            const startIdx = streamBuffer.indexOf("{");
+            if (startIdx === -1) {
+              if (streamBuffer.length > 20000) {
+                streamBuffer = streamBuffer.slice(-2000);
+              }
+              break;
+            }
 
-            const jsonStart = rawPart.indexOf("{");
-            const jsonEnd = rawPart.lastIndexOf("}");
+            let depth = 0;
+            let endIdx = -1;
+            let inString = false;
+            let escape = false;
 
-            if (jsonStart !== -1 && jsonEnd > jsonStart) {
+            for (let i = startIdx; i < streamBuffer.length; i++) {
+              const char = streamBuffer[i];
+              if (escape) {
+                escape = false;
+                continue;
+              }
+              if (char === "\\") {
+                escape = true;
+                continue;
+              }
+              if (char === '"') {
+                inString = !inString;
+                continue;
+              }
+              if (!inString) {
+                if (char === "{") depth++;
+                else if (char === "}") {
+                  depth--;
+                  if (depth === 0) {
+                    endIdx = i;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (endIdx !== -1) {
+              const jsonStr = streamBuffer.slice(startIdx, endIdx + 1);
+              streamBuffer = streamBuffer.slice(endIdx + 1);
+
               try {
-                const parsed = JSON.parse(rawPart.slice(jsonStart, jsonEnd + 1));
+                const parsed = JSON.parse(jsonStr);
                 const eventObj = parsed?.AccessControllerEvent || parsed?.EventNotificationAlert || parsed;
 
                 const major = Number(eventObj?.majorEventType ?? eventObj?.major ?? parsed?.majorEventType ?? 0);
                 const minor = Number(eventObj?.subEventType ?? eventObj?.minor ?? parsed?.subEventType ?? 0);
                 const eventType = parsed?.eventType || eventObj?.eventType;
 
-                const isPunchEvent = (major === 5 || eventType === "AccessControllerEvent" || major === 0) &&
-                                     (VALID_MINOR_CODES.has(minor) || minor === 0);
-
                 const bioId = eventObj?.employeeNoString || eventObj?.employeeNo || eventObj?.cardNo;
+                const isPunchEvent =
+                  (major === 5 || eventType === "AccessControllerEvent" || major === 0) &&
+                  (VALID_MINOR_CODES.has(minor) || minor === 0);
 
                 if (bioId && isPunchEvent) {
                   const rawTime = eventObj?.eventTime || eventObj?.time || eventObj?.dateTime || parsed?.dateTime;
                   const punchTime = rawTime ? new Date(rawTime) : null;
 
                   if (punchTime && !isNaN(punchTime.getTime())) {
-                    console.log(`[Hikvision Stream] Punch verified: Bio ID ${bioId} (${eventObj?.name || 'Unknown'}) at ${punchTime.toISOString()}`);
+                    console.log(
+                      `[Hikvision Stream] Real-time punch verified: Bio ID ${bioId} (${eventObj?.name || "Unknown"}) at ${punchTime.toISOString()} from ${name}`
+                    );
                     if (typeof processPunchCallback === "function") {
                       processPunchCallback({
                         biometricId: String(bioId).trim(),
@@ -343,30 +405,36 @@ function startHikvisionStream(device, processPunchCallback) {
                         deviceName: name,
                         method: eventObj?.currentVerifyMode || "HIKVISION_FACE",
                         employeeName: eventObj?.name ? String(eventObj.name).trim() : null,
+                        direction: device.direction,
                       }).catch((err) => console.error("Error processing stream punch:", err));
                     }
                   }
                 }
               } catch (e) {
-                // Incomplete JSON fragment, continue
+                // Ignore parsing errors for non-event JSON fragments
               }
+            } else {
+              // Incomplete JSON object in buffer; keep buffer from startIdx and wait for next chunk
+              streamBuffer = streamBuffer.slice(startIdx);
+              break;
             }
           }
 
-          // Cap streamBuffer size to avoid runaway memory
-          if (streamBuffer.length > 500000) {
-            streamBuffer = streamBuffer.slice(-100000);
+          if (streamBuffer.length > 200000) {
+            streamBuffer = streamBuffer.slice(-50000);
           }
         });
 
         streamRes.on("end", () => {
-          console.log(`[Hikvision Stream] Stream disconnected from ${name}. Reconnecting in 10s...`);
+          console.log(`[Hikvision Stream] Stream ended from ${name}. Reconnecting in 10s...`);
+          streamReq.destroy();
           activeStreams.delete(id);
           setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
         });
 
         streamRes.on("error", (err) => {
           console.error(`[Hikvision Stream Error] ${name}:`, err.message);
+          streamReq.destroy();
           activeStreams.delete(id);
           setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
         });
@@ -374,18 +442,21 @@ function startHikvisionStream(device, processPunchCallback) {
 
       streamReq.on("error", (err) => {
         console.error(`[Hikvision Auth Stream Error] ${name}:`, err.message);
+        streamReq.destroy();
         activeStreams.delete(id);
         setTimeout(() => startHikvisionStream(device, processPunchCallback), 10000);
       });
 
       streamReq.end();
     } else {
-      console.warn(`[Hikvision Stream] Unexpected status HTTP ${res.statusCode} from ${name}`);
+      req.destroy();
+      console.warn(`[Hikvision Stream] Unexpected probe status HTTP ${res.statusCode} from ${name}`);
       setTimeout(() => startHikvisionStream(device, processPunchCallback), 15000);
     }
   });
 
   req.on("error", (err) => {
+    req.destroy();
     console.error(`[Hikvision Stream Req Error] ${name}:`, err.message);
     setTimeout(() => startHikvisionStream(device, processPunchCallback), 15000);
   });
@@ -497,6 +568,7 @@ async function syncHikvisionDeviceLogs(device, processPunchCallback, startTime =
         deviceName: device.name,
         method: ev.verifyMode || "HIKVISION_FACE",
         employeeName: ev.name,
+        direction: device.direction,
       });
       if (res?.success) processedCount++;
     }
@@ -517,42 +589,22 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
       where: {
         brand: "HIKVISION",
         deletedAt: null,
+        status: { not: "OFFLINE" },
       },
     });
 
-    console.log(`[Hikvision Streams] Initializing for ${devices.length} registered Hikvision device(s)...`);
+    console.log(`[Hikvision Streams] Initializing for ${devices.length} registered online Hikvision device(s)...`);
     for (const device of devices) {
       // 1. Start live alert stream
       startHikvisionStream(device, processPunchCallback);
 
-      // 2. Catch up today's logs immediately
+      // 2. Catch up today's logs immediately in background
       syncHikvisionDeviceLogs(device, processPunchCallback).catch((err) => {
         console.error(`[Hikvision Initial Sync Error] ${device.name}:`, err.message);
       });
     }
 
-    // Automatically trigger cross-device biometrics & fingerprint sync 10 seconds after startup
-    setTimeout(() => {
-      syncBiometricsAcrossDevices(prisma).catch((e) => {
-        console.error("[Hikvision Startup Biometrics Sync Error]:", e.message);
-      });
-    }, 10000);
-
-    // 3. Periodic safety-net sync every 60 seconds
-    if (!syncIntervalHandle) {
-      syncIntervalHandle = setInterval(async () => {
-        try {
-          const activeDevices = await prisma.biometricDevice.findMany({
-            where: { brand: "HIKVISION", deletedAt: null },
-          });
-          for (const dev of activeDevices) {
-            await syncHikvisionDeviceLogs(dev, processPunchCallback);
-          }
-        } catch (e) {
-          console.error("[Hikvision Periodic Sync Error]:", e.message);
-        }
-      }, 300 * 1000);
-    }
+    // Note: Periodic machine sync is handled centrally by cron.service.js every 30 minutes
   } catch (error) {
     console.error(`[Hikvision Streams Init Error]:`, error.message);
   }
@@ -670,7 +722,7 @@ async function pushHikvisionFingerprint(device, employeeNo, fp) {
 async function syncBiometricsAcrossDevices(prisma) {
   try {
     const devices = await prisma.biometricDevice.findMany({
-      where: { brand: "HIKVISION", deletedAt: null },
+      where: { brand: "HIKVISION", deletedAt: null, status: { not: "OFFLINE" } },
     });
 
     if (devices.length < 2) {

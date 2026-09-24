@@ -17,6 +17,7 @@ router.post("/", protect, controller.addDevice);
 router.put("/:id", protect, controller.updateDevice);
 router.delete("/:id", protect, controller.deleteDevice);
 router.post("/:id/test", protect, controller.testDeviceConnection);
+router.post("/sync-all", protect, controller.syncAllDevicesRoute);
 router.post("/:id/sync", protect, controller.syncDeviceLogs);
 router.post("/push-users", protect, controller.pushUsersToDevices);
 router.post("/sync-biometrics", protect, controller.triggerBiometricsCrossSync);

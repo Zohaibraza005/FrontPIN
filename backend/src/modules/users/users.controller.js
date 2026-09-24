@@ -327,6 +327,33 @@ exports.createEmployee = async (req, res) => {
       }
     }
 
+    // 🚀 Ensure Initial Schedule with Overtime Limits
+    try {
+      const maxHours = parsedPayroll.maxExtraHours ? parseInt(parsedPayroll.maxExtraHours) : (parsedPayroll.allowExtraHours ? 2 : 0);
+      const isOtAllowed = Boolean(parsedPayroll.allowExtraHours || maxHours > 0);
+      await prisma.schedule.create({
+        data: {
+          employeeId: employee.id,
+          companyId: employee.companyId || null,
+          startTime: "09:00",
+          endTime: "18:00",
+          days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+          overtimeAllowed: isOtAllowed,
+          overtimeMinutes: maxHours > 0 ? maxHours * 60 : 120,
+          allowEarlyIn: true,
+          earlyInMargin: 15,
+          allowEarlyOut: true,
+          earlyOutMargin: 15,
+          allowHalfDay: false,
+          halfDayMinutes: 240,
+          breaksAllowed: true,
+          breakDurations: [15, 15],
+        },
+      });
+    } catch (schedErr) {
+      console.warn("Initial schedule creation note:", schedErr.message);
+    }
+
     return res.status(201).json({
       success: true,
       data: employee,
@@ -442,12 +469,24 @@ exports.updateEmployee = async (req, res) => {
       updateData.profileImage = `/uploads/${req.file.filename}`;
     }
 
-    if (hiringDate || joiningDate || employmentStatus || workMode) {
+    const rawPayroll = parseField(req.body.payroll) || {};
+    const rawJob = parseField(req.body.job) || {};
+    const maxExtraHours = rawPayroll.maxExtraHours !== undefined
+      ? parseInt(rawPayroll.maxExtraHours)
+      : (rawJob.maxExtraHours !== undefined ? parseInt(rawJob.maxExtraHours) : (req.body.maxExtraHours !== undefined ? parseInt(req.body.maxExtraHours) : undefined));
+
+    const allowExtraHours = rawPayroll.allowExtraHours !== undefined
+      ? Boolean(rawPayroll.allowExtraHours)
+      : (rawJob.allowExtraHours !== undefined ? Boolean(rawJob.allowExtraHours) : (maxExtraHours !== undefined ? maxExtraHours > 0 : undefined));
+
+    if (hiringDate || joiningDate || employmentStatus || workMode || maxExtraHours !== undefined || allowExtraHours !== undefined) {
       const jobData = {
         ...(hiringDate && { hiringDate: new Date(hiringDate) }),
         ...(joiningDate && { joiningDate: new Date(joiningDate) }),
         ...(employmentStatus && { employmentStatus }),
         ...(workMode && { workMode }),
+        ...(allowExtraHours !== undefined && { allowExtraHours }),
+        ...(maxExtraHours !== undefined && { maxExtraHours: isNaN(maxExtraHours) ? 0 : maxExtraHours }),
       };
       updateData.jobInfo = {
         upsert: {
@@ -457,7 +496,6 @@ exports.updateEmployee = async (req, res) => {
       };
     }
 
-    const rawPayroll = parseField(req.body.payroll) || {};
     const payrollPayload = {
       ...(rawPayroll.currency || req.body.currency ? { currency: rawPayroll.currency || req.body.currency } : {}),
       ...((rawPayroll.payoutType || rawPayroll.rateType || req.body.payoutType || req.body.rateType) ? { payoutType: String(rawPayroll.payoutType || rawPayroll.rateType || req.body.payoutType || req.body.rateType) } : {}),
@@ -504,6 +542,28 @@ exports.updateEmployee = async (req, res) => {
         privileges: true,
       },
     });
+
+    if (maxExtraHours !== undefined || allowExtraHours !== undefined) {
+      try {
+        const activeSched = await prisma.schedule.findFirst({
+          where: { employeeId: parseInt(id), deletedAt: null },
+        });
+        const finalMaxHours = maxExtraHours !== undefined ? (isNaN(maxExtraHours) ? 0 : maxExtraHours) : null;
+        const isOtAllowed = allowExtraHours !== undefined ? allowExtraHours : (finalMaxHours !== null ? finalMaxHours > 0 : false);
+
+        if (activeSched) {
+          await prisma.schedule.update({
+            where: { id: activeSched.id },
+            data: {
+              overtimeAllowed: isOtAllowed,
+              overtimeMinutes: finalMaxHours !== null ? finalMaxHours * 60 : activeSched.overtimeMinutes,
+            },
+          });
+        }
+      } catch (schedErr) {
+        console.warn("Schedule overtime sync error:", schedErr.message);
+      }
+    }
 
     let privilegesToApply = Array.isArray(parsedPrivileges) ? parsedPrivileges : null;
     if ((!privilegesToApply || privilegesToApply.length === 0) && updateData.roleId) {
@@ -673,6 +733,25 @@ exports.deleteEmployee = async (req, res) => {
           id: true,
           firstName: true,
           lastName: true,
+          employeeId: true,
+          payroll: {
+            select: {
+              rate: true,
+              payoutType: true,
+              currency: true,
+              overtimeRate: true,
+            },
+          },
+          Schedule: {
+            where: { deletedAt: null },
+            select: {
+              startTime: true,
+              endTime: true,
+              days: true,
+              overtimeAllowed: true,
+              overtimeMinutes: true,
+            },
+          },
         },
         orderBy: { firstName: "asc" },
       });

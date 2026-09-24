@@ -65,6 +65,30 @@ export const Overtime: React.FC = () => {
     reason: "",
   });
 
+  const [punchVerification, setPunchVerification] = useState<{
+    loading: boolean;
+    checked: boolean;
+    hasAttendance: boolean;
+    checkInTime: string | null;
+    checkOutTime: string | null;
+    overtimeMinutes: number;
+    overtimeHours: number;
+    isVerified: boolean;
+    canRequest: boolean;
+    message: string;
+  }>({
+    loading: false,
+    checked: false,
+    hasAttendance: false,
+    checkInTime: null,
+    checkOutTime: null,
+    overtimeMinutes: 0,
+    overtimeHours: 0,
+    isVerified: false,
+    canRequest: true,
+    message: "",
+  });
+
   // 🔥 Load Data
   const loadData = async () => {
     try {
@@ -82,14 +106,93 @@ export const Overtime: React.FC = () => {
     loadData();
   }, []);
 
+  // 🔍 Verify Biometric Punch on employee or date change
+  useEffect(() => {
+    if (!open) {
+      setPunchVerification({
+        loading: false,
+        checked: false,
+        hasAttendance: false,
+        checkInTime: null,
+        checkOutTime: null,
+        overtimeMinutes: 0,
+        overtimeHours: 0,
+        isVerified: false,
+        canRequest: true,
+        message: "",
+      });
+      return;
+    }
+
+    const targetEmpId = user?.role === "ADMIN" ? formData.employeeId : (user?.id || formData.employeeId);
+    if (!targetEmpId || !formData.date) return;
+
+    let isMounted = true;
+    setPunchVerification((prev) => ({ ...prev, loading: true }));
+
+    overtimeAPI.verifyPunch(Number(targetEmpId), formData.date)
+      .then((res: any) => {
+        if (!isMounted) return;
+        setPunchVerification({
+          loading: false,
+          checked: true,
+          hasAttendance: Boolean(res.hasAttendance),
+          checkInTime: res.checkInTime || null,
+          checkOutTime: res.checkOutTime || null,
+          overtimeMinutes: Number(res.overtimeMinutes) || 0,
+          overtimeHours: Number(res.overtimeHours) || 0,
+          isVerified: Boolean(res.isVerified),
+          canRequest: Boolean(res.canRequest),
+          message: res.message || "",
+        });
+
+        // Auto-suggest hours from verified punch if hours is empty and not editing
+        if (!editing && res.isVerified && res.overtimeHours > 0) {
+          setFormData((prev) => {
+            if (!prev.hours || Number(prev.hours) === 0) {
+              return { ...prev, hours: String(res.overtimeHours) };
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setPunchVerification((prev) => ({ ...prev, loading: false, checked: true }));
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, formData.employeeId, formData.date]);
+
+  // Calculate employee hourly rate based on 9hr shift
+  const calculateEmpHourlyRate = (emp: any) => {
+    if (!emp || !emp.payroll || !emp.payroll.rate) return 0;
+    const baseWage = Number(emp.payroll.rate) || 0;
+    const payoutType = String(emp.payroll.payoutType || "monthly").toLowerCase();
+    const shiftHours = 9; // Standard 9-hour shift
+    if (emp.payroll.overtimeRate && Number(emp.payroll.overtimeRate) > 10) {
+      return Number(emp.payroll.overtimeRate);
+    }
+    if (payoutType === "hourly") return baseWage;
+    if (payoutType === "daily") return baseWage / shiftHours;
+    return baseWage / (26 * shiftHours);
+  };
+
   // 🔥 Open Modal for Adding
   const handleOpenAdd = () => {
     setEditing(null);
+    const targetId = user?.role === "ADMIN" ? "" : String(user?.id || "");
+    const targetEmp = employees.find((e) => String(e.id) === String(targetId));
+    const empOtRate = targetEmp?.payroll?.overtimeRate;
+    const defaultRate = empOtRate && Number(empOtRate) > 0 ? String(empOtRate) : "1.5";
     setFormData({
-      employeeId: user?.role === "ADMIN" ? "" : String(user?.id || ""),
+      employeeId: targetId,
       date: new Date().toISOString().slice(0, 10),
       hours: "",
-      rate: "1.5",
+      rate: defaultRate,
       reason: "",
     });
     setOpen(true);
@@ -98,11 +201,12 @@ export const Overtime: React.FC = () => {
   // 🔥 Open Modal for Editing (Populates stored data in real-time)
   const handleEdit = (ot: any) => {
     setEditing(ot);
+    const empOtRate = ot.employee?.payroll?.overtimeRate;
     setFormData({
       employeeId: String(ot.employeeId || ot.employee?.id || ""),
       date: ot.date ? ot.date.slice(0, 10) : "",
       hours: String(ot.hours ?? ""),
-      rate: String(ot.rate ?? "1.5"),
+      rate: String(ot.rate ?? empOtRate ?? "1.5"),
       reason: ot.reason || "",
     });
     setOpen(true);
@@ -129,6 +233,17 @@ export const Overtime: React.FC = () => {
     if (!formData.rate || isNaN(Number(formData.rate)) || Number(formData.rate) <= 0) {
       toast.error("Please enter a valid rate multiplier (> 0)");
       return;
+    }
+
+    if (user?.role === "USER") {
+      if (punchVerification.checked && !punchVerification.canRequest) {
+        toast.error(punchVerification.message || "Cannot submit overtime: Verified check-out punch required.");
+        return;
+      }
+      if (punchVerification.checked && punchVerification.overtimeHours > 0 && Number(formData.hours) > punchVerification.overtimeHours + 0.1) {
+        toast.error(`Requested hours (${formData.hours}h) cannot exceed your actual logged extra punch time (${punchVerification.overtimeHours}h).`);
+        return;
+      }
     }
 
     const payload = {
@@ -188,6 +303,15 @@ export const Overtime: React.FC = () => {
       toast.error(err?.response?.data?.message || err?.data?.message || err?.message || "Failed to update status");
     }
   };
+
+  const currentTargetId = user?.role === "ADMIN" ? formData.employeeId : (user?.id || formData.employeeId);
+  const selectedEmp = employees.find((e) => String(e.id) === String(currentTargetId));
+  const currentHourlyRate = calculateEmpHourlyRate(selectedEmp);
+  const currentHours = Number(formData.hours) || 0;
+  const currentMultiplier = Number(formData.rate) || 1.5;
+  const calculatedEstimatedAmount = currentHours > 0 && currentHourlyRate > 0
+    ? currentHours * currentHourlyRate * currentMultiplier
+    : 0;
 
   const filtered = overtimes.filter((ot) => {
     if (filterStatus !== "all" && ot.status !== filterStatus.toUpperCase())
@@ -318,9 +442,12 @@ export const Overtime: React.FC = () => {
                       ? `${ot.employee.firstName} ${ot.employee.lastName || ""}`.trim()
                       : "N/A";
 
-                    const displayAmount = ot.amount && ot.amount > 0
+                    const displayAmount = ot.amount && Number(ot.amount) > 0
                       ? Number(ot.amount)
-                      : (Number(ot.hours) || 0) * (Number(ot.rate) || 1);
+                      : (() => {
+                          const hRate = calculateEmpHourlyRate(ot.employee);
+                          return (Number(ot.hours) || 0) * (hRate > 0 ? hRate : 1) * (Number(ot.rate) || 1.5);
+                        })();
 
                     return (
                       <TableRow key={ot.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
@@ -463,9 +590,16 @@ export const Overtime: React.FC = () => {
                   placeholder="Select Employee"
                   searchPlaceholder="Search employee..."
                   value={formData.employeeId}
-                  onValueChange={(val) =>
-                    setFormData({ ...formData, employeeId: val })
-                  }
+                  onValueChange={(val) => {
+                    const selEmp = employees.find((e) => String(e.id) === String(val));
+                    const empOtRate = selEmp?.payroll?.overtimeRate;
+                    const defaultRate = empOtRate && Number(empOtRate) > 0 ? String(empOtRate) : "1.5";
+                    setFormData((prev) => ({
+                      ...prev,
+                      employeeId: val,
+                      rate: defaultRate,
+                    }));
+                  }}
                   options={employees.map((emp) => ({
                     value: String(emp.id),
                     label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
@@ -485,6 +619,56 @@ export const Overtime: React.FC = () => {
                 }
               />
             </div>
+
+            {/* Punch Verification Alert Card */}
+            {punchVerification.loading ? (
+              <div className="rounded-xl p-3 bg-gray-50 border border-gray-200 text-gray-500 text-xs flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                <span>Checking biometric punch & attendance records for this date...</span>
+              </div>
+            ) : punchVerification.checked && (
+              <div className={`rounded-xl p-3 border text-xs space-y-1.5 transition-all ${
+                punchVerification.isVerified
+                  ? "bg-emerald-50/80 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800/60"
+                  : punchVerification.hasAttendance
+                    ? "bg-amber-50/80 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800/60"
+                    : "bg-rose-50/80 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-800/60"
+              }`}>
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    {punchVerification.isVerified ? (
+                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    )}
+                    {punchVerification.isVerified
+                      ? "Biometric Punch Verified (30m+ Threshold Met)"
+                      : punchVerification.hasAttendance
+                        ? "Punch Found (Under 30m Threshold)"
+                        : "No Biometric Check-Out Punch Found"}
+                  </span>
+                  {punchVerification.isVerified && (
+                    <Badge variant="outline" className="bg-emerald-100/80 text-emerald-800 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-300 font-mono text-[10px]">
+                      {punchVerification.overtimeHours} hrs logged
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] opacity-90">
+                  {punchVerification.checkInTime && (
+                    <span>Check-In: <strong>{punchVerification.checkInTime}</strong></span>
+                  )}
+                  {punchVerification.checkOutTime && (
+                    <span>Check-Out: <strong>{punchVerification.checkOutTime}</strong></span>
+                  )}
+                  {punchVerification.overtimeMinutes > 0 && (
+                    <span>Logged Extra: <strong>{punchVerification.overtimeMinutes} mins</strong></span>
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed opacity-85">
+                  {punchVerification.message}
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -513,6 +697,34 @@ export const Overtime: React.FC = () => {
               </div>
             </div>
 
+            {selectedEmp && (
+              <div className="rounded-xl p-3 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200/90 dark:border-blue-800/60 space-y-1.5 transition-all">
+                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                  <span className="flex items-center gap-1 font-medium">
+                    <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    Hourly Rate (9hr Shift):
+                  </span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100 font-mono">
+                    Rs. {currentHourlyRate.toFixed(2)} / hr
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                  <span className="font-medium">Calculation:</span>
+                  <span className="font-mono text-gray-700 dark:text-gray-300 text-[11px]">
+                    {currentHours > 0 ? currentHours : 0} hrs × Rs. {currentHourlyRate.toFixed(2)} × {currentMultiplier}x
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-blue-200/80 dark:border-blue-800/60 flex items-center justify-between">
+                  <span className="text-xs font-bold text-blue-950 dark:text-blue-100">
+                    Calculated Overtime Pay:
+                  </span>
+                  <span className="text-base font-extrabold text-blue-700 dark:text-blue-300 font-mono">
+                    Rs. {calculatedEstimatedAmount.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-semibold text-gray-700 block mb-1">Reason</label>
               <Textarea
@@ -528,7 +740,10 @@ export const Overtime: React.FC = () => {
               <Button variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSubmit}>
+              <Button 
+                onClick={handleSubmit}
+                disabled={user?.role === "USER" && punchVerification.checked && !punchVerification.canRequest}
+              >
                 {user?.role === "ADMIN"
                   ? (editing ? "Update Overtime" : "Save Overtime")
                   : (editing ? "Update Request" : "Submit Request")}

@@ -53,10 +53,17 @@ import {
   Smartphone,
   Hash,
   ArrowDownRight,
-  ArrowUpRight
+  ArrowUpRight,
+  SlidersHorizontal,
+  Trash2,
+  Plus,
+  CalendarCheck,
+  CalendarX,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { deviceService } from '../services/device.service';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -65,6 +72,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "../components/ui/dialog";
 
 import {
@@ -250,7 +258,9 @@ const findAttendanceRecord = (attendanceList: any[], targetDateStr: string) => {
   return matches[0];
 };
 
-export const isScheduleOffDay = (schedules: any, date: Date | string): boolean => {
+export const isScheduleOffDay = (schedules: any, date: Date | string, overrideType?: string | null): boolean => {
+  if (overrideType === "WORK_DAY") return false;
+  if (overrideType === "OFF_DAY") return true;
   if (!schedules) return false;
   const list = Array.isArray(schedules) ? schedules : [schedules];
   const activeSched = list.find((s: any) => s && !s.deletedAt);
@@ -371,7 +381,7 @@ export const getEmployeeScheduleForDate = (schedules: any, date: Date | string, 
 export const getEmployeeDailyStatus = (emp: any, date: Date | string): string => {
   const targetDateStr = getFormattedDateStr(date);
   const record = findAttendanceRecord(emp?.Attendance || emp?.attendance, targetDateStr);
-  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, date);
+  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, date, record?.overrideType);
   const isFutureDate = isAfter(startOfDay(new Date(date)), startOfDay(new Date()));
 
   const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
@@ -471,7 +481,97 @@ export const Attendance: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncingMachine, setSyncingMachine] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  // Day Override State
+  const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
+  const [dayOverridesList, setDayOverridesList] = useState<any[]>([]);
+  const [loadingOverrides, setLoadingOverrides] = useState(false);
+  const [savingOverride, setSavingOverride] = useState(false);
+
+  // Day Override Form State
+  const [overrideType, setOverrideType] = useState<"WORK_DAY" | "OFF_DAY">("WORK_DAY");
+  const [overrideDate, setOverrideDate] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [overrideScope, setOverrideScope] = useState<"ALL" | "DEPARTMENT" | "LOCATION" | "EMPLOYEE">("ALL");
+  const [overrideDeptId, setOverrideDeptId] = useState<string>("");
+  const [overrideLocId, setOverrideLocId] = useState<string>("");
+  const [overrideEmpId, setOverrideEmpId] = useState<string>("");
+  const [overrideReason, setOverrideReason] = useState<string>("");
+
+  const loadDayOverrides = async () => {
+    try {
+      setLoadingOverrides(true);
+      const res = await attendanceAPI.getDayOverrides();
+      if (res && res.overrides) {
+        setDayOverridesList(res.overrides);
+      }
+    } catch (err: any) {
+      console.error("Error loading day overrides:", err);
+    } finally {
+      setLoadingOverrides(false);
+    }
+  };
+
+  const handleSaveDayOverride = async () => {
+    if (!overrideDate) {
+      toast.error("Please select a date for the override");
+      return;
+    }
+    if (!overrideReason || !overrideReason.trim()) {
+      toast.error("Please enter a reason for the override");
+      return;
+    }
+    if (overrideScope === "DEPARTMENT" && (!overrideDeptId || overrideDeptId === "all")) {
+      toast.error("Please select a specific department");
+      return;
+    }
+    if (overrideScope === "LOCATION" && (!overrideLocId || overrideLocId === "all")) {
+      toast.error("Please select a specific location");
+      return;
+    }
+    if (overrideScope === "EMPLOYEE" && (!overrideEmpId || overrideEmpId === "all")) {
+      toast.error("Please select a specific employee");
+      return;
+    }
+
+    try {
+      setSavingOverride(true);
+      await attendanceAPI.saveDayOverride({
+        date: overrideDate,
+        type: overrideType,
+        reason: overrideReason.trim(),
+        scope: overrideScope,
+        departmentId: overrideScope === "DEPARTMENT" ? Number(overrideDeptId) : null,
+        companyId: overrideScope === "LOCATION" ? Number(overrideLocId) : null,
+        employeeId: overrideScope === "EMPLOYEE" ? Number(overrideEmpId) : null,
+      });
+
+      toast.success(
+        overrideType === "WORK_DAY"
+          ? "Off-day successfully turned ON as a Working Day!"
+          : "Work day successfully turned OFF as an Admin Holiday!"
+      );
+      setOverrideReason("");
+      await loadDayOverrides();
+      await loadReport();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to save day override");
+    } finally {
+      setSavingOverride(false);
+    }
+  };
+
+  const handleDeleteDayOverride = async (id: number) => {
+    try {
+      await attendanceAPI.deleteDayOverride(id);
+      toast.success("Day override removed successfully");
+      await loadDayOverrides();
+      await loadReport();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to remove day override");
+    }
+  };
 
   // Pagination state for Daily View table
   const [currentPage, setCurrentPage] = useState(1);
@@ -562,7 +662,7 @@ export const Attendance: React.FC = () => {
     const cellDate = cellDateStr ? new Date(`${cellDateStr}T00:00:00`) : (day ? new Date(day) : new Date());
     const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
 
-    const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
+    const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate, record?.overrideType);
 
     const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
     const hasActualCheckInOnThisDate = Boolean(
@@ -632,8 +732,8 @@ export const Attendance: React.FC = () => {
     const isLeave = status === "LEAVE";
     const isAbsent = !hasWorked && !isOff && !isUpcoming && !isLeave;
 
-    // Disable tooltip and lock interactions for OFF (O), LEAVE (L), ABSENT (A), and UPCOMING (U) days
-    const isTooltipDisabled = isOff || isLeave || isAbsent || isUpcoming;
+    // Tooltip is enabled if there's an override, or for worked days
+    const isTooltipDisabled = !finalRecord.overrideType && (isOff || isLeave || isAbsent || isUpcoming);
 
     const config = STATUS_CONFIG[isOff ? "OFF_DAY" : (isUpcoming ? "UPCOMING_DAY" : status)] || STATUS_CONFIG["ABSENT"];
     const isUserMonthly = activeTab === "monthly" && user?.role === "USER";
@@ -641,18 +741,27 @@ export const Attendance: React.FC = () => {
     const cellElement = (
       <div
         onClick={() => {
-          if (isTooltipDisabled) {
+          if (isTooltipDisabled && !finalRecord.overrideType) {
             return;
           }
           setSelectedRecord(finalRecord);
           setEditModalOpen(true);
         }}
-        className={`${isTooltipDisabled ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.05] hover:shadow-md"} ${
+        className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.05] hover:shadow-md"} ${
           isUserMonthly
             ? "w-8 h-8 rounded-lg flex items-center justify-center mx-auto"
             : "rounded-md p-1"
         } ${config.cell}`}
       >
+        {/* Visual indicator dot for Day Override */}
+        {finalRecord.overrideType && (
+          <span
+            className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-gray-950 z-10 ${
+              finalRecord.overrideType === 'WORK_DAY' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+            }`}
+            title={finalRecord.overrideType === 'WORK_DAY' ? 'Admin Override: Forced ON (Working Day)' : 'Admin Override: Forced OFF (Holiday / Off Day)'}
+          />
+        )}
         {isUserMonthly ? (
           <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
             {status === "PRESENT"
@@ -701,7 +810,7 @@ export const Attendance: React.FC = () => {
       </div>
     );
 
-    if (isTooltipDisabled) {
+    if (isTooltipDisabled && !finalRecord.overrideType) {
       return cellElement;
     }
 
@@ -717,10 +826,51 @@ export const Attendance: React.FC = () => {
             className={`text-xs space-y-2 p-3.5 rounded-lg border shadow-xl backdrop-blur-md ${config.tooltip}`}
           >
             {/* Date */}
-            <div className="font-bold text-sm border-b border-white/20 pb-1.5 flex items-center gap-1.5">
-              <CalendarDays className="w-4 h-4" />
-              {format(new Date(finalRecord.date), "PPP")}
+            <div className="font-bold text-sm border-b border-white/20 pb-1.5 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <CalendarDays className="w-4 h-4" />
+                {format(new Date(finalRecord.date), "PPP")}
+              </div>
+              {finalRecord.overrideType && (
+                <span className={`text-[10px] uppercase font-mono px-1.5 py-0.5 rounded border ${
+                  finalRecord.overrideType === 'WORK_DAY'
+                    ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400/50'
+                    : 'bg-amber-500/30 text-amber-200 border-amber-400/50'
+                }`}>
+                  {finalRecord.overrideType === 'WORK_DAY' ? 'ON (Work Day)' : 'OFF (Admin Off)'}
+                </span>
+              )}
             </div>
+
+            {/* Day Override Alert / Reason Banner */}
+            {finalRecord.overrideType && (
+              <div className={`p-2.5 rounded-lg text-xs border ${
+                finalRecord.overrideType === 'WORK_DAY'
+                  ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-100'
+                  : 'bg-amber-950/80 border-amber-500/50 text-amber-100'
+              }`}>
+                <div className="font-bold flex items-center gap-1.5 mb-1 text-[11px]">
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    finalRecord.overrideType === 'WORK_DAY' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                  }`} />
+                  <span>
+                    {finalRecord.overrideType === 'WORK_DAY'
+                      ? 'Day Override: Working Day (ON)'
+                      : 'Day Override: Admin Off / Holiday (OFF)'}
+                  </span>
+                </div>
+                {finalRecord.overrideReason && (
+                  <div className="text-[11px] opacity-95 italic font-sans pl-3 border-l-2 border-white/30 my-1">
+                    "{finalRecord.overrideReason}"
+                  </div>
+                )}
+                {finalRecord.overrideScope && (
+                  <div className="text-[10px] opacity-80 font-mono mt-1">
+                    Scope: {finalRecord.overrideScope}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Status */}
             <div className="flex items-center gap-2">
@@ -873,6 +1023,21 @@ export const Attendance: React.FC = () => {
     }
   };
 
+  const handleSyncFromMachine = async () => {
+    try {
+      setSyncingMachine(true);
+      toast.loading("Connecting to machine & syncing punches...", { id: "sync-machine" });
+      const res = await deviceService.syncAllDevices();
+      toast.success(res?.message || "Punches synced from machine successfully!", { id: "sync-machine" });
+      await loadReport(false);
+    } catch (err: any) {
+      console.error("Machine sync failed:", err);
+      toast.error(err?.message || "Failed to sync from machine", { id: "sync-machine" });
+    } finally {
+      setSyncingMachine(false);
+    }
+  };
+
   const isNextDisabled = useMemo(() => {
     const today = startOfDay(new Date());
     const sel = startOfDay(selectedDate);
@@ -948,7 +1113,7 @@ export const Attendance: React.FC = () => {
       } else if (!st) {
         st = "ABSENT";
       }
-      const isOff = isScheduleOffDay(emp?.Schedule, selectedDate) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
+      const isOff = isScheduleOffDay(emp?.Schedule, selectedDate, rec?.overrideType) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
 
       if (st === "PRESENT") present++;
       else if (st === "LATE" || st === "TARDY") tardy++;
@@ -960,6 +1125,49 @@ export const Attendance: React.FC = () => {
 
     return { present, tardy, absent, leave, total: report.length };
   }, [report, selectedDate, activeTab]);
+
+  // Filtered report calculation based on statusFilter
+  const filteredReport = useMemo(() => {
+    if (!statusFilter || statusFilter === "all") {
+      return report;
+    }
+    const filterUpper = statusFilter.toUpperCase();
+
+    return report.filter((emp) => {
+      if (activeTab === "daily") {
+        const empStatus = getEmployeeDailyStatus(emp, selectedDate);
+        if (filterUpper === "TARDY") return empStatus === "TARDY" || empStatus === "LATE";
+        if (filterUpper === "OFF_DAY") return empStatus === "OFF_DAY" || empStatus === "OFF";
+        return empStatus === filterUpper;
+      }
+
+      // For weekly & monthly views: check if employee has this status on any day of the period, or on selectedDate
+      const records = emp.Attendance || emp.attendance || [];
+      const hasStatusInRecords = records.some((r: any) => {
+        const s = (r.status || "").toUpperCase();
+        if (filterUpper === "TARDY") return s === "TARDY" || s === "LATE";
+        if (filterUpper === "OFF_DAY") return s === "OFF_DAY" || s === "OFF";
+        return s === filterUpper;
+      });
+      if (hasStatusInRecords) return true;
+
+      const dailyStatus = getEmployeeDailyStatus(emp, selectedDate);
+      if (filterUpper === "TARDY") return dailyStatus === "TARDY" || dailyStatus === "LATE";
+      if (filterUpper === "OFF_DAY") return dailyStatus === "OFF_DAY" || dailyStatus === "OFF";
+      return dailyStatus === filterUpper;
+    });
+  }, [report, statusFilter, activeTab, selectedDate]);
+
+  // Pagination calculations (shared across Daily, Weekly, and Monthly views)
+  const totalEmployees = filteredReport.length;
+  const totalPages = Math.max(1, Math.ceil(totalEmployees / itemsPerPage));
+  const validPage = Math.min(currentPage, totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalEmployees);
+  const paginatedReport = useMemo(() => {
+    return filteredReport.slice(startIndex, endIndex);
+  }, [filteredReport, startIndex, endIndex]);
+  const paginatedDailyReport = paginatedReport;
 
   const renderTimesheetView = (start: Date, end: Date) => {
     const days = eachDayOfInterval({ start, end });
@@ -1050,7 +1258,7 @@ export const Attendance: React.FC = () => {
     return (
       <div className="w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950" style={{ width: "1000px" }}>
         {/* Scrollable container with sticky headers and sticky employee column */}
-        <div className="overflow-auto w-full max-w-full max-h-[calc(100vh-360px)] min-h-[250px]">
+        <div className="overflow-x-auto w-full max-w-full">
           <table className="w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md border-b border-gray-200 dark:bg-gray-900/95 dark:border-gray-800">
               <tr>
@@ -1111,7 +1319,7 @@ export const Attendance: React.FC = () => {
             </thead>
   
             <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
-              {filteredReport.map((emp) => {
+              {paginatedReport.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
                   const record = findAttendanceRecord(emp.Attendance || emp.attendance, dayStr);
@@ -1196,51 +1404,102 @@ export const Attendance: React.FC = () => {
             <p className="text-xs text-gray-400">Try adjusting your filters or date selection.</p>
           </div>
         )}
+
+        {/* Pagination Footer */}
+        {totalEmployees > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+              <span>
+                Showing <strong className="text-gray-700 dark:text-gray-200">{startIndex + 1}</strong> to{" "}
+                <strong className="text-gray-700 dark:text-gray-200">{endIndex}</strong> of{" "}
+                <strong className="text-gray-700 dark:text-gray-200">{totalEmployees}</strong> employees
+              </span>
+
+              <div className="flex items-center gap-1.5">
+                <span className="hidden sm:inline text-gray-500 dark:text-gray-400">Rows per page:</span>
+                <Select
+                  value={String(itemsPerPage)}
+                  onValueChange={(val) => {
+                    setItemsPerPage(Number(val));
+                    setCurrentPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[72px] text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 20, 50, 100].map((size) => (
+                      <SelectItem key={size} value={String(size)} className="text-xs">
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={validPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                Previous
+              </Button>
+
+              <div className="flex items-center gap-1">
+                {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                  if (item === "...") {
+                    return (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                      >
+                        ...
+                      </span>
+                    );
+                  }
+
+                  const pageNum = Number(item);
+                  const isActive = pageNum === validPage;
+
+                  return (
+                    <Button
+                      key={`page-${pageNum}`}
+                      variant={isActive ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                        isActive
+                          ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                          : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      {pageNum}
+                    </Button>
+                  );
+                })}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={validPage === totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5 ml-1" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
-
-  // Filtered report calculation based on statusFilter
-  const filteredReport = useMemo(() => {
-    if (!statusFilter || statusFilter === "all") {
-      return report;
-    }
-    const filterUpper = statusFilter.toUpperCase();
-
-    return report.filter((emp) => {
-      if (activeTab === "daily") {
-        const empStatus = getEmployeeDailyStatus(emp, selectedDate);
-        if (filterUpper === "TARDY") return empStatus === "TARDY" || empStatus === "LATE";
-        if (filterUpper === "OFF_DAY") return empStatus === "OFF_DAY" || empStatus === "OFF";
-        return empStatus === filterUpper;
-      }
-
-      // For weekly & monthly views: check if employee has this status on any day of the period, or on selectedDate
-      const records = emp.Attendance || emp.attendance || [];
-      const hasStatusInRecords = records.some((r: any) => {
-        const s = (r.status || "").toUpperCase();
-        if (filterUpper === "TARDY") return s === "TARDY" || s === "LATE";
-        if (filterUpper === "OFF_DAY") return s === "OFF_DAY" || s === "OFF";
-        return s === filterUpper;
-      });
-      if (hasStatusInRecords) return true;
-
-      const dailyStatus = getEmployeeDailyStatus(emp, selectedDate);
-      if (filterUpper === "TARDY") return dailyStatus === "TARDY" || dailyStatus === "LATE";
-      if (filterUpper === "OFF_DAY") return dailyStatus === "OFF_DAY" || dailyStatus === "OFF";
-      return dailyStatus === filterUpper;
-    });
-  }, [report, statusFilter, activeTab, selectedDate]);
-
-  // Daily View pagination calculations
-  const totalEmployees = filteredReport.length;
-  const totalPages = Math.max(1, Math.ceil(totalEmployees / itemsPerPage));
-  const validPage = Math.min(currentPage, totalPages);
-  const startIndex = (validPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, totalEmployees);
-  const paginatedDailyReport = useMemo(() => {
-    return filteredReport.slice(startIndex, endIndex);
-  }, [filteredReport, startIndex, endIndex]);
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
@@ -1254,16 +1513,32 @@ export const Attendance: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-2.5">
+          {user?.role !== 'USER' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsOverrideModalOpen(true);
+                loadDayOverrides();
+              }}
+              className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 hover:bg-indigo-100/80 text-indigo-700 dark:text-indigo-300 dark:bg-indigo-950/40 shadow-2xs rounded-xl transition-all"
+              title="Advance Settings: Turn Off-Days ON or On-Days OFF"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Advance Settings</span>
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
-            disabled={refreshing}
-            onClick={() => loadReport(true)}
+            disabled={syncingMachine || refreshing}
+            onClick={handleSyncFromMachine}
             className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl"
-            title="Real-time live refresh"
+            title="Fetch real-time punches from machine and update attendance"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-600" : "text-gray-500"}`} />
-            <span>Refresh</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${syncingMachine ? "animate-spin text-blue-600" : "text-gray-500"}`} />
+            <span>{syncingMachine ? "Syncing..." : "Sync From Machine"}</span>
           </Button>
 
           <Button
@@ -1502,7 +1777,7 @@ export const Attendance: React.FC = () => {
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
 
-                      const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate);
+                      const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate, record?.overrideType);
                       const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
 
                       const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
@@ -1642,9 +1917,24 @@ export const Attendance: React.FC = () => {
                           </TableCell>
 
                           <TableCell>
-                            <Badge className={`px-2.5 py-0.5 border font-semibold tracking-wide ${statusCfg.badge}`}>
-                              {finalRecord.status}
-                            </Badge>
+                            <div className="flex flex-col gap-1 items-start">
+                              <Badge className={`px-2.5 py-0.5 border font-semibold tracking-wide ${statusCfg.badge}`}>
+                                {finalRecord.status}
+                              </Badge>
+                              {finalRecord.overrideType && (
+                                <span 
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
+                                    finalRecord.overrideType === "WORK_DAY"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
+                                      : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                  }`}
+                                  title={finalRecord.overrideReason || ""}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${finalRecord.overrideType === "WORK_DAY" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                                  {finalRecord.overrideType === "WORK_DAY" ? "Override: ON" : "Override: OFF"}
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
 
                           {/* Action Buttons */}
@@ -2017,6 +2307,26 @@ export const Attendance: React.FC = () => {
             const empFullName = targetEmp ? `${targetEmp.firstName || ""} ${targetEmp.lastName || ""}`.trim() : "";
             const empIdCode = targetEmp?.employeeId || targetEmp?.id;
 
+            const sortedPunches = Array.isArray(viewRecord.punches) && viewRecord.punches.length > 0
+              ? [...viewRecord.punches].sort((a: any, b: any) => new Date(b.punchTime).getTime() - new Date(a.punchTime).getTime())
+              : [];
+
+            const latestPunch = sortedPunches[0] || null;
+
+            const recentAction = latestPunch ? {
+              type: latestPunch.type,
+              time: latestPunch.punchTime,
+              device: latestPunch.device,
+            } : (viewRecord.checkOutTime ? {
+              type: "CHECK_OUT",
+              time: viewRecord.checkOutTime,
+              device: viewRecord.checkOutDevice,
+            } : (viewRecord.checkInTime ? {
+              type: "CHECK_IN",
+              time: viewRecord.checkInTime,
+              device: viewRecord.checkInDevice,
+            } : null));
+
             return (
               <div className="space-y-5">
                 {/* Clean, Single-color Header */}
@@ -2061,7 +2371,16 @@ export const Attendance: React.FC = () => {
                         </div>
                       </div>
 
-                      {daySchedule ? (
+                      {viewRecord.overrideType ? (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                          viewRecord.overrideType === "WORK_DAY"
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300"
+                            : "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300"
+                        }`}>
+                          <span className={`w-2 h-2 rounded-full ${viewRecord.overrideType === "WORK_DAY" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                          {viewRecord.overrideType === "WORK_DAY" ? "Override: Working Day (ON)" : "Override: Admin Off (OFF)"}
+                        </span>
+                      ) : daySchedule ? (
                         daySchedule.isWorkingDay ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
                             Working Day
@@ -2077,6 +2396,13 @@ export const Attendance: React.FC = () => {
                         </span>
                       )}
                     </div>
+
+                    {viewRecord.overrideReason && (
+                      <div className="mt-2.5 p-2 rounded-lg bg-white/80 dark:bg-gray-900/60 border border-blue-200 dark:border-blue-900 text-xs">
+                        <span className="font-bold text-gray-700 dark:text-gray-300">Admin Override Reason: </span>
+                        <span className="italic text-gray-600 dark:text-gray-400">"{viewRecord.overrideReason}"</span>
+                      </div>
+                    )}
 
                     {daySchedule?.isWorkingDay ? (
                       <div className="space-y-2.5 pt-1">
@@ -2179,14 +2505,54 @@ export const Attendance: React.FC = () => {
                       </span>
                     </div>
 
-                    {((Number(viewRecord.overtimeHours) || 0) > 0 || (Number(viewRecord.overtimeMinutes) || 0) > 0) && (
-                      <div className="space-y-1 col-span-2 sm:col-span-4 pt-2 border-t border-gray-200 dark:border-gray-800">
+                    <div className="col-span-2 sm:col-span-4 pt-3 mt-1 border-t border-gray-200 dark:border-gray-800 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="space-y-1">
                         <span className="text-gray-400 font-medium block">Overtime</span>
                         <span className="font-bold text-purple-600 dark:text-purple-400 text-sm">
                           {formatMinutes(Math.round(((Number(viewRecord.overtimeHours) || 0) * 60) || Number(viewRecord.overtimeMinutes) || 0))}
                         </span>
                       </div>
-                    )}
+
+                      <div className="space-y-1 col-span-1 sm:col-span-3">
+                        <span className="text-gray-400 font-medium block">Recent Action</span>
+                        {recentAction ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge 
+                              variant="outline"
+                              className={`text-[11px] px-2 py-0.5 font-bold uppercase tracking-wider shrink-0 ${
+                                recentAction.type === "CHECK_IN" 
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
+                                  : "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300"
+                              }`}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {recentAction.type === "CHECK_IN" ? (
+                                  <>
+                                    <ArrowDownRight className="w-3.5 h-3.5 text-emerald-600" />
+                                    Recent Check In
+                                  </>
+                                ) : (
+                                  <>
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-blue-600" />
+                                    Recent Check Out
+                                  </>
+                                )}
+                              </span>
+                            </Badge>
+                            <span className="font-bold text-gray-900 dark:text-gray-100 text-sm font-mono">
+                              {recentAction.time ? format(new Date(recentAction.time), "hh:mm a") : "—"}
+                            </span>
+                            {recentAction.device && (
+                              <span className="text-xs text-gray-500 font-medium truncate max-w-[200px]">
+                                ({recentAction.device})
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="font-bold text-gray-500 text-sm">—</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2326,6 +2692,307 @@ export const Attendance: React.FC = () => {
             </div>
           );
         })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Day Override (Advance Settings) Modal ────────────────────── */}
+      <Dialog open={isOverrideModalOpen} onOpenChange={setIsOverrideModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 shadow-2xl">
+          <DialogHeader className="space-y-1.5 pb-4 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                <SlidersHorizontal className="w-5 h-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+                  Advance Settings — Day Override
+                </DialogTitle>
+                <DialogDescription className="text-xs text-gray-500">
+                  Override working calendar: Turn off-days into working days (ON) or declare emergency holidays / days off (OFF).
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-6 pt-4">
+            {/* 1. Toggle Selection: Turn OFF->ON vs Turn ON->OFF */}
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
+                Override Action Type
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOverrideType("WORK_DAY")}
+                  className={`p-3.5 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                    overrideType === "WORK_DAY"
+                      ? "border-emerald-500 bg-emerald-50/70 text-emerald-950 dark:bg-emerald-950/40 dark:border-emerald-500/80 dark:text-emerald-100 shadow-sm ring-2 ring-emerald-500/20"
+                      : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/40 text-gray-600 dark:text-gray-400"
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full mb-1.5">
+                    <span className="font-bold text-sm flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
+                      <CalendarCheck className="w-4 h-4" />
+                      Turn Off-Day → ON
+                    </span>
+                    {overrideType === "WORK_DAY" && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    )}
+                  </div>
+                  <p className="text-[11px] leading-snug opacity-80">
+                    Force Sunday or off-day into an official working day (e.g. IT deadline, shift compensation).
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOverrideType("OFF_DAY")}
+                  className={`p-3.5 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                    overrideType === "OFF_DAY"
+                      ? "border-amber-500 bg-amber-50/70 text-amber-950 dark:bg-amber-950/40 dark:border-amber-500/80 dark:text-amber-100 shadow-sm ring-2 ring-amber-500/20"
+                      : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/40 text-gray-600 dark:text-gray-400"
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full mb-1.5">
+                    <span className="font-bold text-sm flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                      <CalendarX className="w-4 h-4" />
+                      Turn Work Day → OFF
+                    </span>
+                    {overrideType === "OFF_DAY" && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                    )}
+                  </div>
+                  <p className="text-[11px] leading-snug opacity-80">
+                    Declare an admin off-day or emergency holiday (e.g. rain emergency, special holiday).
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Target Date & Scope Form */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Date */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Target Date *
+                </label>
+                <Input
+                  type="date"
+                  value={overrideDate}
+                  onChange={(e) => setOverrideDate(e.target.value)}
+                  className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800"
+                />
+              </div>
+
+              {/* Scope Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Applied Scope *
+                </label>
+                <Select
+                  value={overrideScope}
+                  onValueChange={(val: any) => {
+                    setOverrideScope(val);
+                    setOverrideDeptId("");
+                    setOverrideLocId("");
+                    setOverrideEmpId("");
+                  }}
+                >
+                  <SelectTrigger className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800">
+                    <SelectValue placeholder="Select target scope" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Employees</SelectItem>
+                    <SelectItem value="DEPARTMENT">Specific Department</SelectItem>
+                    <SelectItem value="LOCATION">Specific Location / Branch</SelectItem>
+                    <SelectItem value="EMPLOYEE">Specific Employee</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Sub-scope target selector */}
+            {overrideScope === "DEPARTMENT" && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Select Department *
+                </label>
+                <SearchableSelect
+                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
+                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
+                  icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Choose department..."
+                  searchPlaceholder="Search department..."
+                  value={overrideDeptId}
+                  onValueChange={setOverrideDeptId}
+                  options={departments.map((dept) => ({
+                    value: String(dept.id),
+                    label: dept.title || dept.name,
+                  }))}
+                />
+              </div>
+            )}
+
+            {overrideScope === "LOCATION" && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Select Location / Branch *
+                </label>
+                <SearchableSelect
+                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
+                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Choose branch / location..."
+                  searchPlaceholder="Search location..."
+                  value={overrideLocId}
+                  onValueChange={setOverrideLocId}
+                  options={locations.map((loc) => ({
+                    value: String(loc.id),
+                    label: loc.name,
+                  }))}
+                />
+              </div>
+            )}
+
+            {overrideScope === "EMPLOYEE" && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Select Employee *
+                </label>
+                <SearchableSelect
+                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
+                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
+                  icon={<User className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Choose employee..."
+                  searchPlaceholder="Search employee by name or ID..."
+                  value={overrideEmpId}
+                  onValueChange={setOverrideEmpId}
+                  options={employees.map((emp) => {
+                    const empCode = emp.employeeId ? ` (${emp.employeeId})` : "";
+                    const deptTitle = emp.department?.title || (typeof emp.department === "string" ? emp.department : "");
+                    return {
+                      value: String(emp.id),
+                      label: `${emp.firstName} ${emp.lastName || ""}${empCode}`.trim(),
+                      sublabel: deptTitle ? `Dept: ${deptTitle}` : undefined,
+                    };
+                  })}
+                />
+              </div>
+            )}
+
+            {/* Reason */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                Override Reason *
+              </label>
+              <Input
+                placeholder="e.g., Sunday Sprint for product launch / Heavy rain emergency holiday"
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800"
+              />
+              <p className="text-[11px] text-gray-400">
+                💡 This reason will be displayed in employee tooltips and attendance reports for this date.
+              </p>
+            </div>
+
+            {/* Apply Button */}
+            <div className="flex justify-end pt-2">
+              <Button
+                disabled={savingOverride}
+                onClick={handleSaveDayOverride}
+                className="h-10 px-5 text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all gap-2"
+              >
+                {savingOverride ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>Apply Day Override</span>
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* 3. Existing Overrides List */}
+            <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                  <CalendarDays className="w-4 h-4 text-indigo-500" />
+                  <span>Configured Overrides ({dayOverridesList.length})</span>
+                </h4>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadDayOverrides}
+                  disabled={loadingOverrides}
+                  className="h-7 text-xs px-2 text-gray-500 hover:text-gray-900"
+                >
+                  <RefreshCw className={`w-3 h-3 mr-1 ${loadingOverrides ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+              </div>
+
+              {loadingOverrides ? (
+                <div className="text-center py-6 text-xs text-gray-400">
+                  <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-blue-500" />
+                  Loading active overrides...
+                </div>
+              ) : dayOverridesList.length === 0 ? (
+                <div className="text-center py-6 bg-gray-50/60 dark:bg-gray-900/40 rounded-xl border border-dashed border-gray-200 dark:border-gray-800 text-xs text-gray-400">
+                  No active day overrides configured. Use the form above to add one.
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+                  {dayOverridesList.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900/60 flex items-start justify-between gap-3 text-xs shadow-2xs hover:border-gray-300 dark:hover:border-gray-700 transition-colors"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                            {format(new Date(`${item.date}T00:00:00`), "MMM d, yyyy")}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                              item.type === "WORK_DAY"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300"
+                                : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-300"
+                            }`}
+                          >
+                            {item.type === "WORK_DAY" ? "⚡ ON (Work Day)" : "🏖️ OFF (Holiday)"}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-[10px] font-mono">
+                            {item.scope === "ALL" && "All Employees"}
+                            {item.scope === "DEPARTMENT" && `Dept: ${item.departmentTitle || item.departmentId}`}
+                            {item.scope === "LOCATION" && `Branch: ${item.companyName || item.companyId}`}
+                            {item.scope === "EMPLOYEE" && `Employee: ${item.employeeName || item.employeeId}`}
+                          </span>
+                        </div>
+                        <p className="text-gray-700 dark:text-gray-300 italic text-[11px] break-words">
+                          "{item.reason}"
+                        </p>
+                      </div>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteDayOverride(item.id)}
+                        className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg shrink-0"
+                        title="Delete this override"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -25,4 +25,9 @@ router.get("/export-excel", protect, controller.exportAttendanceExcel);
 // 🔹 Update Attendance
 router.put("/:id", protect, controller.updateAttendance);
 
+// 🔹 Day Overrides (Turn Off Day ON / Turn On Day OFF)
+router.get("/day-overrides", protect, controller.getDayOverridesList);
+router.post("/day-overrides", protect, controller.saveDayOverride);
+router.delete("/day-overrides/:id", protect, controller.removeDayOverride);
+
 module.exports = router;

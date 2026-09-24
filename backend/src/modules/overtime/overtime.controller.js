@@ -40,6 +40,46 @@ function isOffDay(schedules, date, timezone = null) {
   return !isWorkingDay;
 }
 
+/**
+ * Calculate accurate Hourly Rate for an employee:
+ * - If employee has explicit overtimeRate configured (> 0), use that.
+ * - If payoutType === 'hourly': baseRate
+ * - If payoutType === 'daily': baseRate / shiftHours (default 9 hours)
+ * - If payoutType === 'monthly' (default):
+ *     dailyRate = baseRate / (workingDaysPerMonth || 26)
+ *     hourlyRate = dailyRate / shiftHours (office shift: 9 hours)
+ */
+function calculateHourlyRate(employeePayroll, schedule = null) {
+  if (!employeePayroll || !employeePayroll.rate) return 0;
+
+  // 1. If explicit fixed hourly rate in PKR is configured (> 10, e.g. 500/hr, not a multiplier like 1.5)
+  if (employeePayroll.overtimeRate && Number(employeePayroll.overtimeRate) > 10) {
+    return Number(employeePayroll.overtimeRate);
+  }
+
+  const baseRate = Number(employeePayroll.rate) || 0;
+  const payoutType = String(employeePayroll.payoutType || "monthly").toLowerCase();
+
+  // 2. Standard office shift hours: 9 hours
+  const shiftHours = 9;
+
+  if (payoutType === "hourly") {
+    return baseRate;
+  }
+
+  if (payoutType === "daily") {
+    return baseRate / shiftHours;
+  }
+
+  // Monthly: Standard 26 working days
+  const workingDaysPerMonth = 26;
+  const dailyRate = baseRate / workingDaysPerMonth;
+  const hourlyRate = dailyRate / shiftHours;
+  return hourlyRate;
+}
+
+exports.calculateHourlyRate = calculateHourlyRate;
+
 exports.createOvertime = async (req, res) => {
   try {
     const role = req.user.role;
@@ -66,15 +106,59 @@ exports.createOvertime = async (req, res) => {
       });
     }
 
-    const baseRate = employee.payroll?.rate || 0;
-    const amount = Number(hours) * baseRate * Number(rate);
+    // 🔍 Punch vs Request Verification
+    const startOfDay = moment(date).startOf("day").toDate();
+    const endOfDay = moment(date).endOf("day").toDate();
+    const attendance = await prisma.attendance.findFirst({
+      where: {
+        employeeId: Number(targetEmployeeId),
+        date: { gte: startOfDay, lte: endOfDay },
+        deletedAt: null,
+      },
+    });
+
+    if (role === "USER") {
+      if (!attendance || !attendance.checkOutTime) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot request overtime: No verified check-out punch found on this date."
+        });
+      }
+
+      const loggedOtMinutes = Number(attendance.overtimeMinutes) || 0;
+      if (loggedOtMinutes < 30) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot request overtime: Your check-out punch does not meet the minimum 30-minute threshold."
+        });
+      }
+
+      const loggedOtHours = loggedOtMinutes / 60;
+      if (Number(hours) > loggedOtHours + 0.1) {
+        return res.status(400).json({
+          success: false,
+          message: `Requested overtime (${hours} hrs) exceeds your actual logged extra punch time (${loggedOtHours.toFixed(2)} hrs).`
+        });
+      }
+    }
+
+    const hourlyRate = calculateHourlyRate(employee.payroll, employee.Schedule);
+    let multiplier = Number(rate);
+    if (!multiplier || isNaN(multiplier) || multiplier <= 0) {
+      if (employee.payroll?.overtimeRate && Number(employee.payroll.overtimeRate) <= 10 && Number(employee.payroll.overtimeRate) > 0) {
+        multiplier = Number(employee.payroll.overtimeRate);
+      } else {
+        multiplier = 1.5;
+      }
+    }
+    const amount = Number((Number(hours) * hourlyRate * multiplier).toFixed(2));
     const targetStatus = role === "USER" ? "PENDING" : "APPROVED";
 
     const overtime = await prisma.overtime.create({
       data: {
         date: new Date(date),
         hours: Number(hours),
-        rate: Number(rate),
+        rate: multiplier,
         amount,
         reason,
         status: targetStatus,
@@ -145,7 +229,12 @@ exports.getOvertimes = async (req, res) => {
         },
       },
       include: {
-        employee: true,
+        employee: {
+          include: {
+            payroll: true,
+            Schedule: { where: { deletedAt: null } },
+          },
+        },
         createdBy: true,
         reviewedBy: true,
       },
@@ -211,10 +300,47 @@ exports.updateOvertime = async (req, res) => {
       });
     }
 
+    if (req.user.role === "USER") {
+      const startOfDay = moment(targetDate).startOf("day").toDate();
+      const endOfDay = moment(targetDate).endOf("day").toDate();
+      const attendance = await prisma.attendance.findFirst({
+        where: {
+          employeeId: Number(targetEmployeeId),
+          date: { gte: startOfDay, lte: endOfDay },
+          deletedAt: null,
+        },
+      });
+
+      if (!attendance || !attendance.checkOutTime) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot update overtime: No verified check-out punch found on this date."
+        });
+      }
+
+      const loggedOtMinutes = Number(attendance.overtimeMinutes) || 0;
+      if (loggedOtMinutes < 30) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot update overtime: Your check-out punch did not meet the minimum 30-minute threshold."
+        });
+      }
+
+      const loggedOtHours = loggedOtMinutes / 60;
+      const hoursToVerify = hours !== undefined ? Number(hours) : existing.hours;
+      if (hoursToVerify > loggedOtHours + 0.1) {
+        return res.status(400).json({
+          success: false,
+          message: `Requested overtime (${hoursToVerify} hrs) exceeds your actual logged extra punch time (${loggedOtHours.toFixed(2)} hrs).`
+        });
+      }
+    }
+
     const newHours = hours !== undefined ? Number(hours) : existing.hours;
     const newRate = (req.user.role === "ADMIN" && rate !== undefined) ? Number(rate) : existing.rate;
-    const baseRate = employee.payroll?.rate || 0;
-    const amount = newHours * baseRate * newRate;
+    const hourlyRate = calculateHourlyRate(employee.payroll, employee.Schedule);
+    const multiplier = Number(newRate) || 1.5;
+    const amount = Number((newHours * hourlyRate * multiplier).toFixed(2));
 
     const dataToUpdate = {
       employeeId: targetEmployeeId,
@@ -285,8 +411,9 @@ exports.updateOvertimeStatus = async (req, res) => {
 
     const newHours = hours !== undefined ? Number(hours) : existing.hours;
     const newRate = rate !== undefined ? Number(rate) : existing.rate;
-    const baseRate = employee?.payroll?.rate || 0;
-    const amount = newHours * baseRate * newRate;
+    const hourlyRate = calculateHourlyRate(employee?.payroll, employee?.Schedule);
+    const multiplier = Number(newRate) || 1.5;
+    const amount = Number((newHours * hourlyRate * multiplier).toFixed(2));
 
     const dataToUpdate = {
       employeeId: targetEmployeeId,
@@ -348,4 +475,82 @@ exports.deleteOvertime = async (req, res) => {
     res.status(500).json({ message: "Error deleting overtime" });
   }
 };
+
+exports.verifyPunch = async (req, res) => {
+  try {
+    const { employeeId, date } = req.query;
+    if (!employeeId || !date) {
+      return res.status(400).json({ success: false, message: "employeeId and date are required" });
+    }
+
+    const targetEmpId = req.user.role === "USER" ? req.user.id : Number(employeeId);
+    const startOfDay = moment(date).startOf("day").toDate();
+    const endOfDay = moment(date).endOf("day").toDate();
+
+    const employee = await prisma.employee.findUnique({
+      where: { id: targetEmpId },
+      include: {
+        company: true,
+        payroll: true,
+        Schedule: { where: { deletedAt: null } }
+      }
+    });
+
+    if (!employee) {
+      return res.status(404).json({ success: false, message: "Employee not found" });
+    }
+
+    const timezone = employee.company?.timezone || "Asia/Karachi";
+    const attendance = await prisma.attendance.findFirst({
+      where: {
+        employeeId: targetEmpId,
+        date: { gte: startOfDay, lte: endOfDay },
+        deletedAt: null,
+      }
+    });
+
+    if (!attendance) {
+      return res.json({
+        success: true,
+        hasAttendance: false,
+        status: "NO_RECORD",
+        checkInTime: null,
+        checkOutTime: null,
+        overtimeMinutes: 0,
+        overtimeHours: 0,
+        isVerified: false,
+        canRequest: req.user.role === "ADMIN",
+        message: "No attendance punch recorded on this date."
+      });
+    }
+
+    const checkInStr = attendance.checkInTime ? moment(attendance.checkInTime).tz(timezone).format("hh:mm A") : null;
+    const checkOutStr = attendance.checkOutTime ? moment(attendance.checkOutTime).tz(timezone).format("hh:mm A") : null;
+    const otMinutes = Number(attendance.overtimeMinutes) || 0;
+    const otHours = Number((otMinutes / 60).toFixed(2));
+    const isVerified = Boolean(attendance.checkOutTime && otMinutes >= 30);
+
+    return res.json({
+      success: true,
+      hasAttendance: true,
+      status: attendance.status,
+      checkInTime: checkInStr,
+      checkOutTime: checkOutStr,
+      totalWorkedMinutes: attendance.totalWorkedMinutes || 0,
+      overtimeMinutes: otMinutes,
+      overtimeHours: otHours,
+      isVerified,
+      canRequest: req.user.role === "ADMIN" || isVerified,
+      message: isVerified
+        ? `Punch verified: Checked out at ${checkOutStr} with ${otHours}h (${otMinutes}m) extra.`
+        : attendance.checkOutTime
+          ? `Check-out at ${checkOutStr} does not meet the 30-min threshold (logged: ${otMinutes}m).`
+          : "Checked in, but no check-out punch recorded yet."
+    });
+  } catch (error) {
+    console.error("Error verifying punch:", error);
+    res.status(500).json({ success: false, message: "Error verifying punch" });
+  }
+};
+
   

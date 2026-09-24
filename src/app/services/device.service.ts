@@ -9,6 +9,7 @@ export interface BiometricDevice {
   username?: string;
   password?: string;
   companyId?: number;
+  direction?: "CHECK_IN" | "CHECK_OUT" | "AUTO";
   status: "ONLINE" | "OFFLINE";
   lastSyncedAt?: string;
   createdAt: string;
@@ -43,6 +44,10 @@ export const deviceService = {
 
   syncLogs: async (id: number) => {
     return await apiCall(`/devices/${id}/sync`, { method: "POST" });
+  },
+
+  syncAllDevices: async () => {
+    return await apiCall("/devices/sync-all", { method: "POST" });
   },
 
   pushUsers: async (employeeId?: number) => {

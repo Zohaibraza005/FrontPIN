@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment");
+const { calculateHourlyRate } = require("../overtime/overtime.controller");
 
 exports.createPayroll = async (req, res) => {
   try {
@@ -100,9 +101,15 @@ exports.createPayroll = async (req, res) => {
       }
     });
 
+    const hourlyRate = calculateHourlyRate(employee.payroll, employee.Schedule);
     const overtimeHours = overtimes.reduce((sum, o) => sum + (Number(o.hours) || 0), 0);
     const overtimeAmount = overtimes.reduce(
-      (sum, o) => sum + ((Number(o.hours) || 0) * rate * (Number(o.rate) || 1)),
+      (sum, o) => {
+        if (o.amount !== undefined && o.amount !== null && Number(o.amount) > 0) {
+          return sum + Number(o.amount);
+        }
+        return sum + ((Number(o.hours) || 0) * hourlyRate * (Number(o.rate) || 1.5));
+      },
       0
     );
 
@@ -1290,6 +1297,7 @@ exports.getPayrollStats = async (req, res) => {
         ]
       },
       include: {
+        components: true,
         employee: {
           include: {
             department: true
@@ -1300,7 +1308,12 @@ exports.getPayrollStats = async (req, res) => {
 
     const totalGross = payrolls.reduce((s, p) => s + (p.grossSalary || 0), 0);
     const totalNet = payrolls.reduce((s, p) => s + (p.netSalary || 0), 0);
-    const totalOvertime = payrolls.reduce((s, p) => s + ((p.overtimeHours || 0) * (p.rate || 0)), 0);
+    const totalOvertime = payrolls.reduce((s, p) => {
+      const otComp = (p.components || []).find(c => String(c.type || "").toUpperCase() === "OVERTIME");
+      if (otComp) return s + (Number(otComp.amount) || 0);
+      const hRate = p.payoutType === "hourly" ? (p.rate || 0) : (p.rate ? (p.rate / (26 * 9)) : 0);
+      return s + ((Number(p.overtimeHours) || 0) * hRate);
+    }, 0);
     const totalAbsentDays = payrolls.reduce((s, p) => s + (p.absentDays || 0), 0);
     const totalLeaveDays = payrolls.reduce((s, p) => s + (p.leaveDays || 0), 0);
 
@@ -1649,11 +1662,19 @@ exports.getRiskAlerts = async (req, res) => {
             }
           }
         ]
+      },
+      include: {
+        components: true,
       }
     });
 
     const totalNet = payrolls.reduce((s, p) => s + p.netSalary, 0);
-    const totalOvertime = payrolls.reduce((s, p) => s + p.overtimeHours * p.rate, 0);
+    const totalOvertime = payrolls.reduce((s, p) => {
+      const otComp = (p.components || []).find(c => String(c.type || "").toUpperCase() === "OVERTIME");
+      if (otComp) return s + (Number(otComp.amount) || 0);
+      const hRate = p.payoutType === "hourly" ? (p.rate || 0) : (p.rate ? (p.rate / (26 * 9)) : 0);
+      return s + ((Number(p.overtimeHours) || 0) * hRate);
+    }, 0);
 
     const overtimePercent = totalNet > 0 ? (totalOvertime / totalNet) * 100 : 0;
 
