@@ -511,6 +511,7 @@ getAdminDashboard: async (companyId?: number | string) => {
   },
 
   saveDayOverride: async (data: {
+    id?: number;
     date: string;
     type: "WORK_DAY" | "OFF_DAY";
     reason: string;
@@ -521,6 +522,24 @@ getAdminDashboard: async (companyId?: number | string) => {
   }) => {
     return apiCall("/attendance/day-overrides", {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateDayOverride: async (
+    id: number,
+    data: {
+      date: string;
+      type: "WORK_DAY" | "OFF_DAY";
+      reason: string;
+      scope: "ALL" | "DEPARTMENT" | "LOCATION" | "EMPLOYEE";
+      departmentId?: number | null;
+      companyId?: number | null;
+      employeeId?: number | null;
+    }
+  ) => {
+    return apiCall(`/attendance/day-overrides/${id}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   },

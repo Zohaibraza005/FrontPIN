@@ -28,6 +28,7 @@ router.put("/:id", protect, controller.updateAttendance);
 // 🔹 Day Overrides (Turn Off Day ON / Turn On Day OFF)
 router.get("/day-overrides", protect, controller.getDayOverridesList);
 router.post("/day-overrides", protect, controller.saveDayOverride);
+router.put("/day-overrides/:id", protect, controller.updateDayOverride);
 router.delete("/day-overrides/:id", protect, controller.removeDayOverride);
 
 module.exports = router;

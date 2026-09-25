@@ -2600,13 +2600,17 @@ exports.saveDayOverride = async (req, res) => {
   try {
     const organizationId = req.user.organizationId || req.user.orgId;
     const createdById = req.user.id;
-    const { date, type, reason, scope, departmentId, companyId, employeeId } = req.body;
+    const { id, date, type, reason, scope, departmentId, companyId, employeeId } = req.body;
 
     if (!date) {
       return res.status(400).json({ success: false, message: "Date is required" });
     }
     if (!reason || !reason.trim()) {
       return res.status(400).json({ success: false, message: "Reason is required" });
+    }
+
+    if (id) {
+      await deleteDayOverride(id, organizationId);
     }
 
     const created = await createDayOverride({
@@ -2625,6 +2629,43 @@ exports.saveDayOverride = async (req, res) => {
   } catch (err) {
     console.error("Error saving day override:", err);
     res.status(500).json({ success: false, message: "Failed to save day override" });
+  }
+};
+
+exports.updateDayOverride = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.orgId;
+    const createdById = req.user.id;
+    const { id } = req.params;
+    const { date, type, reason, scope, departmentId, companyId, employeeId } = req.body;
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: "Date is required" });
+    }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: "Reason is required" });
+    }
+
+    if (id) {
+      await deleteDayOverride(id, organizationId);
+    }
+
+    const updated = await createDayOverride({
+      date,
+      type: type || "WORK_DAY",
+      reason: reason.trim(),
+      scope: scope || "ALL",
+      departmentId,
+      companyId,
+      employeeId,
+      organizationId,
+      createdById,
+    });
+
+    res.json({ success: true, override: updated, message: "Day override updated successfully" });
+  } catch (err) {
+    console.error("Error updating day override:", err);
+    res.status(500).json({ success: false, message: "Failed to update day override" });
   }
 };
 

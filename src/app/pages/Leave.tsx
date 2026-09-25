@@ -25,6 +25,8 @@ import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Plus, Check, X, Eye, Trash2, Pencil, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { DatePickerWithRange } from "../components/ui/date-range-picker";
+import type { DateRange } from "react-day-picker";
 
 const getPaginationRange = (current: number, total: number) => {
   if (total <= 7) {
@@ -68,6 +70,7 @@ export const Leave: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<string>("all");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   useEffect(() => {
     locationAPI.getLocations().then((res) => setLocations(res.data || [])).catch(() => {});
@@ -291,8 +294,13 @@ const calculateDays = (start: string, end: string) => {
         filterStartStr = format(startOfYear(now), "yyyy-MM-dd");
         filterEndStr = format(endOfYear(now), "yyyy-MM-dd");
       } else if (dateFilter === "custom") {
-        filterStartStr = customStartDate;
-        filterEndStr = customEndDate;
+        if (dateRange?.from) {
+          filterStartStr = format(dateRange.from, "yyyy-MM-dd");
+          filterEndStr = dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : filterStartStr;
+        } else {
+          filterStartStr = customStartDate;
+          filterEndStr = customEndDate;
+        }
       }
 
       if (filterStartStr && lEndStr < filterStartStr) return false;
@@ -307,7 +315,7 @@ const calculateDays = (start: string, end: string) => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedLocation, dateFilter, customStartDate, customEndDate]);
+  }, [selectedLocation, dateFilter, customStartDate, customEndDate, dateRange]);
 
   const totalItems = filteredLeaves.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
@@ -443,8 +451,34 @@ const calculateDays = (start: string, end: string) => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger className="w-[165px] min-w-[165px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0">
+              <Select
+                value={dateFilter}
+                onValueChange={(val) => {
+                  setDateFilter(val);
+                  const now = new Date();
+                  if (val === "this_week") {
+                    setDateRange({
+                      from: startOfWeek(now, { weekStartsOn: 1 }),
+                      to: endOfWeek(now, { weekStartsOn: 1 }),
+                    });
+                  } else if (val === "this_month") {
+                    setDateRange({
+                      from: startOfMonth(now),
+                      to: endOfMonth(now),
+                    });
+                  } else if (val === "this_year") {
+                    setDateRange({
+                      from: startOfYear(now),
+                      to: endOfYear(now),
+                    });
+                  } else if (val === "all") {
+                    setDateRange(undefined);
+                    setCustomStartDate("");
+                    setCustomEndDate("");
+                  }
+                }}
+              >
+                <SelectTrigger className="w-[155px] min-w-[155px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0">
                   <div className="flex items-center gap-2 truncate">
                     <Calendar className="w-4 h-4 text-gray-500 shrink-0" />
                     <SelectValue placeholder="Filter Date" />
@@ -460,21 +494,21 @@ const calculateDays = (start: string, end: string) => {
               </Select>
 
               {dateFilter === "custom" && (
-                <div className="flex items-center gap-2 bg-white dark:bg-gray-950 px-2.5 h-9 border border-gray-200 dark:border-gray-800 rounded-md shadow-xs shrink-0">
-                  <Input
-                    type="date"
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="h-7 w-[125px] text-xs border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-gray-700 dark:text-gray-200"
-                  />
-                  <span className="text-xs text-gray-400 font-medium">to</span>
-                  <Input
-                    type="date"
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="h-7 w-[125px] text-xs border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-gray-700 dark:text-gray-200"
-                  />
-                </div>
+                <DatePickerWithRange
+                  date={dateRange}
+                  setDate={(range) => {
+                    setDateRange(range);
+                    if (range?.from) {
+                      setCustomStartDate(format(range.from, "yyyy-MM-dd"));
+                      setCustomEndDate(range.to ? format(range.to, "yyyy-MM-dd") : format(range.from, "yyyy-MM-dd"));
+                    } else {
+                      setCustomStartDate("");
+                      setCustomEndDate("");
+                    }
+                  }}
+                  placeholder="Select custom date range..."
+                  align="end"
+                />
               )}
 
               {locations.length > 0 && (

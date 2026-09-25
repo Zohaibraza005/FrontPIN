@@ -39,6 +39,8 @@ import {
 } from "../components/ui/table";
 import { FileSpreadsheet, Printer } from "lucide-react";
 import { toast } from "sonner";
+import { DatePickerWithRange } from "../components/ui/date-range-picker";
+import type { DateRange as RangeType } from "react-day-picker";
 import {
   LineChart,
   Line,
@@ -651,33 +653,27 @@ export const Reports: React.FC = () => {
                 </Select>
 
                 {dateRange === "custom" && (
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      type="date"
-                      value={startDate}
-                      max={new Date().toISOString().split("T")[0]}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const todayStr = new Date().toISOString().split("T")[0];
-                        if (val && val > todayStr) return;
-                        setStartDate(val);
-                      }}
-                      className="w-[130px] h-9 text-xs"
-                    />
-                    <span className="text-xs text-muted-foreground">to</span>
-                    <Input
-                      type="date"
-                      value={endDate}
-                      max={new Date().toISOString().split("T")[0]}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const todayStr = new Date().toISOString().split("T")[0];
-                        if (val && val > todayStr) return;
-                        setEndDate(val);
-                      }}
-                      className="w-[130px] h-9 text-xs"
-                    />
-                  </div>
+                  <DatePickerWithRange
+                    date={
+                      startDate
+                        ? {
+                            from: new Date(`${startDate}T00:00:00`),
+                            to: endDate ? new Date(`${endDate}T00:00:00`) : undefined,
+                          }
+                        : undefined
+                    }
+                    setDate={(range: RangeType | undefined) => {
+                      if (range?.from) {
+                        setStartDate(format(range.from, "yyyy-MM-dd"));
+                        setEndDate(range.to ? format(range.to, "yyyy-MM-dd") : format(range.from, "yyyy-MM-dd"));
+                      } else {
+                        setStartDate("");
+                        setEndDate("");
+                      }
+                    }}
+                    placeholder="Select date range..."
+                    align="end"
+                  />
                 )}
 
                 <SearchableSelect

@@ -59,7 +59,10 @@ import {
   Plus,
   CalendarCheck,
   CalendarX,
-  AlertTriangle
+  AlertTriangle,
+  Check,
+  X,
+  Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
@@ -489,6 +492,7 @@ export const Attendance: React.FC = () => {
   const [dayOverridesList, setDayOverridesList] = useState<any[]>([]);
   const [loadingOverrides, setLoadingOverrides] = useState(false);
   const [savingOverride, setSavingOverride] = useState(false);
+  const [editingOverrideId, setEditingOverrideId] = useState<number | null>(null);
 
   // Day Override Form State
   const [overrideType, setOverrideType] = useState<"WORK_DAY" | "OFF_DAY">("WORK_DAY");
@@ -498,6 +502,28 @@ export const Attendance: React.FC = () => {
   const [overrideLocId, setOverrideLocId] = useState<string>("");
   const [overrideEmpId, setOverrideEmpId] = useState<string>("");
   const [overrideReason, setOverrideReason] = useState<string>("");
+
+  const resetOverrideForm = () => {
+    setEditingOverrideId(null);
+    setOverrideType("WORK_DAY");
+    setOverrideDate(format(new Date(), "yyyy-MM-dd"));
+    setOverrideScope("ALL");
+    setOverrideDeptId("");
+    setOverrideLocId("");
+    setOverrideEmpId("");
+    setOverrideReason("");
+  };
+
+  const handleStartEditOverride = (item: any) => {
+    setEditingOverrideId(item.id);
+    setOverrideType(item.type || "WORK_DAY");
+    setOverrideDate(item.date ? String(item.date).slice(0, 10) : format(new Date(), "yyyy-MM-dd"));
+    setOverrideScope(item.scope || "ALL");
+    setOverrideDeptId(item.departmentId ? String(item.departmentId) : "");
+    setOverrideLocId(item.companyId ? String(item.companyId) : "");
+    setOverrideEmpId(item.employeeId ? String(item.employeeId) : "");
+    setOverrideReason(item.reason || "");
+  };
 
   const loadDayOverrides = async () => {
     try {
@@ -537,7 +563,7 @@ export const Attendance: React.FC = () => {
 
     try {
       setSavingOverride(true);
-      await attendanceAPI.saveDayOverride({
+      const payload = {
         date: overrideDate,
         type: overrideType,
         reason: overrideReason.trim(),
@@ -545,14 +571,25 @@ export const Attendance: React.FC = () => {
         departmentId: overrideScope === "DEPARTMENT" ? Number(overrideDeptId) : null,
         companyId: overrideScope === "LOCATION" ? Number(overrideLocId) : null,
         employeeId: overrideScope === "EMPLOYEE" ? Number(overrideEmpId) : null,
-      });
+      };
 
-      toast.success(
-        overrideType === "WORK_DAY"
-          ? "Off-day successfully turned ON as a Working Day!"
-          : "Work day successfully turned OFF as an Admin Holiday!"
-      );
-      setOverrideReason("");
+      if (editingOverrideId) {
+        if (attendanceAPI.updateDayOverride) {
+          await attendanceAPI.updateDayOverride(editingOverrideId, payload);
+        } else {
+          await attendanceAPI.saveDayOverride({ ...payload, id: editingOverrideId });
+        }
+        toast.success("Day override updated successfully!");
+      } else {
+        await attendanceAPI.saveDayOverride(payload);
+        toast.success(
+          overrideType === "WORK_DAY"
+            ? "Off-day successfully turned ON as a Working Day!"
+            : "Work day successfully turned OFF as an Admin Holiday!"
+        );
+      }
+
+      resetOverrideForm();
       await loadDayOverrides();
       await loadReport();
     } catch (err: any) {
@@ -566,6 +603,9 @@ export const Attendance: React.FC = () => {
     try {
       await attendanceAPI.deleteDayOverride(id);
       toast.success("Day override removed successfully");
+      if (editingOverrideId === id) {
+        resetOverrideForm();
+      }
       await loadDayOverrides();
       await loadReport();
     } catch (err: any) {
@@ -1581,18 +1621,22 @@ export const Attendance: React.FC = () => {
               </Button>
             </div>
 
-            {/* DatePicker Input Box */}
-            <div className="relative w-44 sm:w-48 shrink-0">
+            {/* DatePicker Input Box (Same as Dashboard) */}
+            <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
+              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
               <DatePicker
                 selected={selectedDate}
                 maxDate={new Date()}
-                onChange={(date: Date) => {
+                onChange={(date: Date | null) => {
                   if (!date) return;
                   if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
                   setSelectedDate(date);
                   if (activeTab === "weekly") setWeekOffset(0);
                   if (activeTab === "monthly") setMonthOffset(0);
                 }}
+                showMonthDropdown={activeTab !== "monthly"}
+                showYearDropdown={activeTab !== "monthly"}
+                dropdownMode="select"
                 showMonthYearPicker={activeTab === "monthly"}
                 highlightDates={
                   activeTab === "weekly"
@@ -1608,13 +1652,27 @@ export const Attendance: React.FC = () => {
                 }
                 dateFormat={
                   activeTab === "daily"
-                    ? "PPP"
+                    ? "yyyy-MM-dd"
                     : activeTab === "weekly"
-                    ? "'Week of' MMM d, yyyy"
+                    ? "'Week of' yyyy-MM-dd"
                     : "MMMM yyyy"
                 }
-                className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-1.5 h-9 text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-28 sm:w-32 bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-xs sm:text-sm focus:outline-none cursor-pointer p-0"
+                placeholderText="Select date..."
               />
+              {!isSameDay(selectedDate, new Date()) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate(new Date());
+                    if (activeTab === "weekly") setWeekOffset(0);
+                    if (activeTab === "monthly") setMonthOffset(0);
+                  }}
+                  className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
+                >
+                  Today
+                </button>
+              )}
             </div>
 
             {user?.role === "ADMIN" && (
@@ -2696,299 +2754,471 @@ export const Attendance: React.FC = () => {
       </Dialog>
 
       {/* ── Day Override (Advance Settings) Modal ────────────────────── */}
-      <Dialog open={isOverrideModalOpen} onOpenChange={setIsOverrideModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 shadow-2xl">
-          <DialogHeader className="space-y-1.5 pb-4 border-b border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                <SlidersHorizontal className="w-5 h-5" />
+      <Dialog
+        open={isOverrideModalOpen}
+        onOpenChange={(open) => {
+          setIsOverrideModalOpen(open);
+          if (!open) {
+            resetOverrideForm();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl md:max-w-5xl lg:max-w-6xl w-[95vw] max-h-[92vh] overflow-y-auto rounded-2xl p-6 sm:p-8 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 shadow-2xl">
+          <DialogHeader className="space-y-2 pb-5 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 shadow-2xs">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div>
+                  <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+                    Advance Settings — Day Override
+                  </DialogTitle>
+                  <DialogDescription className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    Override working calendar: Turn off-days into working days (ON) or declare emergency holidays / days off (OFF).
+                  </DialogDescription>
+                </div>
               </div>
-              <div>
-                <DialogTitle className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-                  Advance Settings — Day Override
-                </DialogTitle>
-                <DialogDescription className="text-xs text-gray-500">
-                  Override working calendar: Turn off-days into working days (ON) or declare emergency holidays / days off (OFF).
-                </DialogDescription>
-              </div>
+
+              {editingOverrideId && (
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-200 border border-amber-300 dark:border-amber-800 flex items-center gap-1.5 shadow-2xs animate-pulse">
+                    <Pencil className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    Editing Mode Active (#{editingOverrideId})
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={resetOverrideForm}
+                    className="h-7 text-xs px-2.5 rounded-lg border-gray-200 dark:border-gray-800 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"
+                  >
+                    Cancel Edit
+                  </Button>
+                </div>
+              )}
             </div>
           </DialogHeader>
 
-          <div className="space-y-6 pt-4">
-            {/* 1. Toggle Selection: Turn OFF->ON vs Turn ON->OFF */}
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
-                Override Action Type
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setOverrideType("WORK_DAY")}
-                  className={`p-3.5 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
-                    overrideType === "WORK_DAY"
-                      ? "border-emerald-500 bg-emerald-50/70 text-emerald-950 dark:bg-emerald-950/40 dark:border-emerald-500/80 dark:text-emerald-100 shadow-sm ring-2 ring-emerald-500/20"
-                      : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/40 text-gray-600 dark:text-gray-400"
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full mb-1.5">
-                    <span className="font-bold text-sm flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
-                      <CalendarCheck className="w-4 h-4" />
-                      Turn Off-Day → ON
+          <div className="space-y-6 pt-5">
+            {/* 1. Form Section Card */}
+            <div className="bg-gray-50/70 dark:bg-gray-900/40 rounded-2xl border border-gray-200/80 dark:border-gray-800/80 p-5 sm:p-6 space-y-5">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-200/60 dark:border-gray-800/60">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                    {editingOverrideId ? "Edit Day Override Details" : "Configure New Day Override"}
+                  </span>
+                  {editingOverrideId && (
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-500 text-white">
+                      Editing
                     </span>
-                    {overrideType === "WORK_DAY" && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    )}
-                  </div>
-                  <p className="text-[11px] leading-snug opacity-80">
-                    Force Sunday or off-day into an official working day (e.g. IT deadline, shift compensation).
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setOverrideType("OFF_DAY")}
-                  className={`p-3.5 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
-                    overrideType === "OFF_DAY"
-                      ? "border-amber-500 bg-amber-50/70 text-amber-950 dark:bg-amber-950/40 dark:border-amber-500/80 dark:text-amber-100 shadow-sm ring-2 ring-amber-500/20"
-                      : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/40 text-gray-600 dark:text-gray-400"
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full mb-1.5">
-                    <span className="font-bold text-sm flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
-                      <CalendarX className="w-4 h-4" />
-                      Turn Work Day → OFF
-                    </span>
-                    {overrideType === "OFF_DAY" && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    )}
-                  </div>
-                  <p className="text-[11px] leading-snug opacity-80">
-                    Declare an admin off-day or emergency holiday (e.g. rain emergency, special holiday).
-                  </p>
-                </button>
-              </div>
-            </div>
-
-            {/* 2. Target Date & Scope Form */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Date */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  Target Date *
-                </label>
-                <Input
-                  type="date"
-                  value={overrideDate}
-                  onChange={(e) => setOverrideDate(e.target.value)}
-                  className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800"
-                />
-              </div>
-
-              {/* Scope Selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  Applied Scope *
-                </label>
-                <Select
-                  value={overrideScope}
-                  onValueChange={(val: any) => {
-                    setOverrideScope(val);
-                    setOverrideDeptId("");
-                    setOverrideLocId("");
-                    setOverrideEmpId("");
-                  }}
-                >
-                  <SelectTrigger className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800">
-                    <SelectValue placeholder="Select target scope" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Employees</SelectItem>
-                    <SelectItem value="DEPARTMENT">Specific Department</SelectItem>
-                    <SelectItem value="LOCATION">Specific Location / Branch</SelectItem>
-                    <SelectItem value="EMPLOYEE">Specific Employee</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Sub-scope target selector */}
-            {overrideScope === "DEPARTMENT" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  Select Department *
-                </label>
-                <SearchableSelect
-                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
-                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
-                  icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
-                  placeholder="Choose department..."
-                  searchPlaceholder="Search department..."
-                  value={overrideDeptId}
-                  onValueChange={setOverrideDeptId}
-                  options={departments.map((dept) => ({
-                    value: String(dept.id),
-                    label: dept.title || dept.name,
-                  }))}
-                />
-              </div>
-            )}
-
-            {overrideScope === "LOCATION" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  Select Location / Branch *
-                </label>
-                <SearchableSelect
-                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
-                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
-                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
-                  placeholder="Choose branch / location..."
-                  searchPlaceholder="Search location..."
-                  value={overrideLocId}
-                  onValueChange={setOverrideLocId}
-                  options={locations.map((loc) => ({
-                    value: String(loc.id),
-                    label: loc.name,
-                  }))}
-                />
-              </div>
-            )}
-
-            {overrideScope === "EMPLOYEE" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  Select Employee *
-                </label>
-                <SearchableSelect
-                  className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm"
-                  popoverClassName="w-[320px] sm:w-[420px] z-[60]"
-                  icon={<User className="w-3.5 h-3.5 text-gray-400" />}
-                  placeholder="Choose employee..."
-                  searchPlaceholder="Search employee by name or ID..."
-                  value={overrideEmpId}
-                  onValueChange={setOverrideEmpId}
-                  options={employees.map((emp) => {
-                    const empCode = emp.employeeId ? ` (${emp.employeeId})` : "";
-                    const deptTitle = emp.department?.title || (typeof emp.department === "string" ? emp.department : "");
-                    return {
-                      value: String(emp.id),
-                      label: `${emp.firstName} ${emp.lastName || ""}${empCode}`.trim(),
-                      sublabel: deptTitle ? `Dept: ${deptTitle}` : undefined,
-                    };
-                  })}
-                />
-              </div>
-            )}
-
-            {/* Reason */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                Override Reason *
-              </label>
-              <Input
-                placeholder="e.g., Sunday Sprint for product launch / Heavy rain emergency holiday"
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800"
-              />
-              <p className="text-[11px] text-gray-400">
-                💡 This reason will be displayed in employee tooltips and attendance reports for this date.
-              </p>
-            </div>
-
-            {/* Apply Button */}
-            <div className="flex justify-end pt-2">
-              <Button
-                disabled={savingOverride}
-                onClick={handleSaveDayOverride}
-                className="h-10 px-5 text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all gap-2"
-              >
-                {savingOverride ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4" />
-                    <span>Apply Day Override</span>
-                  </>
+                  )}
+                </div>
+                {editingOverrideId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={resetOverrideForm}
+                    className="h-7 text-xs px-2.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 gap-1.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Reset to New
+                  </Button>
                 )}
-              </Button>
+              </div>
+
+              {/* Action Type Toggle */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-2">
+                  Override Action Type *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <button
+                    type="button"
+                    onClick={() => setOverrideType("WORK_DAY")}
+                    className={`p-4 rounded-xl border-2 text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      overrideType === "WORK_DAY"
+                        ? "border-emerald-500 bg-emerald-50/80 text-emerald-950 dark:bg-emerald-950/40 dark:border-emerald-500/80 dark:text-emerald-100 shadow-sm ring-2 ring-emerald-500/20"
+                        : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/60 text-gray-600 dark:text-gray-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1.5">
+                      <span className="font-bold text-sm flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+                        <CalendarCheck className="w-4 h-4" />
+                        Turn Off-Day → ON
+                      </span>
+                      {overrideType === "WORK_DAY" && (
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20" />
+                      )}
+                    </div>
+                    <p className="text-[11px] leading-relaxed opacity-85">
+                      Force Sunday or off-day into an official working day (e.g. IT deadline, weekend sprint, shift compensation).
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOverrideType("OFF_DAY")}
+                    className={`p-4 rounded-xl border-2 text-left transition-all flex flex-col justify-between cursor-pointer ${
+                      overrideType === "OFF_DAY"
+                        ? "border-amber-500 bg-amber-50/80 text-amber-950 dark:bg-amber-950/40 dark:border-amber-500/80 dark:text-amber-100 shadow-sm ring-2 ring-amber-500/20"
+                        : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-white dark:bg-gray-900/60 text-gray-600 dark:text-gray-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1.5">
+                      <span className="font-bold text-sm flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                        <CalendarX className="w-4 h-4" />
+                        Turn Work Day → OFF
+                      </span>
+                      {overrideType === "OFF_DAY" && (
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-4 ring-amber-500/20" />
+                      )}
+                    </div>
+                    <p className="text-[11px] leading-relaxed opacity-85">
+                      Declare an admin off-day or emergency holiday (e.g. heavy rain, extreme weather, special administrative holiday).
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Target Date, Scope, Sub-Scope */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Date */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Target Date *</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={overrideDate}
+                    onChange={(e) => setOverrideDate(e.target.value)}
+                    className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+                  />
+                </div>
+
+                {/* Scope Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Applied Scope *</span>
+                  </label>
+                  <Select
+                    value={overrideScope}
+                    onValueChange={(val: any) => {
+                      setOverrideScope(val);
+                      setOverrideDeptId("");
+                      setOverrideLocId("");
+                      setOverrideEmpId("");
+                    }}
+                  >
+                    <SelectTrigger className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+                      <SelectValue placeholder="Select target scope" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      <SelectItem value="ALL">All Employees (Global)</SelectItem>
+                      <SelectItem value="DEPARTMENT">Specific Department</SelectItem>
+                      <SelectItem value="LOCATION">Specific Location / Branch</SelectItem>
+                      <SelectItem value="EMPLOYEE">Specific Employee</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Sub-scope target selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                    {overrideScope === "DEPARTMENT" && "Select Department *"}
+                    {overrideScope === "LOCATION" && "Select Location / Branch *"}
+                    {overrideScope === "EMPLOYEE" && "Select Employee *"}
+                    {overrideScope === "ALL" && "Target Scope"}
+                  </label>
+                  {overrideScope === "DEPARTMENT" && (
+                    <SearchableSelect
+                      className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm bg-white dark:bg-gray-900"
+                      popoverClassName="w-[320px] sm:w-[420px] z-[80]"
+                      icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
+                      placeholder="Choose department..."
+                      searchPlaceholder="Search department..."
+                      value={overrideDeptId}
+                      onValueChange={setOverrideDeptId}
+                      options={departments.map((dept) => ({
+                        value: String(dept.id),
+                        label: dept.title || dept.name,
+                      }))}
+                    />
+                  )}
+                  {overrideScope === "LOCATION" && (
+                    <SearchableSelect
+                      className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm bg-white dark:bg-gray-900"
+                      popoverClassName="w-[320px] sm:w-[420px] z-[80]"
+                      icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
+                      placeholder="Choose branch / location..."
+                      searchPlaceholder="Search location..."
+                      value={overrideLocId}
+                      onValueChange={setOverrideLocId}
+                      options={locations.map((loc) => ({
+                        value: String(loc.id),
+                        label: loc.name,
+                      }))}
+                    />
+                  )}
+                  {overrideScope === "EMPLOYEE" && (
+                    <SearchableSelect
+                      className="w-full h-10 rounded-xl border-gray-200 dark:border-gray-800 text-xs sm:text-sm bg-white dark:bg-gray-900"
+                      popoverClassName="w-[320px] sm:w-[420px] z-[80]"
+                      icon={<User className="w-3.5 h-3.5 text-gray-400" />}
+                      placeholder="Choose employee..."
+                      searchPlaceholder="Search employee by name or ID..."
+                      value={overrideEmpId}
+                      onValueChange={setOverrideEmpId}
+                      options={employees.map((emp) => {
+                        const empCode = emp.employeeId ? ` (${emp.employeeId})` : "";
+                        const deptTitle = emp.department?.title || (typeof emp.department === "string" ? emp.department : "");
+                        return {
+                          value: String(emp.id),
+                          label: `${emp.firstName} ${emp.lastName || ""}${empCode}`.trim(),
+                          sublabel: deptTitle ? `Dept: ${deptTitle}` : undefined,
+                        };
+                      })}
+                    />
+                  )}
+                  {overrideScope === "ALL" && (
+                    <div className="h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-100/70 dark:bg-gray-800/40 flex items-center text-xs text-gray-500 dark:text-gray-400">
+                      Applies to all registered staff members
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Reason & Action Buttons */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  Override Reason / Description *
+                </label>
+                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                  <div className="flex-1 w-full">
+                    <Input
+                      placeholder="e.g., Sunday Sprint for product launch / Heavy rain emergency holiday"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                    {editingOverrideId && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={resetOverrideForm}
+                        className="h-10 px-4 text-xs sm:text-sm font-semibold rounded-xl border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    <Button
+                      disabled={savingOverride}
+                      onClick={handleSaveDayOverride}
+                      className={`h-10 px-5 text-xs sm:text-sm font-bold text-white rounded-xl shadow-md transition-all gap-2 ${
+                        editingOverrideId
+                          ? "bg-amber-600 hover:bg-amber-700"
+                          : "bg-blue-600 hover:bg-blue-700"
+                      }`}
+                    >
+                      {savingOverride ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>{editingOverrideId ? "Updating..." : "Saving..."}</span>
+                        </>
+                      ) : editingOverrideId ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span>Update Day Override</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          <span>Apply Day Override</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  💡 This reason will be displayed in employee tooltips, shift calendar, and monthly attendance audit reports.
+                </p>
+              </div>
             </div>
 
-            {/* 3. Existing Overrides List */}
-            <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
+            {/* 2. Configured Overrides Table Section */}
+            <div className="pt-2">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                  <CalendarDays className="w-4 h-4 text-indigo-500" />
-                  <span>Configured Overrides ({dayOverridesList.length})</span>
-                </h4>
+                <div>
+                  <h4 className="text-sm font-bold tracking-tight text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-indigo-500" />
+                    <span>Configured Overrides</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      {dayOverridesList.length}
+                    </span>
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Active day overrides applied to the attendance calculation engine
+                  </p>
+                </div>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={loadDayOverrides}
                   disabled={loadingOverrides}
-                  className="h-7 text-xs px-2 text-gray-500 hover:text-gray-900"
+                  className="h-8 text-xs px-3 rounded-lg border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:text-gray-900"
                 >
-                  <RefreshCw className={`w-3 h-3 mr-1 ${loadingOverrides ? "animate-spin" : ""}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingOverrides ? "animate-spin" : ""}`} />
                   Refresh
                 </Button>
               </div>
 
               {loadingOverrides ? (
-                <div className="text-center py-6 text-xs text-gray-400">
-                  <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-blue-500" />
+                <div className="text-center py-10 text-xs text-gray-400 bg-gray-50/50 dark:bg-gray-900/30 rounded-2xl border border-gray-100 dark:border-gray-800">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-blue-500" />
                   Loading active overrides...
                 </div>
               ) : dayOverridesList.length === 0 ? (
-                <div className="text-center py-6 bg-gray-50/60 dark:bg-gray-900/40 rounded-xl border border-dashed border-gray-200 dark:border-gray-800 text-xs text-gray-400">
-                  No active day overrides configured. Use the form above to add one.
+                <div className="text-center py-10 bg-gray-50/60 dark:bg-gray-900/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 text-xs text-gray-400">
+                  <CalendarDays className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-700" />
+                  <p className="font-medium text-gray-600 dark:text-gray-400">No active day overrides configured</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Use the configuration form above to schedule a work day or off day override.</p>
                 </div>
               ) : (
-                <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
-                  {dayOverridesList.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-3 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900/60 flex items-start justify-between gap-3 text-xs shadow-2xs hover:border-gray-300 dark:hover:border-gray-700 transition-colors"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
-                            {format(new Date(`${item.date}T00:00:00`), "MMM d, yyyy")}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
-                              item.type === "WORK_DAY"
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300"
-                                : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-300"
-                            }`}
-                          >
-                            {item.type === "WORK_DAY" ? "⚡ ON (Work Day)" : "🏖️ OFF (Holiday)"}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-[10px] font-mono">
-                            {item.scope === "ALL" && "All Employees"}
-                            {item.scope === "DEPARTMENT" && `Dept: ${item.departmentTitle || item.departmentId}`}
-                            {item.scope === "LOCATION" && `Branch: ${item.companyName || item.companyId}`}
-                            {item.scope === "EMPLOYEE" && `Employee: ${item.employeeName || item.employeeId}`}
-                          </span>
-                        </div>
-                        <p className="text-gray-700 dark:text-gray-300 italic text-[11px] break-words">
-                          "{item.reason}"
-                        </p>
-                      </div>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-2xs bg-white dark:bg-gray-900">
+                  <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
+                    <Table>
+                      <TableHeader className="bg-gray-50/80 dark:bg-gray-800/60 sticky top-0 z-10 backdrop-blur-xs">
+                        <TableRow className="border-b border-gray-200 dark:border-gray-800">
+                          <TableHead className="w-[140px] text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                            Target Date
+                          </TableHead>
+                          <TableHead className="w-[160px] text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                            Override Type
+                          </TableHead>
+                          <TableHead className="w-[200px] text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                            Target Scope
+                          </TableHead>
+                          <TableHead className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                            Reason / Remarks
+                          </TableHead>
+                          <TableHead className="w-[150px] text-right text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                            Actions
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dayOverridesList.map((item) => {
+                          const isEditingThis = editingOverrideId === item.id;
+                          return (
+                            <TableRow
+                              key={item.id}
+                              className={`transition-colors border-b border-gray-100 dark:border-gray-800/80 ${
+                                isEditingThis
+                                  ? "bg-blue-50/70 dark:bg-blue-950/40 ring-1 ring-blue-500/50"
+                                  : "hover:bg-gray-50/60 dark:hover:bg-gray-800/40"
+                              }`}
+                            >
+                              {/* Date */}
+                              <TableCell className="py-3 font-semibold text-xs text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                <div className="flex items-center gap-1.5 font-mono">
+                                  <CalendarIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                  <span>{format(new Date(`${item.date}T00:00:00`), "MMM d, yyyy")}</span>
+                                </div>
+                              </TableCell>
 
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteDayOverride(item.id)}
-                        className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg shrink-0"
-                        title="Delete this override"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ))}
+                              {/* Override Type */}
+                              <TableCell className="py-3 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider border ${
+                                    item.type === "WORK_DAY"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800"
+                                      : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800"
+                                  }`}
+                                >
+                                  {item.type === "WORK_DAY" ? "⚡ ON (Work Day)" : "🏖️ OFF (Holiday)"}
+                                </span>
+                              </TableCell>
+
+                              {/* Target Scope */}
+                              <TableCell className="py-3">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-[11px] font-medium inline-flex items-center gap-1">
+                                    {item.scope === "ALL" && (
+                                      <>
+                                        <Globe className="w-3 h-3 text-gray-500" />
+                                        <span>All Employees</span>
+                                      </>
+                                    )}
+                                    {item.scope === "DEPARTMENT" && (
+                                      <>
+                                        <Building2 className="w-3 h-3 text-indigo-500" />
+                                        <span>Dept: {item.departmentTitle || item.departmentId}</span>
+                                      </>
+                                    )}
+                                    {item.scope === "LOCATION" && (
+                                      <>
+                                        <MapPin className="w-3 h-3 text-emerald-500" />
+                                        <span>Branch: {item.companyName || item.companyId}</span>
+                                      </>
+                                    )}
+                                    {item.scope === "EMPLOYEE" && (
+                                      <>
+                                        <User className="w-3 h-3 text-blue-500" />
+                                        <span>Employee: {item.employeeName || item.employeeId}</span>
+                                      </>
+                                    )}
+                                  </span>
+                                </div>
+                              </TableCell>
+
+                              {/* Reason */}
+                              <TableCell className="py-3 text-xs text-gray-600 dark:text-gray-300">
+                                <span className="italic">"{item.reason}"</span>
+                              </TableCell>
+
+                              {/* Actions */}
+                              <TableCell className="py-3 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleStartEditOverride(item)}
+                                    className={`h-7 px-2.5 text-xs font-semibold rounded-lg transition-colors gap-1 ${
+                                      isEditingThis
+                                        ? "bg-amber-600 text-white border-amber-600 hover:bg-amber-700 hover:text-white"
+                                        : "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900/60 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                                    }`}
+                                    title="Edit this override"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    <span>Edit</span>
+                                  </Button>
+
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteDayOverride(item.id)}
+                                    className="h-7 px-2 text-xs font-semibold text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-700 rounded-lg transition-colors gap-1"
+                                    title="Delete this override"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Delete</span>
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               )}
             </div>
