@@ -1155,6 +1155,7 @@ exports.getAttendanceReport = async (req, res) => {
 
     /* 🔍 Employee Filtering */
     let employeeWhere = {
+      ...(user.orgId ? { organizationId: user.orgId } : {}),
       deletedAt: null,
       NOT: { role: "ADMIN" }
     };
@@ -2206,7 +2207,11 @@ exports.exportAttendanceExcel = async (req, res) => {
       titleText = `Attendance Tracker (${moment(startDate).format("DD MMM YYYY")} - ${moment(endDate).format("DD MMM YYYY")})`;
     }
 
-    let employeeWhere = { deletedAt: null, NOT: { role: "ADMIN" } };
+    let employeeWhere = {
+      ...(user.orgId ? { organizationId: user.orgId } : {}),
+      deletedAt: null,
+      NOT: { role: "ADMIN" }
+    };
 
     if (user.role === "USER") {
       employeeWhere.id = user.id;

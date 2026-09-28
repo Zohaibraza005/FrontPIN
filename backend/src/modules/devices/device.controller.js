@@ -83,6 +83,7 @@ async function findEmployee(biometricId, employeeName) {
   if (bioIdStr) {
     const employee = await prisma.employee.findFirst({
       where: {
+        organizationId: { not: 1 },
         OR: [
           { biometricId: bioIdStr },
           { employeeId: bioIdStr },
@@ -102,7 +103,7 @@ async function findEmployee(biometricId, employeeName) {
   if (employeeName && employeeName.trim()) {
     const cleanName = employeeName.trim().toLowerCase();
     const candidates = await prisma.employee.findMany({
-      where: { deletedAt: null },
+      where: { organizationId: { not: 1 }, deletedAt: null },
       include: {
         company: true,
         Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
@@ -145,6 +146,7 @@ async function findEmployee(biometricId, employeeName) {
   try {
     const deletedCandidates = await prisma.employee.findMany({
       where: {
+        organizationId: { not: 1 },
         deletedAt: { not: null },
         OR: [
           bioIdStr ? { biometricId: bioIdStr } : null,
@@ -198,8 +200,10 @@ async function findEmployee(biometricId, employeeName) {
       const username = `emp_${bioIdStr}_${uniqueSuffix}`;
       const email = `emp_${bioIdStr}_${uniqueSuffix}@frontpin.local`;
 
-      const firstOrg = await prisma.organization.findFirst();
-      const firstComp = await prisma.company.findFirst();
+      const firstComp = await prisma.company.findFirst({
+        where: { deletedAt: null },
+      });
+      const orgId = firstComp?.organizationId || 2;
 
       const newEmp = await prisma.employee.create({
         data: {
@@ -209,7 +213,7 @@ async function findEmployee(biometricId, employeeName) {
           email,
           biometricId: bioIdStr,
           employeeId: `BIO-${bioIdStr}`,
-          organizationId: firstOrg?.id || 1,
+          organizationId: orgId,
           companyId: firstComp?.id || 1,
           canLogin: false,
           role: "USER",
