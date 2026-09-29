@@ -1377,8 +1377,12 @@ export const dashboardAPI = {
   },
 
 // Update in your api service (dashboardAPI)
-getStatsDetails: async (category: string, date: string, location: string) => {
-  return apiCall(`/dashboard/stats/${category}?date=${date}&location=${location}`);
+getStatsDetails: async (category: string, date: string, location: string, department?: string) => {
+  let url = `/dashboard/stats/${category}?date=${date}&location=${location}`;
+  if (department && department.toLowerCase() !== "all") {
+    url += `&department=${department}`;
+  }
+  return apiCall(url);
 },
   getAdminDashboard: async (filters?: { date?: string; location?: string }) => {
     return apiCall(`/dashboard/admin?${new URLSearchParams(filters)}`);

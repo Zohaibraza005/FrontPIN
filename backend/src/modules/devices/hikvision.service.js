@@ -554,7 +554,7 @@ async function syncHikvisionDeviceLogs(device, processPunchCallback, startTime =
   try {
     const moment = require("moment-timezone");
     const timezone = "Asia/Karachi";
-    const start = startTime || moment().tz(timezone).startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+    const start = startTime || moment().tz(timezone).subtract(1, "day").startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
     const end = endTime || moment().tz(timezone).endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
 
     const events = await fetchHikvisionAcsEvents(device, start, end);

@@ -193,6 +193,32 @@ async function findEmployee(biometricId, employeeName) {
   // 4. Auto-provision new employee if completely new user punches on machine
   if (bioIdStr) {
     try {
+      const existingBio = await prisma.employee.findFirst({
+        where: { biometricId: bioIdStr },
+        include: {
+          company: true,
+          Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
+          jobInfo: true,
+        },
+      });
+
+      if (existingBio) {
+        if (existingBio.deletedAt) {
+          const restored = await prisma.employee.update({
+            where: { id: existingBio.id },
+            data: { deletedAt: null },
+            include: {
+              company: true,
+              Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
+              jobInfo: true,
+            },
+          });
+          console.log(`[Biometric Punch] Restored previously deleted employee: ${restored.firstName} ${restored.lastName} (Bio: ${bioIdStr})`);
+          return restored;
+        }
+        return existingBio;
+      }
+
       const parts = employeeName ? employeeName.trim().split(/\s+/) : [];
       const firstName = parts[0] || "Employee";
       const lastName = parts.slice(1).join(" ") || bioIdStr;
@@ -406,16 +432,26 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
   const rawSchedule = employee.Schedule?.find((s) => !s.deletedAt) || { startTime: "09:00", endTime: "18:00" };
 
-  // Check if schedule is a night / cross-midnight shift (e.g. 19:00 to 04:00)
-  const [testSh, testSm] = (rawSchedule.startTime || "09:00").split(":").map(Number);
-  const [testEh, testEm] = (rawSchedule.endTime || "18:00").split(":").map(Number);
-  const isNightShift = ((testSh || 0) * 60 + (testSm || 0)) > ((testEh || 0) * 60 + (testEm || 0));
+  const yesterdayMoment = pTime.clone().subtract(1, "day");
+  const yesterdayDateString = yesterdayMoment.format("YYYY-MM-DD");
 
-  // If night shift and punch happens in the morning before noon (< 12:00 PM),
-  // this punch belongs to yesterday's night shift!
+  // Resolve shifts for yesterday and today
+  const yesterdayShift = getScheduleShiftForDay(rawSchedule, yesterdayDateString, timezone);
+  const todayShift = getScheduleShiftForDay(rawSchedule, todayDateString, timezone);
+
+  // Today's shift start time in employee's timezone
+  const todayShiftStartTime = todayShift.startTime || rawSchedule.startTime || "09:00";
+  const todayShiftStartLocal = moment.tz(`${todayDateString} ${todayShiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
+  const todayEarliestCheckInLocal = todayShiftStartLocal.clone().subtract(2, "hours");
+
+  // Decide shift date:
+  // - If punch happens BEFORE today's earliest check-in window (2 hours before shift start):
+  //   It belongs to YESTERDAY'S shift (the shift that started yesterday)!
+  // - If punch happens AT OR AFTER today's earliest check-in window:
+  //   It belongs to TODAY'S shift!
   let shiftDateMoment = pTime.clone();
-  if (isNightShift && pTime.hour() < 12) {
-    shiftDateMoment = pTime.clone().subtract(1, "day");
+  if (pTime.isBefore(todayEarliestCheckInLocal)) {
+    shiftDateMoment = yesterdayMoment.clone();
   }
 
   const shiftDateString = shiftDateMoment.format("YYYY-MM-DD");
@@ -533,12 +569,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
       if (activeRecent && activeRecent.checkInTime) {
         const diffHoursFromCheckIn = pTime.diff(moment(activeRecent.checkInTime), "hours", true);
-        if (diffHoursFromCheckIn >= 0 && diffHoursFromCheckIn < 11) {
+        if (diffHoursFromCheckIn >= 0 && diffHoursFromCheckIn < 16) {
           // If direction is CHECK_OUT or dynamic, close yesterday's shift
           if (deviceDir === "CHECK_OUT" || deviceDir === null) {
             attendance = activeRecent;
           }
-        } else if (diffHoursFromCheckIn >= 11) {
+        } else if (diffHoursFromCheckIn >= 16) {
           // Auto-close past unclosed attendance at 11 hours limit (max 9h shift + 2h OT)
           const autoOutTime = moment(activeRecent.checkInTime).add(11, "hours").toDate();
           await prisma.attendance.update({
@@ -561,44 +597,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // 🟢 CASE A: DEDICATED CHECK-IN TERMINAL (e.g. HIKVISION Gate Pass, Gate 1)
   // =========================================================================
   if (deviceDir === "CHECK_IN") {
-    // 1. Abnormally early punch: before shiftStart - 2 hours
-    if (pTime.isBefore(earliestAllowedInLocal)) {
-      if (!attendance) {
-        try {
-          attendance = await prisma.attendance.upsert({
-            where: {
-              employeeId_date: {
-                employeeId: employee.id,
-                date: shiftStartUtc,
-              },
-            },
-            create: {
-              employeeId: employee.id,
-              date: shiftStartUtc,
-              shiftStartTime: schedule.startTime,
-              shiftEndTime: schedule.endTime,
-              checkInTime: null,
-              status: "PRESENT",
-            },
-            update: {},
-          });
-        } catch (err) {
-          if (err.code === "P2002") {
-            attendance = await prisma.attendance.findFirst({
-              where: { employeeId: employee.id, date: { gte: shiftStartUtc, lte: shiftEndUtc } },
-            });
-          }
-        }
-      }
-
-      if (attendance) {
-        await recordPunch(attendance.id, "CHECK_IN", punchDate);
-      }
-      console.log(`[Biometric Punch] [${deviceTag}] Early punch before allowed 2h window recorded in punch log for ${employee.firstName} ${employee.lastName} (Punch: ${pTime.format("HH:mm")}, Earliest In: ${earliestAllowedInLocal.format("HH:mm")})`);
-      return { success: true, type: "EARLY_PUNCH_RECORDED", employee, attendance };
-    }
-
-    // 2. Valid punch within window (>= earliestAllowedInLocal)
+    // 1. If no attendance exists, record check-in
     if (!attendance) {
       const { isLate, lateMinutes, status } = calcLateness(pTime);
       try {
@@ -641,7 +640,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     }
 
     // Attendance already exists
-    // 1. If checkInTime is missing (or was null due to early punch or checkout punch arriving first)
+    // 1. If checkInTime is missing (or was null due to checkout punch arriving first)
     if (!attendance.checkInTime) {
       const { isLate, lateMinutes, status } = calcLateness(pTime);
       const updateData = {
@@ -668,8 +667,31 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       return { success: true, type: "CHECK_IN", employee, attendance };
     }
 
-    // 2. If incoming punch is EARLIER than current checkInTime AND is within allowed window
-    if (pTime.isBefore(moment(attendance.checkInTime)) && pTime.isSameOrAfter(earliestAllowedInLocal)) {
+    // 2. If current checkInTime in this record is from before today's 2-hour window (an early morning punch from yesterday),
+    // replace it with today's real check-in, clear checkOutTime, and recalculate lateness!
+    if (attendance.checkInTime && moment(attendance.checkInTime).tz(timezone).isBefore(todayEarliestCheckInLocal)) {
+      const { isLate, lateMinutes, status } = calcLateness(pTime);
+      const updateData = {
+        checkInTime: punchDate,
+        checkOutTime: null,
+        totalWorkedMinutes: 0,
+        checkInMethod: punchMethod,
+        checkInDevice: deviceTag,
+        isLate,
+        lateMinutes,
+        status,
+      };
+      attendance = await prisma.attendance.update({
+        where: { id: attendance.id },
+        data: updateData,
+      });
+      await recordPunch(attendance.id, "CHECK_IN", punchDate);
+      console.log(`[Biometric Punch] [${deviceTag}] Real CHECK-IN set for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (overriding early morning punch)`);
+      return { success: true, type: "CHECK_IN", employee, attendance };
+    }
+
+    // 3. If incoming punch is EARLIER than current checkInTime
+    if (pTime.isBefore(moment(attendance.checkInTime))) {
       const { isLate, lateMinutes, status } = calcLateness(pTime);
       const updateData = {
         checkInTime: punchDate,
@@ -788,42 +810,6 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // ⚪ CASE C: DYNAMIC / UNASSIGNED TERMINALS (e.g. Enrolling Device)
   // =========================================================================
   if (!attendance) {
-    // 1. Abnormally early punch: before shiftStart - 2 hours
-    if (pTime.isBefore(earliestAllowedInLocal)) {
-      try {
-        attendance = await prisma.attendance.upsert({
-          where: {
-            employeeId_date: {
-              employeeId: employee.id,
-              date: shiftStartUtc,
-            },
-          },
-          create: {
-            employeeId: employee.id,
-            date: shiftStartUtc,
-            shiftStartTime: schedule.startTime,
-            shiftEndTime: schedule.endTime,
-            checkInTime: null,
-            status: "PRESENT",
-          },
-          update: {},
-        });
-      } catch (err) {
-        if (err.code === "P2002") {
-          attendance = await prisma.attendance.findFirst({
-            where: { employeeId: employee.id, date: { gte: shiftStartUtc, lte: shiftEndUtc } },
-          });
-        }
-      }
-
-      if (attendance) {
-        await recordPunch(attendance.id, "CHECK_IN", punchDate);
-      }
-      console.log(`[Biometric Punch] Early punch outside 2h window recorded in punch log for ${employee.firstName} ${employee.lastName} (Punch: ${pTime.format("HH:mm")}, Earliest In: ${earliestAllowedInLocal.format("HH:mm")})`);
-      return { success: true, type: "EARLY_PUNCH_RECORDED", employee, attendance };
-    }
-
-    // 2. Normal check-in within window
     const { isLate, lateMinutes, status } = calcLateness(pTime);
 
     try {
@@ -897,7 +883,27 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     return { success: true, type: "CHECK_IN", employee, attendance };
   }
 
-  let inTimeMoment = moment(attendance.checkInTime);
+  // If current checkInTime in this record is from before today's 2-hour window (an early morning punch from yesterday),
+  // replace it with today's real check-in, clear checkOutTime, and recalculate lateness!
+  if (attendance.checkInTime && moment(attendance.checkInTime).tz(timezone).isBefore(todayEarliestCheckInLocal)) {
+    const { isLate, lateMinutes, status } = calcLateness(pTime);
+    const updateData = {
+      checkInTime: punchDate,
+      checkOutTime: null,
+      totalWorkedMinutes: 0,
+      checkInMethod: punchMethod,
+      checkInDevice: deviceTag,
+      isLate,
+      lateMinutes,
+      status,
+    };
+    attendance = await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: updateData,
+    });
+    await recordPunch(attendance.id, "CHECK_IN", punchDate);
+    return { success: true, type: "CHECK_IN", employee, attendance };
+  }
 
   // If incoming punch is earlier than existing checkInTime
   if (pTime.isBefore(inTimeMoment)) {
@@ -1165,7 +1171,7 @@ exports.testDeviceConnection = async (req, res) => {
 /**
  * Helper to sync a single device's logs
  */
-async function syncSingleDevice(device, prismaInstance = prisma, processPunchCallback = processBiometricPunch) {
+async function syncSingleDevice(device, prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null) {
   if (device.brand === "ZKTECO") {
     const logs = await fetchZkTecoLogs(device.ipAddress, device.port);
     let count = 0;
@@ -1189,7 +1195,7 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
     return { success: true, count, brand: "ZKTECO", deviceName: device.name };
   } else if (device.brand === "HIKVISION") {
     const { syncHikvisionDeviceLogs } = require("./hikvision.service");
-    const result = await syncHikvisionDeviceLogs(device, processPunchCallback);
+    const result = await syncHikvisionDeviceLogs(device, processPunchCallback, startTime, endTime);
 
     await prismaInstance.biometricDevice.update({
       where: { id: device.id },
@@ -1212,7 +1218,7 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
 /**
  * Sync ALL registered active biometric devices in parallel
  */
-async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch) {
+async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null) {
   const devices = await prismaInstance.biometricDevice.findMany({
     where: { deletedAt: null },
   });
@@ -1224,7 +1230,7 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
   // Run all device syncs concurrently in parallel for maximum speed
   const syncPromises = devices.map(async (device) => {
     try {
-      const res = await syncSingleDevice(device, prismaInstance, processPunchCallback);
+      const res = await syncSingleDevice(device, prismaInstance, processPunchCallback, startTime, endTime);
       return res;
     } catch (err) {
       console.error(`[Device Sync Failed] ${device.name} (${device.ipAddress}):`, err.message);
@@ -1303,7 +1309,18 @@ exports.syncDeviceLogs = async (req, res) => {
  */
 exports.syncAllDevicesRoute = async (req, res) => {
   try {
-    const summary = await syncAllActiveDevices(prisma, processBiometricPunch);
+    const moment = require("moment-timezone");
+    const timezone = "Asia/Karachi";
+    const targetDate = req.query.date || req.body?.date;
+    let startTime = null;
+    let endTime = null;
+
+    if (targetDate) {
+      startTime = moment.tz(targetDate, timezone).subtract(1, "day").startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+      endTime = moment.tz(targetDate, timezone).add(1, "day").endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+    }
+
+    const summary = await syncAllActiveDevices(prisma, processBiometricPunch, startTime, endTime);
     return res.json({
       success: true,
       count: summary.count,

@@ -425,7 +425,7 @@ exports.getTodayStatus = async (req, res) => {
     const isTodayOff = isOffDay(employee.Schedule, todayDateString, timezone);
 
     // 3️⃣ Fetch attendance
-    const attendance = await prisma.attendance.findUnique({
+    let attendance = await prisma.attendance.findUnique({
       where: {
         employeeId_date: {
           employeeId,
@@ -443,27 +443,65 @@ exports.getTodayStatus = async (req, res) => {
       },
     });
 
+    if (!attendance) {
+      const activeRecent = await prisma.attendance.findFirst({
+        where: {
+          employeeId,
+          checkInTime: { not: null },
+          checkOutTime: null,
+        },
+        include: {
+          activities: {
+            orderBy: { startTime: "asc" },
+            include: { task: true },
+          },
+          punches: {
+            orderBy: { punchTime: "asc" },
+          },
+        },
+        orderBy: { checkInTime: "desc" },
+      });
+      if (activeRecent && activeRecent.checkInTime) {
+        const diffHrs = moment().diff(moment(activeRecent.checkInTime), "hours", true);
+        if (diffHrs >= 0 && diffHrs < 16) {
+          attendance = activeRecent;
+        }
+      }
+    }
+
     const breakStats = getBreakStats(employee.Schedule, attendance?.activities);
 
-    if (!attendance || !attendance.checkInTime) {
+    let effectiveCheckIn = attendance?.checkInTime;
+    let effectiveCheckOut = attendance?.checkOutTime;
+
+    if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
+      const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
+      if (firstIn) effectiveCheckIn = firstIn.punchTime;
+    }
+    if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
+      const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
+      if (lastOut) effectiveCheckOut = lastOut.punchTime;
+    }
+
+    if (!attendance || (!effectiveCheckIn && !effectiveCheckOut)) {
       return res.json({
         success: true,
         isOffDay: isTodayOff,
         clockedIn: false,
         clockedOut: false,
-        punches: [],
+        punches: attendance?.punches || [],
         ...breakStats,
       });
     }
 
-    if (attendance.checkOutTime) {
+    if (effectiveCheckOut) {
       return res.json({
         success: true,
         isOffDay: isTodayOff,
         clockedIn: false,
         clockedOut: true,
-        checkInTime: attendance.checkInTime,
-        checkOutTime: attendance.checkOutTime,
+        checkInTime: effectiveCheckIn,
+        checkOutTime: effectiveCheckOut,
         totalWorkedMinutes: attendance.totalWorkedMinutes,
         punches: attendance.punches || [],
         ...breakStats,
@@ -479,7 +517,7 @@ exports.getTodayStatus = async (req, res) => {
       isOffDay: isTodayOff,
       clockedIn: true,
       clockedOut: false,
-      checkInTime: attendance.checkInTime,
+      checkInTime: effectiveCheckIn,
       currentActivity: activeActivity
         ? {
             type: activeActivity.type,
@@ -534,7 +572,7 @@ exports.clockOut = async (req, res) => {
     const { todayStart, todayEnd } =
       await getEmployeeTodayRange(employeeId);
 
-    const attendance = await prisma.attendance.findFirst({
+    let attendance = await prisma.attendance.findFirst({
       where: {
         employeeId,
         date: {
@@ -543,6 +581,23 @@ exports.clockOut = async (req, res) => {
         },
       },
     });
+
+    if (!attendance) {
+      const activeRecent = await prisma.attendance.findFirst({
+        where: {
+          employeeId,
+          checkInTime: { not: null },
+          checkOutTime: null,
+        },
+        orderBy: { checkInTime: "desc" },
+      });
+      if (activeRecent && activeRecent.checkInTime) {
+        const diffHrs = moment().diff(moment(activeRecent.checkInTime), "hours", true);
+        if (diffHrs >= 0 && diffHrs < 16) {
+          attendance = activeRecent;
+        }
+      }
+    }
 
     if (!attendance) {
       return res.status(400).json({ message: "No attendance found" });
@@ -1396,12 +1451,19 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🔴 No Attendance */
         if (!existing) {
+          const isToday = dateStr === moment().tz(empTz).format("YYYY-MM-DD");
           const isFutureDay = moment(dateStr, "YYYY-MM-DD").isAfter(moment().startOf("day"));
+
+          const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+          const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
+          const sTime = dayShift?.startTime || activeSched?.startTime || "09:00";
+          const shiftStartMoment = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+          const shiftHasNotStarted = isToday && moment().tz(empTz).isBefore(shiftStartMoment);
 
           let defaultStatus = "ABSENT";
           if (isDayOff) {
             defaultStatus = "OFF_DAY";
-          } else if (isFutureDay) {
+          } else if (isFutureDay || shiftHasNotStarted) {
             defaultStatus = "UPCOMING_DAY";
           }
 
@@ -1427,13 +1489,35 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🟢 Attendance Exists */
 
-        // Verify check-in and check-out actually belong to this date in company timezone
-        const checkInDateMatch = existing.checkInTime
-          ? moment(existing.checkInTime).tz(empTz).format("YYYY-MM-DD") === dateStr
-          : false;
-        const checkOutDateMatch = existing.checkOutTime
-          ? moment(existing.checkOutTime).tz(empTz).format("YYYY-MM-DD") === dateStr
-          : false;
+        // Retrieve effective check-in and check-out (from attendance record or real punches)
+        let effCheckIn = existing.checkInTime || null;
+        let effCheckOut = existing.checkOutTime || null;
+
+        if (!effCheckIn && existing.punches && existing.punches.length > 0) {
+          const firstIn = existing.punches.find((p) => p.type === "CHECK_IN");
+          if (firstIn) effCheckIn = firstIn.punchTime;
+        }
+        if (!effCheckOut && existing.punches && existing.punches.length > 0) {
+          const lastOut = [...existing.punches].reverse().find((p) => p.type === "CHECK_OUT");
+          if (lastOut) effCheckOut = lastOut.punchTime;
+        }
+
+        const nextDateStr = moment(dateStr).add(1, "day").format("YYYY-MM-DD");
+        const prevDateStr = moment(dateStr).subtract(1, "day").format("YYYY-MM-DD");
+
+        const checkInDayStr = effCheckIn ? moment(effCheckIn).tz(empTz).format("YYYY-MM-DD") : null;
+        const checkOutDayStr = effCheckOut ? moment(effCheckOut).tz(empTz).format("YYYY-MM-DD") : null;
+
+        // A punch belongs to this shift if on dateStr or neighboring overnight shift dates
+        const checkInDateMatch = Boolean(
+          checkInDayStr && (checkInDayStr === dateStr || checkInDayStr === nextDateStr || checkInDayStr === prevDateStr)
+        );
+        const checkOutDateMatch = Boolean(
+          checkOutDayStr && (checkOutDayStr === dateStr || checkOutDayStr === nextDateStr || checkOutDayStr === prevDateStr)
+        );
+
+        let finalCheckIn = checkInDateMatch ? effCheckIn : null;
+        let finalCheckOut = checkOutDateMatch ? effCheckOut : null;
 
         let totalWorkedMinutes = existing.totalWorkedMinutes || 0;
         let totalBreakMinutes = existing.totalBreakMinutes || 0;
@@ -1459,10 +1543,7 @@ exports.getAttendanceReport = async (req, res) => {
         let finalStatus = existing.status;
         if (finalStatus === "LATE") finalStatus = "TARDY";
 
-        let finalCheckIn = checkInDateMatch ? existing.checkInTime : null;
-        let finalCheckOut = (checkOutDateMatch || (checkInDateMatch && existing.checkOutTime)) ? existing.checkOutTime : null;
-
-        const hasWorkedShift = Boolean(checkInDateMatch && (totalWorkedMinutes > 0 || finalCheckOut));
+        const hasWorkedShift = Boolean((finalCheckIn || finalCheckOut) || totalWorkedMinutes > 0);
 
         let isLate = false;
         let lateMinutes = 0;
@@ -1537,17 +1618,21 @@ exports.getAttendanceReport = async (req, res) => {
           }
         }
 
-        // Asynchronously persist any corrected schedule/lateness fields to the DB
-        if (existing?.id && finalCheckIn && (
+        // Asynchronously persist any corrected schedule/lateness/punch fields to the DB
+        if (existing?.id && (
           existing.isLate !== isLate ||
           existing.lateMinutes !== lateMinutes ||
           existing.status !== finalStatus ||
           existing.shiftStartTime !== sTime ||
-          existing.shiftEndTime !== eTime
+          existing.shiftEndTime !== eTime ||
+          (!existing.checkInTime && finalCheckIn) ||
+          (!existing.checkOutTime && finalCheckOut)
         )) {
           prisma.attendance.update({
             where: { id: existing.id },
             data: {
+              ...(finalCheckIn && !existing.checkInTime ? { checkInTime: finalCheckIn } : {}),
+              ...(finalCheckOut && !existing.checkOutTime ? { checkOutTime: finalCheckOut } : {}),
               isLate,
               lateMinutes,
               status: finalStatus,

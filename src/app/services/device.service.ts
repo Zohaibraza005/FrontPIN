@@ -46,8 +46,9 @@ export const deviceService = {
     return await apiCall(`/devices/${id}/sync`, { method: "POST" });
   },
 
-  syncAllDevices: async () => {
-    return await apiCall("/devices/sync-all", { method: "POST" });
+  syncAllDevices: async (date?: string) => {
+    const url = date ? `/devices/sync-all?date=${date}` : "/devices/sync-all";
+    return await apiCall(url, { method: "POST" });
   },
 
   pushUsers: async (employeeId?: number) => {

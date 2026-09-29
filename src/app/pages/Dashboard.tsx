@@ -55,6 +55,7 @@ import {
   CalendarDays,
   User,
   Search,
+  Building2,
 } from "lucide-react";
 import {
   BarChart,
@@ -100,6 +101,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
@@ -478,6 +480,12 @@ export const Dashboard: React.FC = () => {
         setTaskTrend(graphData.taskTrend || []);
         setDepartmentData(graphData.departmentData || []);
       } else if (user?.role === "SUPERVISOR") {
+        // Fetch supervisor's personal real-time attendance status
+        const statusRes = await attendanceAPI.getTodayStatus().catch(() => null);
+        if (statusRes) {
+          setTodayStatusState(statusRes);
+        }
+
         const statsData = await dashboardAPI.getSupervisorDashboard({
           date: formattedDate,
           location,
@@ -490,6 +498,7 @@ export const Dashboard: React.FC = () => {
 
         setStats(statsData.stats || {});
         setAttendanceData(statsData.attendanceWidget || []);
+        setCompanyName(statsData.companyName || user?.company?.name || "");
 
         setWeeklyAttendance(graphData.weeklyAttendance || []);
         setProjectStatusData(graphData.projectStatusData || []);
@@ -545,13 +554,18 @@ export const Dashboard: React.FC = () => {
       ? new Date(a.checkOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : null,
     activities: a.activities || [],
+    department: a.department || a.employee?.department?.title || "No Department",
+    company: a.company || a.employee?.company?.name || null,
+    email: a.email || a.employee?.email || "N/A",
   }));
 
   const getFilteredEmployees = (status: string) => {
     return formattedAttendance.filter((emp) => {
       const st = (emp.status || "").toLowerCase();
-      if (status === "present") return st === "present" || st === "late" || st === "working";
+      if (status === "present") return st === "present" || st === "late" || st === "tardy" || st === "working";
+      if (status === "late") return st === "late" || st === "tardy";
       if (status === "break") return st === "break" || st === "on_break";
+      if (status === "leave") return st === "leave" || st === "on_leave";
       if (status === "absent") return st === "absent";
       return st === status;
     });
@@ -567,10 +581,21 @@ export const Dashboard: React.FC = () => {
   const getTodayRecord = () => {
     const todayStr = new Date().toDateString();
 
+    let stateCheckIn = todayStatusState?.checkInTime;
+    let stateCheckOut = todayStatusState?.checkOutTime;
+    if (!stateCheckIn && todayStatusState?.punches?.length > 0) {
+      const inP = todayStatusState.punches.find((p: any) => p.type === "CHECK_IN");
+      if (inP) stateCheckIn = inP.punchTime;
+    }
+    if (!stateCheckOut && todayStatusState?.punches?.length > 0) {
+      const outP = [...todayStatusState.punches].reverse().find((p: any) => p.type === "CHECK_OUT");
+      if (outP) stateCheckOut = outP.punchTime;
+    }
+
     // 1. Prioritize todayStatusState (from dedicated /attendance/today-status endpoint)
-    if (todayStatusState && (todayStatusState.clockedIn || todayStatusState.clockedOut || todayStatusState.checkInTime)) {
+    if (todayStatusState && (todayStatusState.clockedIn || todayStatusState.clockedOut || stateCheckIn)) {
       // Verify checkInTime actually belongs to today
-      if (todayStatusState.checkInTime && new Date(todayStatusState.checkInTime).toDateString() !== todayStr) {
+      if (stateCheckIn && new Date(stateCheckIn).toDateString() !== todayStr) {
         // Old state from previous day
       } else {
         const weeklyMatch = (weeklyAttendance || []).find((att: any) => {
@@ -579,11 +604,20 @@ export const Dashboard: React.FC = () => {
           return false;
         });
 
+        let workedMins = todayStatusState.totalWorkedMinutes || weeklyMatch?.totalWorkedMinutes || 0;
+        if (!workedMins && stateCheckIn && stateCheckOut) {
+          const inMs = new Date(stateCheckIn).getTime();
+          const outMs = new Date(stateCheckOut).getTime();
+          if (outMs > inMs) {
+            workedMins = Math.floor((outMs - inMs) / 60000);
+          }
+        }
+
         return {
-          checkInTime: todayStatusState.checkInTime,
-          checkOutTime: todayStatusState.checkOutTime,
+          checkInTime: stateCheckIn,
+          checkOutTime: stateCheckOut,
           status: todayStatusState.clockedOut ? "CLOCKED_OUT" : "PRESENT",
-          totalWorkedMinutes: todayStatusState.totalWorkedMinutes || weeklyMatch?.totalWorkedMinutes || 0,
+          totalWorkedMinutes: workedMins,
           totalBreakMinutes: todayStatusState.totalBreakMinutes || weeklyMatch?.totalBreakMinutes || 0,
           punches: todayStatusState.punches || weeklyMatch?.punches || [],
         };
@@ -633,7 +667,15 @@ export const Dashboard: React.FC = () => {
       const interval = setInterval(updateTimer, 1000);
       return () => clearInterval(interval);
     } else if (todayRecord) {
-      setTodayElapsedMinutes(todayRecord.totalWorkedMinutes || 0);
+      let worked = todayRecord.totalWorkedMinutes || 0;
+      if (!worked && todayRecord.checkInTime && todayRecord.checkOutTime) {
+        const inMs = new Date(todayRecord.checkInTime).getTime();
+        const outMs = new Date(todayRecord.checkOutTime).getTime();
+        if (outMs > inMs) {
+          worked = Math.floor((outMs - inMs) / 60000);
+        }
+      }
+      setTodayElapsedMinutes(worked);
     } else {
       setTodayElapsedMinutes(0);
     }
@@ -862,94 +904,215 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
             {/* Left: Stats Cards ── takes more space on large screens */}
             <div className="xl:col-span-8 space-y-6">
-              {/* Welcome Card – clean white card with vector illustration */}
-              <div className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-6 md:p-7 flex flex-row items-center justify-between gap-4 min-h-[175px]">
-                {/* LEFT SIDE: Welcome Text + Date Filter */}
-                <div className="space-y-4 max-w-[65%] sm:max-w-[70%]">
-                  <div>
-                    <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 leading-tight">
-                      Welcome back
-                       {/* {user?.name || "User"}! */}
-                    </h1>
-                    <p className="text-sm text-gray-500 font-medium mt-1">
-                      Here's what's happening with your company today.
-                    </p>
+              {user?.role === "SUPERVISOR" ? (
+                /* Supervisor Welcome Card – Clock In / Clock Out Attendance Box */
+                <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 md:p-7 min-h-[175px]">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">
+                        Welcome To {companyName || user?.company?.name || "Frontpin"}
+                      </h2>
+                      <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-xs">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span className="font-bold text-indigo-600">
+                          {selectedDate === moment().format("YYYY-MM-DD") ? "Today:" : "Date:"}
+                        </span>
+                        <DatePicker
+                          selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
+                          maxDate={new Date()}
+                          onChange={(date: Date | null) => {
+                            if (!date) return;
+                            const today = new Date();
+                            today.setHours(23, 59, 59, 999);
+                            if (date > today) return;
+                            setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                          }}
+                          dateFormat="dd MMM yyyy"
+                          showMonthDropdown
+                          showYearDropdown
+                          dropdownMode="select"
+                          className="bg-transparent border-none text-xs font-semibold text-gray-700 p-0 focus:outline-none cursor-pointer w-24"
+                        />
+                      </div>
+                      {selectedDate !== moment().format("YYYY-MM-DD") && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                          className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors whitespace-nowrap shadow-xs"
+                        >
+                          Today
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {/* DATE FILTER */}
-                  <div className="inline-flex items-center gap-2.5 bg-gray-50/90 border border-gray-200/80 p-2.5 rounded-2xl">
-                    <Calendar className="w-4 h-4 text-blue-600 ml-1 shrink-0" />
-                    <DatePicker
-                      selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                      maxDate={new Date()}
-                      onChange={(date: Date | null) => {
-                        if (!date) return;
-                        const today = new Date();
-                        today.setHours(23, 59, 59, 999);
-                        if (date > today) return;
-                        setSelectedDate(moment(date).format("YYYY-MM-DD"));
-                      }}
-                      dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
-                      showMonthDropdown
-                      showYearDropdown
-                      dropdownMode="select"
-                      className="text-gray-900 font-semibold bg-white w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-xs cursor-pointer"
-                      placeholderText="Select date..."
-                    />
-                    {selectedDate !== moment().format("YYYY-MM-DD") && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
-                        className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs"
-                      >
-                        Today
-                      </button>
-                    )}
+                  <div className="flex flex-row items-center justify-between gap-6 my-auto pt-4">
+                    <div className="flex flex-col space-y-4">
+                      <div className="relative pl-6 space-y-3">
+                        {/* Vertical line connecting check-in and check-out */}
+                        <div className="absolute left-[4px] top-2 bottom-2 w-0.5 bg-gray-200" />
+                        
+                        {/* Check In Row */}
+                        <div className="flex items-center gap-3 text-sm whitespace-nowrap">
+                          <span className="absolute left-0 w-2.5 h-2.5 rounded-full border-2 border-green-500 bg-white" />
+                          <span className="font-semibold text-gray-700">CLOCK IN</span>
+                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-600 font-medium">{checkInTimeFormatted}</span>
+                        </div>
+
+                        {/* Check Out Row */}
+                        <div className="flex items-center gap-3 text-sm whitespace-nowrap">
+                          <span className="absolute left-0 w-2.5 h-2.5 rounded-full border-2 border-red-500 bg-white" />
+                          <span className="font-semibold text-gray-700">Clock Out</span>
+                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-600 font-medium">{checkOutTimeFormatted}</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-2xl font-bold text-gray-900">
+                          {todayHoursText}
+                        </div>
+                        <p className="text-xs text-gray-500">Today's Hours</p>
+                      </div>
+                    </div>
+
+                    {/* SVG Illustration - Modern Office Workstation */}
+                    <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
+                      <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
+                        {/* Background soft circle */}
+                        <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
+                        
+                        {/* Laptop screen base */}
+                        <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
+                        <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
+                        
+                        {/* Laptop keyboard area */}
+                        <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
+                        <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
+                        
+                        {/* Coffee mug */}
+                        <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
+                        <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
+                        <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
+                        
+                        {/* Potted Plant */}
+                        <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
+                        <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
+                        <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
+                        <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
+                        
+                        {/* Large clock */}
+                        <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
+                        <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
+                        <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
+                        <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
+                        
+                        {/* Code symbols on screen */}
+                        <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
+                        <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
+                        <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
+                        
+                        {/* Floating calendar checklist checkmark */}
+                        <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
+                        <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                  </div>
+                </Card>
+              ) : (
+                /* Admin Welcome Card – clean white card with vector illustration */
+                <div className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-6 md:p-7 flex flex-row items-center justify-between gap-4 min-h-[175px]">
+                  {/* LEFT SIDE: Welcome Text + Date Filter */}
+                  <div className="space-y-4 max-w-[65%] sm:max-w-[70%]">
+                    <div>
+                      <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 leading-tight">
+                        Welcome back
+                         {/* {user?.name || "User"}! */}
+                      </h1>
+                      <p className="text-sm text-gray-500 font-medium mt-1">
+                        Here's what's happening with your company today.
+                      </p>
+                    </div>
+
+                    {/* DATE FILTER */}
+                    <div className="inline-flex items-center gap-2.5 bg-gray-50/90 border border-gray-200/80 p-2.5 rounded-2xl">
+                      <Calendar className="w-4 h-4 text-blue-600 ml-1 shrink-0" />
+                      <DatePicker
+                        selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
+                        maxDate={new Date()}
+                        onChange={(date: Date | null) => {
+                          if (!date) return;
+                          const today = new Date();
+                          today.setHours(23, 59, 59, 999);
+                          if (date > today) return;
+                          setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                        }}
+                        dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
+                        showMonthDropdown
+                        showYearDropdown
+                        dropdownMode="select"
+                        className="text-gray-900 font-semibold bg-white w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-xs cursor-pointer"
+                        placeholderText="Select date..."
+                      />
+                      {selectedDate !== moment().format("YYYY-MM-DD") && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                          className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs"
+                        >
+                          Today
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* RIGHT SIDE: SVG Vector Illustration */}
+                  <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
+                    <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
+                      {/* Background soft circle */}
+                      <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
+                      
+                      {/* Laptop screen base */}
+                      <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
+                      <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
+                      
+                      {/* Laptop keyboard area */}
+                      <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
+                      <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
+                      
+                      {/* Coffee mug */}
+                      <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
+                      <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
+                      <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
+                      
+                      {/* Potted Plant */}
+                      <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
+                      <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
+                      <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
+                      <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
+                      
+                      {/* Large clock */}
+                      <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
+                      <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
+                      <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
+                      <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
+                      
+                      {/* Code symbols on screen */}
+                      <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
+                      <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
+                      <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
+                      
+                      {/* Floating calendar checklist checkmark */}
+                      <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
+                      <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </div>
                 </div>
-
-                {/* RIGHT SIDE: SVG Vector Illustration */}
-                <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
-                  <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
-                    {/* Background soft circle */}
-                    <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
-                    
-                    {/* Laptop screen base */}
-                    <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
-                    <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
-                    
-                    {/* Laptop keyboard area */}
-                    <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
-                    <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
-                    
-                    {/* Coffee mug */}
-                    <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
-                    <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
-                    <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
-                    
-                    {/* Potted Plant */}
-                    <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
-                    <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
-                    <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
-                    <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
-                    
-                    {/* Large clock */}
-                    <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
-                    <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                    <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                    <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
-                    
-                    {/* Code symbols on screen */}
-                    <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
-                    <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
-                    <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
-                    
-                    {/* Floating calendar checklist checkmark */}
-                    <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
-                    <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              </div>
+              )}
 
               <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
                 Attendance Stats
@@ -1229,37 +1392,88 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
-      {/* Attendance Details Sheet */}
-      <Sheet open={attendanceSheetOpen} onOpenChange={setAttendanceSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-lg p-0 overflow-y-auto bg-gray-50/50">
+      {/* Attendance Details Dialog (Centered Modal) */}
+      <Dialog open={attendanceSheetOpen} onOpenChange={setAttendanceSheetOpen}>
+        <DialogContent className="sm:max-w-xl md:max-w-2xl w-[95vw] max-h-[88vh] overflow-hidden p-0 rounded-2xl bg-white border border-gray-100 shadow-2xl flex flex-col">
           {selectedAttendance && (
-            <div className="flex flex-col min-h-full">
+            <div className="flex flex-col h-full max-h-[88vh]">
               {/* Top Banner Header */}
-              <div className="bg-white border-b border-gray-100 p-6">
+              <div className="bg-gradient-to-b from-gray-50/90 to-white border-b border-gray-100 p-5 sm:p-6 pr-12">
                 <div className="flex items-center gap-4">
-                  <div className="size-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white font-extrabold text-lg flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
+                  <div className="size-13 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-base sm:text-lg flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
                     {selectedAttendance.name
                       ? selectedAttendance.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
                       : "U"}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h2 className="text-xl font-bold text-gray-900 truncate">
-                      {selectedAttendance.name || "Employee Details"}
-                    </h2>
-                    <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1.5">
-                      <span>Today's Activity Timeline</span>
-                      <span>•</span>
-                      <span className="font-semibold text-gray-700">
-                        {selectedDate ? moment(selectedDate).format("MMM DD, YYYY") : "Today"}
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <DialogTitle className="text-lg sm:text-xl font-bold text-gray-900 truncate">
+                        {selectedAttendance.name || "Employee Details"}
+                      </DialogTitle>
+                      {(() => {
+                        const st = (selectedAttendance.status || "").toLowerCase();
+                        if (st === "present" || st === "working") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Present
+                            </span>
+                          );
+                        } else if (st === "late" || st === "tardy") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <span className="size-1.5 rounded-full bg-amber-500" />
+                              Late / Tardy
+                            </span>
+                          );
+                        } else if (st === "break" || st === "on_break") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                              <span className="size-1.5 rounded-full bg-orange-500" />
+                              On Break
+                            </span>
+                          );
+                        } else if (st === "leave" || st === "on_leave") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                              <span className="size-1.5 rounded-full bg-purple-500" />
+                              On Leave
+                            </span>
+                          );
+                        } else {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="size-1.5 rounded-full bg-rose-500" />
+                              Absent
+                            </span>
+                          );
+                        }
+                      })()}
+                    </div>
+                    <DialogDescription className="text-xs text-gray-500 font-medium mt-1 flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1">
+                        <Building2 className="size-3.5 text-gray-400" />
+                        <span className="font-semibold text-gray-700">{selectedAttendance.department || "No Department"}</span>
                       </span>
-                    </p>
+                      <span>•</span>
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="size-3.5 text-gray-400" />
+                        <span>{selectedDate ? moment(selectedDate).format("MMM DD, YYYY") : "Today"}</span>
+                      </span>
+                      {selectedAttendance.email && selectedAttendance.email !== "N/A" && (
+                        <>
+                          <span>•</span>
+                          <span className="text-gray-400 truncate max-w-[200px]">{selectedAttendance.email}</span>
+                        </>
+                      )}
+                    </DialogDescription>
                   </div>
                 </div>
 
                 {/* 3 Metric Cards */}
-                <div className="grid grid-cols-3 gap-3 mt-6">
+                <div className="grid grid-cols-3 gap-3 mt-5">
                   {/* Clock In */}
-                  <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">Clock In</span>
                       <div className="size-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
@@ -1272,7 +1486,7 @@ export const Dashboard: React.FC = () => {
                   </div>
 
                   {/* Clock Out */}
-                  <div className="bg-rose-50/60 border border-rose-100/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="bg-rose-50/70 border border-rose-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">Clock Out</span>
                       <div className="size-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
@@ -1285,64 +1499,28 @@ export const Dashboard: React.FC = () => {
                   </div>
 
                   {/* Status */}
-                  <div className="bg-blue-50/60 border border-blue-100/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="bg-blue-50/70 border border-blue-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">Status</span>
                       <div className="size-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
                         <UserCheck className="size-3.5" />
                       </div>
                     </div>
-                    <div>
-                      {(() => {
-                        const st = (selectedAttendance.status || "").toLowerCase();
-                        if (st === "present" || st === "working") {
-                          return (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Present
-                            </span>
-                          );
-                        } else if (st === "late") {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-                              Late
-                            </span>
-                          );
-                        } else if (st === "break") {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-orange-100 text-orange-800">
-                              Break
-                            </span>
-                          );
-                        } else if (st === "leave" || st === "on_leave") {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800">
-                              On Leave
-                            </span>
-                          );
-                        } else {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
-                              Absent
-                            </span>
-                          );
-                        }
-                      })()}
-                    </div>
+                    <p className="text-xs sm:text-sm font-bold text-gray-900 capitalize truncate">
+                      {selectedAttendance.status || "—"}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Activity Timeline Body */}
-              <div className="p-6 flex-1 bg-white mt-2">
-                <div className="flex items-center justify-between mb-5">
+              {/* Activity Timeline Scrollable Section */}
+              <div className="p-5 sm:p-6 overflow-y-auto flex-1 bg-white">
+                <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <div className="size-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <div className="size-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                       <Clock className="size-4" />
                     </div>
-                    <h3 className="text-base font-bold text-gray-900">
-                      Activity Timeline
-                    </h3>
+                    <h3 className="text-sm sm:text-base font-bold text-gray-900">Activity Timeline</h3>
                   </div>
                   <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 text-xs font-semibold px-2.5 py-0.5">
                     {selectedAttendance.activities?.length || 0} Entries
@@ -1350,47 +1528,47 @@ export const Dashboard: React.FC = () => {
                 </div>
 
                 {selectedAttendance.activities?.length > 0 ? (
-                  <div className="relative pl-6 border-l-2 border-indigo-100 space-y-5">
+                  <div className="relative pl-6 border-l-2 border-indigo-100 space-y-4">
                     {selectedAttendance.activities.map((act: any, idx: number) => {
                       const isTask = act.type === "task";
-                      const startTimeFormatted = new Date(act.startTime).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      });
+                      const startTimeFormatted = act.startTime
+                        ? new Date(act.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                        : "—";
                       const endTimeFormatted = act.endTime
-                        ? new Date(act.endTime).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
+                        ? new Date(act.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                         : null;
 
                       return (
                         <div key={act.id || idx} className="relative group">
                           {/* Timeline Dot */}
-                          <div className={`absolute -left-[31px] top-1.5 size-4 rounded-full border-2 border-white shadow-xs flex items-center justify-center ${
-                            isTask ? "bg-indigo-600" : "bg-amber-500"
-                          }`} />
+                          <div
+                            className={`absolute -left-[31px] top-1.5 size-4 rounded-full border-2 border-white shadow-xs flex items-center justify-center ${
+                              isTask ? "bg-indigo-600" : "bg-amber-500"
+                            }`}
+                          />
 
                           {/* Card Content */}
-                          <div className="bg-white border border-gray-200/80 hover:border-indigo-200 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all">
-                            <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="bg-gray-50/50 hover:bg-white border border-gray-200/80 hover:border-indigo-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs transition-all">
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
                               <div className="flex items-center gap-2">
-                                <div className={`size-7 rounded-lg flex items-center justify-center ${
-                                  isTask ? "bg-indigo-50 text-indigo-600" : "bg-amber-50 text-amber-600"
-                                }`}>
-                                  {isTask ? <PlayCircle className="size-4" /> : <Coffee className="size-4" />}
+                                <div
+                                  className={`size-6 rounded-lg flex items-center justify-center ${
+                                    isTask ? "bg-indigo-50 text-indigo-600" : "bg-amber-50 text-amber-600"
+                                  }`}
+                                >
+                                  {isTask ? <PlayCircle className="size-3.5" /> : <Coffee className="size-3.5" />}
                                 </div>
-                                <span className="font-bold text-sm text-gray-900 capitalize">
+                                <span className="font-bold text-xs sm:text-sm text-gray-900 capitalize">
                                   {act.type || "Activity"}
                                 </span>
                               </div>
 
-                              <span className="text-xs font-semibold font-mono text-gray-500 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
+                              <span className="text-xs font-semibold font-mono text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
                                 {startTimeFormatted} {endTimeFormatted && `→ ${endTimeFormatted}`}
                               </span>
                             </div>
 
-                            <div className="flex items-center justify-between text-xs text-gray-500 pt-1 border-t border-gray-100 mt-2">
+                            <div className="flex items-center justify-between text-xs text-gray-500 pt-1.5 border-t border-gray-200/60 mt-2">
                               <span className="flex items-center gap-1 font-medium">
                                 <span>Duration:</span>
                                 <span className="font-bold text-gray-800">
@@ -1408,7 +1586,7 @@ export const Dashboard: React.FC = () => {
                             </div>
 
                             {act.idleDetected && (
-                              <div className="mt-2.5 flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 px-2.5 py-1 rounded-lg">
+                              <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
                                 <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
                                 <span>Idle Time Detected</span>
                               </div>
@@ -1419,8 +1597,8 @@ export const Dashboard: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-12 px-4 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
-                    <div className="size-12 rounded-2xl bg-gray-100 text-gray-400 flex items-center justify-center mx-auto mb-3">
+                  <div className="text-center py-10 px-4 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200 my-2">
+                    <div className="size-12 rounded-2xl bg-gray-100 text-gray-400 flex items-center justify-center mx-auto mb-2.5">
                       <Clock className="size-6" />
                     </div>
                     <h4 className="text-sm font-bold text-gray-800">No Activities Logged</h4>
@@ -1432,8 +1610,8 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
         </>
       ) : (
         // ── REGULAR USER / EMPLOYEE VIEW ──
@@ -2544,9 +2722,7 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
                   key={emp.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (status === "present" || status === "late") {
-                      handleView(emp);
-                    }
+                    handleView(emp);
                   }}
                   className={`
                     flex items-center justify-between 

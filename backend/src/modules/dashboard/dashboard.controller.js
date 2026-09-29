@@ -111,6 +111,9 @@ const getAdminDashboard = async (req, res) => {
             activities: {
               orderBy: { startTime: "asc" },
             },
+            punches: {
+              orderBy: { punchTime: "asc" },
+            },
           },
         },
       },
@@ -151,23 +154,41 @@ const getAdminDashboard = async (req, res) => {
           keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
           keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
         }
+        if (att.punches?.length) {
+          for (const p of att.punches) {
+            if (p.type === "CHECK_IN" && p.punchTime) {
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+            }
+          }
+        }
         return keys.has(targetDateStr);
-      }) || emp.Attendance[0];
+      });
+
+      let effectiveCheckIn = attendance?.checkInTime;
+      let effectiveCheckOut = attendance?.checkOutTime;
+      if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
+        const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
+        if (firstIn) effectiveCheckIn = firstIn.punchTime;
+      }
+      if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
+        const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
+        if (lastOut) effectiveCheckOut = lastOut.punchTime;
+      }
 
       let status = "ABSENT";
 
       if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
-      } else if (attendance && attendance.checkInTime) {
+      } else if (attendance) {
         const hasOpenBreak = attendance.activities?.some(
           (a) => a.type === "BREAK" && !a.endTime
         );
         if (attendance.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") {
-          status = "TARDY";
-        } else {
-          status = "PRESENT";
+        } else if (effectiveCheckIn) {
+          status = (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") ? "TARDY" : "PRESENT";
         }
       }
 
@@ -176,9 +197,9 @@ const getAdminDashboard = async (req, res) => {
         name: `${emp.firstName} ${emp.lastName}`,
         email: emp.email || "N/A",
         status,
-        checkInTime: attendance?.checkInTime || null,
-        checkOutTime: attendance?.checkOutTime || null,
-        isLate: attendance?.isLate || false,
+        checkInTime: effectiveCheckIn || null,
+        checkOutTime: effectiveCheckOut || null,
+        isLate: Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY"),
         activities: attendance?.activities ? attendance?.activities : [],
       };
     });
@@ -640,6 +661,9 @@ const getSupervisorDashboard = async (req, res) => {
             activities: {
               orderBy: { startTime: "asc" },
             },
+            punches: {
+              orderBy: { punchTime: "asc" },
+            },
           },
         },
       },
@@ -676,27 +700,52 @@ const getSupervisorDashboard = async (req, res) => {
           keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
           keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
         }
+        if (att.punches?.length) {
+          for (const p of att.punches) {
+            if (p.type === "CHECK_IN" && p.punchTime) {
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+            }
+          }
+        }
         return keys.has(targetDateStr);
       });
+
+      let effectiveCheckIn = attendance?.checkInTime;
+      let effectiveCheckOut = attendance?.checkOutTime;
+      if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
+        const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
+        if (firstIn) effectiveCheckIn = firstIn.punchTime;
+      }
+      if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
+        const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
+        if (lastOut) effectiveCheckOut = lastOut.punchTime;
+      }
 
       let status = "ABSENT";
 
       if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
       } else if (attendance) {
-        if (attendance.status === "BREAK") {
+        const hasOpenBreak = attendance.activities?.some(
+          (a) => a.type === "BREAK" && !a.endTime
+        );
+        if (attendance.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (attendance.checkInTime) {
-          status = attendance.isLate ? "TARDY" : "PRESENT";
+        } else if (effectiveCheckIn) {
+          status = (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") ? "TARDY" : "PRESENT";
         }
       }
 
       return {
         id: emp.id,
         name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
+        email: emp.email || "N/A",
         status,
-        checkInTime: attendance?.checkInTime || null,
-        checkOutTime: attendance?.checkOutTime || null,
+        checkInTime: effectiveCheckIn || null,
+        checkOutTime: effectiveCheckOut || null,
+        isLate: Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY"),
         activities: attendance?.activities || [],
         company: emp.company?.name || null,
         department: emp.department?.title || null,
@@ -1382,7 +1431,7 @@ const getAdminDashboardGraphs = async (req, res) => {
 const getStatsDetails = async (req, res) => {
   try {
     const { category } = req.params;
-    const { date: queryDate, location: queryLocation } = req.query;
+    const { date: queryDate, location: queryLocation, department: queryDepartment } = req.query;
     const user = req.user;
     const userId = user.id;
     const organizationId = user.orgId;
@@ -1417,7 +1466,38 @@ const getStatsDetails = async (req, res) => {
     const isLocFiltered = queryLocation && String(queryLocation).toUpperCase() !== "ALL" && !isNaN(Number(queryLocation));
     const locationFilter = isLocFiltered ? { companyId: Number(queryLocation) } : {};
 
+    // Department filter (departmentId)
+    const isDeptFiltered = queryDepartment && String(queryDepartment).toUpperCase() !== "ALL" && !isNaN(Number(queryDepartment));
+    const departmentFilter = isDeptFiltered ? { departmentId: Number(queryDepartment) } : {};
+
     let list = [];
+
+    // Determine role-based scoping (especially for supervisor's own team vs all)
+    let supervisorWhere = {};
+    if (role === "SUPERVISOR") {
+      const supervisor = await prisma.employee.findUnique({
+        where: { id: userId },
+        include: {
+          privileges: true,
+          appRole: true,
+        },
+      });
+
+      const rawPrivs = supervisor?.privileges?.length
+        ? supervisor.privileges
+        : (supervisor?.appRole?.privileges
+            ? (typeof supervisor.appRole.privileges === "string"
+                ? JSON.parse(supervisor.appRole.privileges)
+                : supervisor.appRole.privileges)
+            : []);
+
+      const empPriv = rawPrivs.find((p) => p.module === "EMPLOYEE" || p.module === "ATTENDANCE");
+      const isTeamOnly = empPriv ? empPriv.ownTeamOnly === true : false;
+
+      supervisorWhere = isTeamOnly
+        ? { OR: [{ id: userId }, { supervisorId: userId }] }
+        : {};
+    }
 
     // Fetch all employees in org/location along with today's Attendance and approved leaves
     const allEmployees = await prisma.employee.findMany({
@@ -1425,12 +1505,13 @@ const getStatsDetails = async (req, res) => {
         organizationId,
         deletedAt: null,
         NOT: { role: "ADMIN" },
-        ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
+        ...(role === "SUPERVISOR" ? supervisorWhere : {}),
         ...(role === "USER" ? { id: userId } : {}),
         ...locationFilter,
+        ...departmentFilter,
       },
       include: {
-        department: { select: { title: true } },
+        department: { select: { id: true, title: true } },
         jobInfo: true,
         Attendance: {
           where: {
@@ -1453,6 +1534,9 @@ const getStatsDetails = async (req, res) => {
           include: {
             activities: {
               orderBy: { startTime: "asc" },
+            },
+            punches: {
+              orderBy: { punchTime: "asc" },
             },
           },
         },
@@ -1491,9 +1575,29 @@ const getStatsDetails = async (req, res) => {
           keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
           keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
         }
+        if (a.punches?.length) {
+          for (const p of a.punches) {
+            if (p.type === "CHECK_IN" && p.punchTime) {
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
+              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+            }
+          }
+        }
         return keys.has(targetDateStr);
-      }) || emp.Attendance[0];
+      });
       const leave = leaveMap.get(emp.id);
+
+      let effectiveCheckIn = att?.checkInTime;
+      let effectiveCheckOut = att?.checkOutTime;
+      if (att && !effectiveCheckIn && att.punches?.length > 0) {
+        const firstIn = att.punches.find((p) => p.type === "CHECK_IN");
+        if (firstIn) effectiveCheckIn = firstIn.punchTime;
+      }
+      if (att && !effectiveCheckOut && att.punches?.length > 0) {
+        const lastOut = [...att.punches].reverse().find((p) => p.type === "CHECK_OUT");
+        if (lastOut) effectiveCheckOut = lastOut.punchTime;
+      }
 
       let status = "absent";
       let clockIn = "—";
@@ -1503,10 +1607,10 @@ const getStatsDetails = async (req, res) => {
 
       if (leave) {
         status = "on_leave";
-      } else if (att && att.checkInTime) {
-        clockIn = moment(att.checkInTime).format("hh:mm A");
-        if (att.checkOutTime) {
-          clockOut = moment(att.checkOutTime).format("hh:mm A");
+      } else if (att && effectiveCheckIn) {
+        clockIn = moment(effectiveCheckIn).format("hh:mm A");
+        if (effectiveCheckOut) {
+          clockOut = moment(effectiveCheckOut).format("hh:mm A");
         }
         isLate = Boolean(att.isLate || att.status === "LATE" || att.status === "TARDY");
         lateMinutes = att.lateMinutes || 0;
@@ -1529,6 +1633,7 @@ const getStatsDetails = async (req, res) => {
         name: `${emp.firstName} ${emp.lastName}`,
         email: emp.email || "N/A",
         department: emp.department?.title || "N/A",
+        departmentId: emp.departmentId || emp.department?.id,
         role: emp.role,
         status,
         clockIn,
@@ -1558,7 +1663,7 @@ const getStatsDetails = async (req, res) => {
       // ────────────────────────────────────────────────
       case "present-today":
         list = unifiedEmployeeList.filter((e) =>
-          ["present", "late", "break", "working"].includes(e.status)
+          ["present", "late", "tardy", "break", "working"].includes(e.status)
         );
         break;
 
@@ -1581,7 +1686,7 @@ const getStatsDetails = async (req, res) => {
       // ────────────────────────────────────────────────
       case "late-tardy":
       case "late-today":
-        list = unifiedEmployeeList.filter((e) => e.isLate || e.status === "late");
+        list = unifiedEmployeeList.filter((e) => e.isLate || e.status === "late" || e.status === "tardy");
         break;
 
       case "overtime-requests":
@@ -1595,9 +1700,10 @@ const getStatsDetails = async (req, res) => {
             organizationId,
             deletedAt: null,
             NOT: { role: "ADMIN" },
-            ...(role === "SUPERVISOR" ? { supervisorId: userId } : {}),
+            ...(role === "SUPERVISOR" ? supervisorWhere : {}),
             ...(role === "USER" ? { id: userId } : {}),
             ...locationFilter,
+            ...departmentFilter,
           },
         };
 
@@ -1610,6 +1716,8 @@ const getStatsDetails = async (req, res) => {
                 firstName: true,
                 lastName: true,
                 email: true,
+                departmentId: true,
+                department: { select: { id: true, title: true } },
               },
             },
           },
@@ -1621,6 +1729,8 @@ const getStatsDetails = async (req, res) => {
           employeeId: o.employeeId,
           name: `${o.employee.firstName} ${o.employee.lastName}`,
           email: o.employee.email || "N/A",
+          department: o.employee.department?.title || "N/A",
+          departmentId: o.employee.departmentId || o.employee.department?.id,
           status: o.status ? o.status.toLowerCase() : "pending",
           hours: o.hours || 0,
           date: o.date ? moment(o.date).format("MMM DD, YYYY") : "N/A",

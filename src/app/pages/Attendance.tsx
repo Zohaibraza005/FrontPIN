@@ -387,17 +387,28 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
   const isEmpDayOff = isScheduleOffDay(emp?.Schedule, date, record?.overrideType);
   const isFutureDate = isAfter(startOfDay(new Date(date)), startOfDay(new Date()));
 
+  const prevDateStr = format(subDays(new Date(date), 1), "yyyy-MM-dd");
+  const nextDateStr = format(addDays(new Date(date), 1), "yyyy-MM-dd");
   const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+  const isCheckInOnShift = checkInDateStr === targetDateStr || checkInDateStr === nextDateStr || checkInDateStr === prevDateStr;
   const hasActualCheckInOnThisDate = Boolean(
     record?.checkInTime &&
-    checkInDateStr === targetDateStr &&
+    isCheckInOnShift &&
     (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(String(record.status).toUpperCase())))
   );
+
+  const isToday = isSameDay(date, new Date());
+  const sched = getEmployeeScheduleForDate(emp?.Schedule, date, record);
+  const sTime = sched?.startTime || "09:00";
+  const [sh, sm] = sTime.split(":").map(Number);
+  const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+  const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+  const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
   let defaultStatus = "ABSENT";
   if (isEmpDayOff && !hasActualCheckInOnThisDate) {
     defaultStatus = "OFF_DAY";
-  } else if (isFutureDate && !hasActualCheckInOnThisDate) {
+  } else if ((isFutureDate || shiftNotStartedYet || record?.status === "UPCOMING_DAY") && !hasActualCheckInOnThisDate) {
     defaultStatus = "UPCOMING_DAY";
   }
 
@@ -704,29 +715,56 @@ export const Attendance: React.FC = () => {
 
     const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate, record?.overrideType);
 
-    const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+    const prevCellDateStr = format(subDays(cellDate, 1), "yyyy-MM-dd");
+    const nextCellDateStr = format(addDays(cellDate, 1), "yyyy-MM-dd");
+
+    let effCellCheckIn = record?.checkInTime ?? null;
+    let effCellCheckOut = record?.checkOutTime ?? null;
+    if (!effCellCheckIn && record?.punches?.length) {
+      const pIn = record.punches.find((p: any) => p.type === "CHECK_IN");
+      if (pIn) effCellCheckIn = pIn.punchTime;
+    }
+    if (!effCellCheckOut && record?.punches?.length) {
+      const pOut = [...record.punches].reverse().find((p: any) => p.type === "CHECK_OUT");
+      if (pOut) effCellCheckOut = pOut.punchTime;
+    }
+
+    const checkInDateStr = effCellCheckIn ? getFormattedDateStr(effCellCheckIn) : null;
+    const checkOutDateStr = effCellCheckOut ? getFormattedDateStr(effCellCheckOut) : null;
+
+    const isCellCheckInOnShift = checkInDateStr === cellDateStr || checkInDateStr === nextCellDateStr || checkInDateStr === prevCellDateStr;
+    const isCellCheckOutOnShift = checkOutDateStr === cellDateStr || checkOutDateStr === nextCellDateStr || checkOutDateStr === prevCellDateStr;
+
     const hasActualCheckInOnThisDate = Boolean(
-      record?.checkInTime &&
-      checkInDateStr === cellDateStr &&
+      effCellCheckIn &&
+      isCellCheckInOnShift &&
       (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
     );
+
+    const isToday = isSameDay(day, new Date());
+    const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, day, record);
+    const sTime = daySchedule?.startTime || "09:00";
+    const [sh, sm] = sTime.split(":").map(Number);
+    const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+    const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+    const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
     let defaultStatus = "ABSENT";
     if (isEmpDayOff && !hasActualCheckInOnThisDate) {
       defaultStatus = "OFF_DAY";
-    } else if (isFutureDay && !hasActualCheckInOnThisDate) {
+    } else if ((isFutureDay || shiftNotStartedYet || record?.status === "UPCOMING_DAY") && !hasActualCheckInOnThisDate) {
       defaultStatus = "UPCOMING_DAY";
     }
 
     let rawStatus = record?.status;
     if (rawStatus === "LATE") rawStatus = "TARDY";
 
-    if (record?.checkInTime && !isEmpDayOff && rawStatus !== "LEAVE") {
+    if (effCellCheckIn && !isEmpDayOff && rawStatus !== "LEAVE") {
       const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, day, record);
       const graceMinutes = daySchedule?.allowEarlyIn ? (Number(daySchedule.earlyInMinutes) || 0) : 0;
       const sTime = daySchedule?.startTime || "09:00";
       const [sh, sm] = sTime.split(":").map(Number);
-      const inDate = new Date(record.checkInTime);
+      const inDate = new Date(effCellCheckIn);
       const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
       const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
       const diffFromStart = inTotalMins - shiftStartTotalMins;
@@ -743,8 +781,8 @@ export const Attendance: React.FC = () => {
     }
 
     const isOffCell = rawStatus === "OFF_DAY" || (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE");
-    const cellCheckIn = (isOffCell || checkInDateStr !== cellDateStr) ? null : (record?.checkInTime ?? null);
-    const cellCheckOut = (isOffCell || (record?.checkOutTime && getFormattedDateStr(record.checkOutTime) !== cellDateStr)) ? null : (record?.checkOutTime ?? null);
+    const cellCheckIn = (isOffCell || !isCellCheckInOnShift) ? null : effCellCheckIn;
+    const cellCheckOut = (isOffCell || !isCellCheckOutOnShift) ? null : effCellCheckOut;
 
     const finalRecord = {
       id: record?.id ?? null,
@@ -1067,7 +1105,8 @@ export const Attendance: React.FC = () => {
     try {
       setSyncingMachine(true);
       toast.loading("Connecting to machine & syncing punches...", { id: "sync-machine" });
-      const res = await deviceService.syncAllDevices();
+      const targetDateStr = format(selectedDate, "yyyy-MM-dd");
+      const res = await deviceService.syncAllDevices(targetDateStr);
       toast.success(res?.message || "Punches synced from machine successfully!", { id: "sync-machine" });
       await loadReport(false);
     } catch (err: any) {
@@ -1233,9 +1272,10 @@ export const Attendance: React.FC = () => {
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
         const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
         const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+        const isCheckInOnShift = checkInDateStr === dayStr || checkInDateStr === format(addDays(cellDate, 1), "yyyy-MM-dd") || checkInDateStr === format(subDays(cellDate, 1), "yyyy-MM-dd");
         const hasActualCheckInOnThisDate = Boolean(
           record?.checkInTime &&
-          checkInDateStr === dayStr &&
+          isCheckInOnShift &&
           (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
         );
 
@@ -1368,9 +1408,10 @@ export const Attendance: React.FC = () => {
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
                   const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
                   const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+                  const isCheckInOnShift = checkInDateStr === dayStr || checkInDateStr === format(addDays(cellDate, 1), "yyyy-MM-dd") || checkInDateStr === format(subDays(cellDate, 1), "yyyy-MM-dd");
                   const hasActualCheckInOnThisDate = Boolean(
                     record?.checkInTime &&
-                    checkInDateStr === dayStr &&
+                    isCheckInOnShift &&
                     (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
                   );
 
@@ -1838,29 +1879,56 @@ export const Attendance: React.FC = () => {
                       const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate, record?.overrideType);
                       const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
 
-                      const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
+                      const prevDateStr = format(subDays(selectedDate, 1), "yyyy-MM-dd");
+                      const nextDateStr = format(addDays(selectedDate, 1), "yyyy-MM-dd");
+
+                      let effCheckIn = record?.checkInTime ?? null;
+                      let effCheckOut = record?.checkOutTime ?? null;
+                      if (!effCheckIn && record?.punches?.length) {
+                        const pIn = record.punches.find((p: any) => p.type === "CHECK_IN");
+                        if (pIn) effCheckIn = pIn.punchTime;
+                      }
+                      if (!effCheckOut && record?.punches?.length) {
+                        const pOut = [...record.punches].reverse().find((p: any) => p.type === "CHECK_OUT");
+                        if (pOut) effCheckOut = pOut.punchTime;
+                      }
+
+                      const checkInDateStr = effCheckIn ? getFormattedDateStr(effCheckIn) : null;
+                      const checkOutDateStr = effCheckOut ? getFormattedDateStr(effCheckOut) : null;
+
+                      const isCheckInOnShift = checkInDateStr === targetDateStr || checkInDateStr === nextDateStr || checkInDateStr === prevDateStr;
+                      const isCheckOutOnShift = checkOutDateStr === targetDateStr || checkOutDateStr === nextDateStr || checkOutDateStr === prevDateStr;
+
                       const hasActualCheckInOnThisDate = Boolean(
-                        record?.checkInTime &&
-                        checkInDateStr === targetDateStr &&
+                        effCheckIn &&
+                        isCheckInOnShift &&
                         (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
                       );
+
+                      const isToday = isSameDay(selectedDate, new Date());
+                      const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
+                      const sTime = daySchedule?.startTime || "09:00";
+                      const [sh, sm] = sTime.split(":").map(Number);
+                      const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+                      const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
+                      const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
                       let defaultStatus = "ABSENT";
                       if (isEmpDayOff && !hasActualCheckInOnThisDate) {
                         defaultStatus = "OFF_DAY";
-                      } else if (isFutureDate && !hasActualCheckInOnThisDate) {
+                      } else if ((isFutureDate || shiftNotStartedYet || record?.status === "UPCOMING_DAY") && !hasActualCheckInOnThisDate) {
                         defaultStatus = "UPCOMING_DAY";
                       }
 
                       let rawStatus = record?.status;
                       if (rawStatus === "LATE") rawStatus = "TARDY";
 
-                      if (record?.checkInTime && !isEmpDayOff && rawStatus !== "LEAVE") {
+                      if (effCheckIn && !isEmpDayOff && rawStatus !== "LEAVE") {
                         const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
                         const graceMinutes = daySchedule?.allowEarlyIn ? (Number(daySchedule.earlyInMinutes) || 0) : 0;
                         const sTime = daySchedule?.startTime || "09:00";
                         const [sh, sm] = sTime.split(":").map(Number);
-                        const inDate = new Date(record.checkInTime);
+                        const inDate = new Date(effCheckIn);
                         const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
                         const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
                         const diffFromStart = inTotalMins - shiftStartTotalMins;
@@ -1878,8 +1946,8 @@ export const Attendance: React.FC = () => {
 
                       // Compute real-time elapsed minutes if actively on shift today
                       let workedMins = record?.totalWorkedMinutes ?? 0;
-                      if (record?.checkInTime && !record?.checkOutTime && isSameDay(selectedDate, new Date())) {
-                        const inMs = new Date(record.checkInTime).getTime();
+                      if (effCheckIn && !effCheckOut && isSameDay(selectedDate, new Date())) {
+                        const inMs = new Date(effCheckIn).getTime();
                         const nowMs = Date.now();
                         if (nowMs > inMs) {
                           const diffMins = Math.floor((nowMs - inMs) / 60000);
@@ -1887,13 +1955,9 @@ export const Attendance: React.FC = () => {
                         }
                       }
 
-                      const nextDateStr = format(addDays(selectedDate, 1), "yyyy-MM-dd");
-                      const checkOutDateStr = record?.checkOutTime ? getFormattedDateStr(record.checkOutTime) : null;
-                      const isCheckOutOnShift = checkOutDateStr === targetDateStr || checkOutDateStr === nextDateStr;
-
                       const isOffDayRow = rawStatus === "OFF_DAY" || (isEmpDayOff && !hasActualCheckInOnThisDate && rawStatus !== "LEAVE");
-                      const validCheckIn = (!isOffDayRow && (checkInDateStr === targetDateStr || checkInDateStr === nextDateStr)) ? (record?.checkInTime ?? null) : null;
-                      const validCheckOut = (!isOffDayRow && record?.checkOutTime && isCheckOutOnShift) ? record.checkOutTime : null;
+                      const validCheckIn = (!isOffDayRow && isCheckInOnShift) ? effCheckIn : null;
+                      const validCheckOut = (!isOffDayRow && isCheckOutOnShift) ? effCheckOut : null;
 
                       const finalRecord = {
                         ...record,
