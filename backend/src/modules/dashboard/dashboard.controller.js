@@ -89,6 +89,9 @@ const getAdminDashboard = async (req, res) => {
     const employees = await prisma.employee.findMany({
       where: employeeWhere,
       include: {
+        company: {
+          select: { timezone: true, name: true },
+        },
         Attendance: {
           where: {
             OR: [
@@ -142,29 +145,23 @@ const getAdminDashboard = async (req, res) => {
     // ────────────────────────────────────────────────
     const targetDateStr = selectedDateQuery.toFormat("yyyy-MM-dd");
     const attendanceWidget = employees.map((emp) => {
-      const attendance = emp.Attendance.find((att) => {
-        const keys = new Set();
+      const empTz = emp.company?.timezone || orgTimeZone;
+      const matchedRecords = emp.Attendance.filter((att) => {
+        let attDateStr = null;
         if (att.date) {
-          keys.add(DateTime.fromJSDate(new Date(att.date)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+          attDateStr = moment(att.date).tz(empTz).format("YYYY-MM-DD");
+        } else if (att.checkInTime) {
+          attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
-        if (att.checkInTime) {
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-        }
-        if (att.punches?.length) {
-          for (const p of att.punches) {
-            if (p.type === "CHECK_IN" && p.punchTime) {
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-            }
-          }
-        }
-        return keys.has(targetDateStr);
+        return attDateStr === targetDateStr;
       });
+
+      const attendance =
+        matchedRecords.find(
+          (a) => a.checkInTime || a.punches?.some((p) => p.type === "CHECK_IN")
+        ) ||
+        matchedRecords[0] ||
+        null;
 
       let effectiveCheckIn = attendance?.checkInTime;
       let effectiveCheckOut = attendance?.checkOutTime;
@@ -178,29 +175,34 @@ const getAdminDashboard = async (req, res) => {
       }
 
       let status = "ABSENT";
+      let isLate = false;
 
       if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
-      } else if (attendance) {
-        const hasOpenBreak = attendance.activities?.some(
+      } else if (effectiveCheckIn) {
+        isLate = Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY");
+        const hasOpenBreak = attendance?.activities?.some(
           (a) => a.type === "BREAK" && !a.endTime
         );
-        if (attendance.status === "BREAK" || hasOpenBreak) {
+        if (attendance?.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (effectiveCheckIn) {
-          status = (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") ? "TARDY" : "PRESENT";
+        } else if (isLate) {
+          status = "TARDY";
+        } else {
+          status = "PRESENT";
         }
       }
 
       return {
         id: emp.id,
-        name: `${emp.firstName} ${emp.lastName}`,
+        name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
         email: emp.email || "N/A",
         status,
         checkInTime: effectiveCheckIn || null,
         checkOutTime: effectiveCheckOut || null,
-        isLate: Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY"),
+        isLate,
         activities: attendance?.activities ? attendance?.activities : [],
+        company: emp.company?.name || null,
       };
     });
 
@@ -688,29 +690,23 @@ const getSupervisorDashboard = async (req, res) => {
     // 5️⃣ Attendance Widget
     const targetDateStr = selectedDateQuery.toFormat("yyyy-MM-dd");
     const attendanceWidget = employees.map((emp) => {
-      const attendance = emp.Attendance.find((att) => {
-        const keys = new Set();
+      const empTz = emp.company?.timezone || orgTimeZone;
+      const matchedRecords = emp.Attendance.filter((att) => {
+        let attDateStr = null;
         if (att.date) {
-          keys.add(DateTime.fromJSDate(new Date(att.date)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+          attDateStr = moment(att.date).tz(empTz).format("YYYY-MM-DD");
+        } else if (att.checkInTime) {
+          attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
-        if (att.checkInTime) {
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(att.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-        }
-        if (att.punches?.length) {
-          for (const p of att.punches) {
-            if (p.type === "CHECK_IN" && p.punchTime) {
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-            }
-          }
-        }
-        return keys.has(targetDateStr);
+        return attDateStr === targetDateStr;
       });
+
+      const attendance =
+        matchedRecords.find(
+          (a) => a.checkInTime || a.punches?.some((p) => p.type === "CHECK_IN")
+        ) ||
+        matchedRecords[0] ||
+        null;
 
       let effectiveCheckIn = attendance?.checkInTime;
       let effectiveCheckOut = attendance?.checkOutTime;
@@ -724,17 +720,21 @@ const getSupervisorDashboard = async (req, res) => {
       }
 
       let status = "ABSENT";
+      let isLate = false;
 
       if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
-      } else if (attendance) {
-        const hasOpenBreak = attendance.activities?.some(
+      } else if (effectiveCheckIn) {
+        isLate = Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY");
+        const hasOpenBreak = attendance?.activities?.some(
           (a) => a.type === "BREAK" && !a.endTime
         );
-        if (attendance.status === "BREAK" || hasOpenBreak) {
+        if (attendance?.status === "BREAK" || hasOpenBreak) {
           status = "BREAK";
-        } else if (effectiveCheckIn) {
-          status = (attendance.isLate || attendance.status === "LATE" || attendance.status === "TARDY") ? "TARDY" : "PRESENT";
+        } else if (isLate) {
+          status = "TARDY";
+        } else {
+          status = "PRESENT";
         }
       }
 
@@ -745,7 +745,7 @@ const getSupervisorDashboard = async (req, res) => {
         status,
         checkInTime: effectiveCheckIn || null,
         checkOutTime: effectiveCheckOut || null,
-        isLate: Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY"),
+        isLate,
         activities: attendance?.activities || [],
         company: emp.company?.name || null,
         department: emp.department?.title || null,
@@ -1511,6 +1511,9 @@ const getStatsDetails = async (req, res) => {
         ...departmentFilter,
       },
       include: {
+        company: {
+          select: { timezone: true, name: true },
+        },
         department: { select: { id: true, title: true } },
         jobInfo: true,
         Attendance: {
@@ -1563,29 +1566,24 @@ const getStatsDetails = async (req, res) => {
 
     // Construct full unified employee attendance status list
     const unifiedEmployeeList = allEmployees.map((emp) => {
-      const att = emp.Attendance.find((a) => {
-        const keys = new Set();
-        if (a.date) {
-          keys.add(DateTime.fromJSDate(new Date(a.date)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(a.date), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(a.date), { zone: "utc" }).toFormat("yyyy-MM-dd"));
+      const empTz = emp.company?.timezone || orgTimeZone;
+      const matchedRecords = emp.Attendance.filter((att) => {
+        let attDateStr = null;
+        if (att.date) {
+          attDateStr = moment(att.date).tz(empTz).format("YYYY-MM-DD");
+        } else if (att.checkInTime) {
+          attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
-        if (a.checkInTime) {
-          keys.add(DateTime.fromJSDate(new Date(a.checkInTime)).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-          keys.add(DateTime.fromJSDate(new Date(a.checkInTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-        }
-        if (a.punches?.length) {
-          for (const p of a.punches) {
-            if (p.type === "CHECK_IN" && p.punchTime) {
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime)).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: orgTimeZone }).toFormat("yyyy-MM-dd"));
-              keys.add(DateTime.fromJSDate(new Date(p.punchTime), { zone: "utc" }).toFormat("yyyy-MM-dd"));
-            }
-          }
-        }
-        return keys.has(targetDateStr);
+        return attDateStr === targetDateStr;
       });
+
+      const att =
+        matchedRecords.find(
+          (a) => a.checkInTime || a.punches?.some((p) => p.type === "CHECK_IN")
+        ) ||
+        matchedRecords[0] ||
+        null;
+
       const leave = leaveMap.get(emp.id);
 
       let effectiveCheckIn = att?.checkInTime;
@@ -1607,18 +1605,18 @@ const getStatsDetails = async (req, res) => {
 
       if (leave) {
         status = "on_leave";
-      } else if (att && effectiveCheckIn) {
-        clockIn = moment(effectiveCheckIn).format("hh:mm A");
+      } else if (effectiveCheckIn) {
+        clockIn = moment(effectiveCheckIn).tz(empTz).format("hh:mm A");
         if (effectiveCheckOut) {
-          clockOut = moment(effectiveCheckOut).format("hh:mm A");
+          clockOut = moment(effectiveCheckOut).tz(empTz).format("hh:mm A");
         }
-        isLate = Boolean(att.isLate || att.status === "LATE" || att.status === "TARDY");
-        lateMinutes = att.lateMinutes || 0;
+        isLate = Boolean(att?.isLate || att?.status === "LATE" || att?.status === "TARDY");
+        lateMinutes = att?.lateMinutes || 0;
 
-        const hasOpenBreak = att.activities?.some(
+        const hasOpenBreak = att?.activities?.some(
           (a) => a.type === "BREAK" && !a.endTime
         );
-        if (att.status === "BREAK" || hasOpenBreak) {
+        if (att?.status === "BREAK" || hasOpenBreak) {
           status = "break";
         } else if (isLate) {
           status = "tardy";
@@ -1630,7 +1628,7 @@ const getStatsDetails = async (req, res) => {
       return {
         id: emp.id,
         attendanceId: att?.id,
-        name: `${emp.firstName} ${emp.lastName}`,
+        name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
         email: emp.email || "N/A",
         department: emp.department?.title || "N/A",
         departmentId: emp.departmentId || emp.department?.id,

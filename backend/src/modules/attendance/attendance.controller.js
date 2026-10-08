@@ -260,6 +260,9 @@ async function autoCheckoutOverdueAttendances() {
             jobInfo: true,
           },
         },
+        punches: {
+          orderBy: { punchTime: "asc" },
+        },
       },
     });
 
@@ -310,13 +313,38 @@ async function autoCheckoutOverdueAttendances() {
       const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
       const cutoffUtc = cutoffLocal.clone().utc();
 
-      // If current time has passed the shift end + 2h OT cutoff, auto-checkout!
-      if (nowUtc.isAfter(cutoffUtc)) {
-        const inMoment = moment(att.checkInTime);
-        let effectiveOutMoment = cutoffUtc;
-        if (effectiveOutMoment.isBefore(inMoment)) {
-          effectiveOutMoment = inMoment.clone().add(540, "minutes");
+      // Check if employee ALREADY has a physical CHECK_OUT punch
+      const checkOutPunches = (att.punches || []).filter((p) => p.type === "CHECK_OUT");
+      if (checkOutPunches.length > 0) {
+        // Employee DID check out! Reconcile checkOutTime to the last check-out punch
+        const lastCheckOutPunch = checkOutPunches[checkOutPunches.length - 1];
+        const lastPunchMoment = moment(lastCheckOutPunch.punchTime);
+        const lastPunchUtc = lastPunchMoment.clone().utc();
+
+        // If user punched out after 2h cutoff, cap checkOutTime at cutoff; otherwise use exact punch time
+        const isPastCutoff = lastPunchUtc.isAfter(cutoffUtc);
+        const effectiveOutUtc = isPastCutoff ? cutoffUtc : lastPunchUtc;
+        const effectiveOutDate = effectiveOutUtc.toDate();
+
+        if (isPastCutoff) {
+          const hasAuto = (att.punches || []).some((p) => p.type === "AUTO_CLOCK_OUT");
+          if (!hasAuto) {
+            await prisma.attendancePunch.create({
+              data: {
+                attendanceId: att.id,
+                employeeId: emp.id,
+                type: "AUTO_CLOCK_OUT",
+                punchTime: cutoffUtc.toDate(),
+                device: "Auto System Checkout",
+                method: "SYSTEM",
+              },
+            });
+          }
         }
+
+        // Calculate worked minutes based on real first check-in
+        const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
+        const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
 
         let scheduledDurationMinutes = 540;
         const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
@@ -324,7 +352,53 @@ async function autoCheckoutOverdueAttendances() {
           scheduledDurationMinutes = diffShiftMins;
         }
 
-        const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutMoment.diff(inMoment, "minutes")));
+        const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutUtc.diff(trueInMoment, "minutes")));
+        const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
+        const totalWorkedMinutes = Math.min(maxAllowedWorkedMinutes, rawWorkedMinutes);
+
+        let overtimeMinutes = 0;
+        if (maxOtMinutes > 0 && totalWorkedMinutes > scheduledDurationMinutes) {
+          const rawExtra = totalWorkedMinutes - scheduledDurationMinutes;
+          if (rawExtra >= 30) {
+            overtimeMinutes = Math.min(rawExtra, maxOtMinutes);
+          }
+        }
+        if (activeSchedule.overtimeAllowed === false) {
+          overtimeMinutes = 0;
+        }
+
+        await prisma.attendance.update({
+          where: { id: att.id },
+          data: {
+            checkInTime: trueInMoment.toDate(),
+            checkOutTime: effectiveOutDate,
+            checkOutMethod: lastCheckOutPunch.method || "BIOMETRIC",
+            checkOutDevice: lastCheckOutPunch.device || null,
+            autoClockedOut: false,
+            totalWorkedMinutes,
+            overtimeMinutes,
+            isEarlyOut: false,
+            earlyOutMinutes: 0,
+          },
+        });
+        closedCount++;
+        continue;
+      }
+
+      // If NO physical CHECK_OUT punch exists:
+      // Auto-checkout ONLY if current time has passed the shift end + 2h OT cutoff!
+      if (nowUtc.isAfter(cutoffUtc)) {
+        const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
+        const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
+        const cutoffDate = cutoffUtc.toDate();
+
+        let scheduledDurationMinutes = 540;
+        const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
+        if (diffShiftMins > 0) {
+          scheduledDurationMinutes = diffShiftMins;
+        }
+
+        const rawWorkedMinutes = Math.max(0, Math.round(cutoffUtc.diff(trueInMoment, "minutes")));
         const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
         const totalWorkedMinutes = Math.min(maxAllowedWorkedMinutes, rawWorkedMinutes);
 
@@ -340,12 +414,13 @@ async function autoCheckoutOverdueAttendances() {
           overtimeMinutes = 0;
         }
 
-        const cutoffDate = effectiveOutMoment.toDate();
+        const hasExistingAutoPunch = (att.punches || []).some((p) => p.type === "AUTO_CLOCK_OUT");
 
-        await prisma.$transaction([
+        const txSteps = [
           prisma.attendance.update({
             where: { id: att.id },
             data: {
+              checkInTime: trueInMoment.toDate(),
               checkOutTime: cutoffDate,
               checkOutMethod: "SYSTEM",
               autoClockedOut: true,
@@ -355,24 +430,30 @@ async function autoCheckoutOverdueAttendances() {
               earlyOutMinutes: 0,
             },
           }),
-          prisma.attendancePunch.create({
-            data: {
-              attendanceId: att.id,
-              employeeId: emp.id,
-              type: "AUTO_CLOCK_OUT",
-              punchTime: cutoffDate,
-              method: "SYSTEM",
-              device: "Auto System Checkout",
-            },
-          }),
-        ]);
+        ];
 
+        if (!hasExistingAutoPunch) {
+          txSteps.push(
+            prisma.attendancePunch.create({
+              data: {
+                attendanceId: att.id,
+                employeeId: emp.id,
+                type: "AUTO_CLOCK_OUT",
+                punchTime: cutoffDate,
+                method: "SYSTEM",
+                device: "Auto System Checkout",
+              },
+            })
+          );
+        }
+
+        await prisma.$transaction(txSteps);
         closedCount++;
       }
     }
 
     if (closedCount > 0) {
-      console.log(`[Auto-Checkout] Auto-closed ${closedCount} overdue attendance record(s) at shift end + 2h cutoff.`);
+      console.log(`[Auto-Checkout] Reconciled/auto-closed ${closedCount} overdue attendance record(s).`);
     }
 
     return { count: closedCount };
@@ -1489,17 +1570,64 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🟢 Attendance Exists */
 
-        // Retrieve effective check-in and check-out (from attendance record or real punches)
+        const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+        const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
+        const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
+        const eTime = dayShift.endTime || activeSched?.endTime || "18:00";
+        const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
+        const allowedEarlyOutMins = activeSched?.allowEarlyOut ? (Number(activeSched.earlyOutMinutes) || 0) : 0;
+
+        let maxOtMinutes = 120;
+        if (activeSched?.overtimeAllowed === false) {
+          maxOtMinutes = 0;
+        } else if (activeSched?.overtimeMinutes && Number(activeSched.overtimeMinutes) > 0) {
+          maxOtMinutes = Number(activeSched.overtimeMinutes);
+        } else if (emp.jobInfo?.maxExtraHours != null) {
+          maxOtMinutes = Number(emp.jobInfo.maxExtraHours) * 60;
+        }
+
+        const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+        let shiftEndLocal = moment.tz(`${dateStr} ${eTime}`, "YYYY-MM-DD HH:mm", empTz);
+        if (shiftEndLocal.isBefore(shiftStartLocal)) {
+          shiftEndLocal.add(1, "day");
+        }
+        const earliestAllowedInLocal = shiftStartLocal.clone().subtract(2, "hours");
+        const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+
+        // Retrieve effective check-in and check-out from punches or existing record
         let effCheckIn = existing.checkInTime || null;
         let effCheckOut = existing.checkOutTime || null;
 
-        if (!effCheckIn && existing.punches && existing.punches.length > 0) {
-          const firstIn = existing.punches.find((p) => p.type === "CHECK_IN");
-          if (firstIn) effCheckIn = firstIn.punchTime;
+        const punchesList = existing.punches || [];
+        const checkInPunches = punchesList.filter((p) => p.type === "CHECK_IN");
+        const checkOutPunches = punchesList.filter((p) => p.type === "CHECK_OUT");
+
+        // 1. Check-In: First CHECK_IN punch of the shift takes priority
+        if (checkInPunches.length > 0) {
+          effCheckIn = checkInPunches[0].punchTime;
         }
-        if (!effCheckOut && existing.punches && existing.punches.length > 0) {
-          const lastOut = [...existing.punches].reverse().find((p) => p.type === "CHECK_OUT");
-          if (lastOut) effCheckOut = lastOut.punchTime;
+
+        // Apply 2-hour early window condition: if punch is earlier than shiftStart - 2h, cap at shiftStart - 2h
+        if (effCheckIn && moment(effCheckIn).tz(empTz).isBefore(earliestAllowedInLocal)) {
+          effCheckIn = earliestAllowedInLocal.toDate();
+        }
+
+        // 2. Check-Out: Last CHECK_OUT punch takes priority
+        if (checkOutPunches.length > 0) {
+          const lastOutPunch = checkOutPunches[checkOutPunches.length - 1];
+          const lastOutMoment = moment(lastOutPunch.punchTime).tz(empTz);
+          // Apply 2-hour overtime cutoff condition: if punch is later than shiftEnd + 2h, cap at shiftEnd + 2h
+          if (lastOutMoment.isAfter(cutoffLocal)) {
+            effCheckOut = cutoffLocal.toDate();
+          } else {
+            effCheckOut = lastOutPunch.punchTime;
+          }
+        } else if (effCheckOut) {
+          // If auto clocked out or recorded without CHECK_OUT punch, ensure it does not exceed cutoff or future
+          const outMoment = moment(effCheckOut).tz(empTz);
+          if (outMoment.isAfter(cutoffLocal)) {
+            effCheckOut = cutoffLocal.toDate();
+          }
         }
 
         const nextDateStr = moment(dateStr).add(1, "day").format("YYYY-MM-DD");
@@ -1508,7 +1636,6 @@ exports.getAttendanceReport = async (req, res) => {
         const checkInDayStr = effCheckIn ? moment(effCheckIn).tz(empTz).format("YYYY-MM-DD") : null;
         const checkOutDayStr = effCheckOut ? moment(effCheckOut).tz(empTz).format("YYYY-MM-DD") : null;
 
-        // A punch belongs to this shift if on dateStr or neighboring overnight shift dates
         const checkInDateMatch = Boolean(
           checkInDayStr && (checkInDayStr === dateStr || checkInDayStr === nextDateStr || checkInDayStr === prevDateStr)
         );
@@ -1533,13 +1660,6 @@ exports.getAttendanceReport = async (req, res) => {
           totalBreakMinutes = Math.floor(calculatedBreak);
         }
 
-        const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
-        const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
-        const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
-        const eTime = dayShift.endTime || activeSched?.endTime || "18:00";
-        const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
-        const allowedEarlyOutMins = activeSched?.allowEarlyOut ? (Number(activeSched.earlyOutMinutes) || 0) : 0;
-
         let finalStatus = existing.status;
         if (finalStatus === "LATE") finalStatus = "TARDY";
 
@@ -1552,7 +1672,6 @@ exports.getAttendanceReport = async (req, res) => {
 
         if (finalCheckIn && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
           const checkInMoment = moment(finalCheckIn).tz(empTz);
-          const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
           const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
 
           if (checkInMoment.isAfter(lateThreshold)) {
@@ -1570,11 +1689,6 @@ exports.getAttendanceReport = async (req, res) => {
 
         if (finalCheckIn && finalCheckOut && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
           const checkOutMoment = moment(finalCheckOut).tz(empTz);
-          const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
-          let shiftEndLocal = moment.tz(`${dateStr} ${eTime}`, "YYYY-MM-DD HH:mm", empTz);
-          if (shiftEndLocal.isBefore(shiftStartLocal)) {
-            shiftEndLocal.add(1, "day");
-          }
           const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
 
           if (checkOutMoment.isBefore(earlyOutThreshold) && checkOutMoment.isAfter(shiftStartLocal)) {
@@ -1686,8 +1800,27 @@ exports.getAttendanceReport = async (req, res) => {
           overtimeMinutes: finalOtMinutes,
           overtimeAmount: overtime?.amount || 0,
           totalWorkedMinutes,
-          totalBreakMinutes,
-          punches: existing.punches || [],
+          punches: (() => {
+            const list = [...(existing.punches || [])];
+            const isCutoffCapped = finalCheckOut && (
+              existing.autoClockedOut ||
+              moment(finalCheckOut).tz(empTz).isSame(cutoffLocal, "minute")
+            );
+            const hasAutoPunch = list.some((p) => p.type === "AUTO_CLOCK_OUT");
+            if (isCutoffCapped && !hasAutoPunch && finalCheckOut) {
+              list.push({
+                id: `auto_${existing.id || dateStr}`,
+                attendanceId: existing.id,
+                employeeId: emp.id,
+                type: "AUTO_CLOCK_OUT",
+                punchTime: finalCheckOut,
+                device: "Auto System Checkout",
+                method: "SYSTEM",
+              });
+            }
+            list.sort((a, b) => new Date(a.punchTime) - new Date(b.punchTime));
+            return list;
+          })(),
           overrideType: dayOverride?.type || null,
           overrideReason: dayOverride?.reason || null,
           overrideScope: dayOverride?.scope || null,

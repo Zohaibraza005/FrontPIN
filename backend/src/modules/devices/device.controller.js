@@ -597,9 +597,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // 🟢 CASE A: DEDICATED CHECK-IN TERMINAL (e.g. HIKVISION Gate Pass, Gate 1)
   // =========================================================================
   if (deviceDir === "CHECK_IN") {
+    const isWayEarly = pTime.isBefore(earliestAllowedInLocal);
+    const effectiveInDate = isWayEarly ? earliestAllowedInLocal.toDate() : punchDate;
+
     // 1. If no attendance exists, record check-in
     if (!attendance) {
-      const { isLate, lateMinutes, status } = calcLateness(pTime);
+      const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
       try {
         attendance = await prisma.attendance.upsert({
           where: {
@@ -613,7 +616,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
             date: shiftStartUtc,
             shiftStartTime: schedule.startTime,
             shiftEndTime: schedule.endTime,
-            checkInTime: punchDate,
+            checkInTime: effectiveInDate,
             checkInMethod: punchMethod,
             checkInDevice: deviceTag,
             isLate,
@@ -640,11 +643,14 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     }
 
     // Attendance already exists
-    // 1. If checkInTime is missing (or was null due to checkout punch arriving first)
+    // Record real punch in AttendancePunch
+    await recordPunch(attendance.id, "CHECK_IN", punchDate);
+
+    // 1. If checkInTime is missing:
     if (!attendance.checkInTime) {
-      const { isLate, lateMinutes, status } = calcLateness(pTime);
+      const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
       const updateData = {
-        checkInTime: punchDate,
+        checkInTime: effectiveInDate,
         checkInMethod: punchMethod,
         checkInDevice: deviceTag,
         isLate,
@@ -653,7 +659,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       };
 
       if (attendance.checkOutTime) {
-        const metrics = calculateAttendanceMetrics(punchDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
+        const metrics = calculateAttendanceMetrics(effectiveInDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
         Object.assign(updateData, metrics);
       }
 
@@ -662,39 +668,15 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         data: updateData,
       });
 
-      await recordPunch(attendance.id, "CHECK_IN", punchDate);
       console.log(`[Biometric Punch] [${deviceTag}] CHECK-IN set for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
       return { success: true, type: "CHECK_IN", employee, attendance };
     }
 
-    // 2. If current checkInTime in this record is from before today's 2-hour window (an early morning punch from yesterday),
-    // replace it with today's real check-in, clear checkOutTime, and recalculate lateness!
-    if (attendance.checkInTime && moment(attendance.checkInTime).tz(timezone).isBefore(todayEarliestCheckInLocal)) {
-      const { isLate, lateMinutes, status } = calcLateness(pTime);
-      const updateData = {
-        checkInTime: punchDate,
-        checkOutTime: null,
-        totalWorkedMinutes: 0,
-        checkInMethod: punchMethod,
-        checkInDevice: deviceTag,
-        isLate,
-        lateMinutes,
-        status,
-      };
-      attendance = await prisma.attendance.update({
-        where: { id: attendance.id },
-        data: updateData,
-      });
-      await recordPunch(attendance.id, "CHECK_IN", punchDate);
-      console.log(`[Biometric Punch] [${deviceTag}] Real CHECK-IN set for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (overriding early morning punch)`);
-      return { success: true, type: "CHECK_IN", employee, attendance };
-    }
-
-    // 3. If incoming punch is EARLIER than current checkInTime
+    // 2. If incoming punch is EARLIER than current checkInTime:
     if (pTime.isBefore(moment(attendance.checkInTime))) {
-      const { isLate, lateMinutes, status } = calcLateness(pTime);
+      const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
       const updateData = {
-        checkInTime: punchDate,
+        checkInTime: effectiveInDate,
         checkInMethod: punchMethod,
         checkInDevice: deviceTag,
         isLate,
@@ -703,7 +685,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       };
 
       if (attendance.checkOutTime) {
-        const metrics = calculateAttendanceMetrics(punchDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
+        const metrics = calculateAttendanceMetrics(effectiveInDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
         Object.assign(updateData, metrics);
       }
 
@@ -712,15 +694,13 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         data: updateData,
       });
 
-      await recordPunch(attendance.id, "CHECK_IN", punchDate);
       console.log(`[Biometric Punch] [${deviceTag}] CHECK-IN updated earlier for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
       return { success: true, type: "CHECK_IN_UPDATED", employee, attendance };
     }
 
-    // 3. Subsequent punch on Gate Pass or Gate 1 during the shift:
-    // ALWAYS record as CHECK_IN punch, NEVER set or overwrite checkOutTime!
-    await recordPunch(attendance.id, "CHECK_IN", punchDate);
-    console.log(`[Biometric Punch] [${deviceTag}] Additional CHECK-IN stored for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
+    // 3. Subsequent check-in punch during the shift (e.g. at 4:27 AM or passing gates):
+    // Real punch is already saved in AttendancePunch. DO NOT overwrite checkInTime and DO NOT clear checkOutTime!
+    console.log(`[Biometric Punch] [${deviceTag}] Subsequent CHECK-IN stored for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
     return { success: true, type: "CHECK_IN_STORED", employee, attendance };
   }
 
@@ -730,7 +710,6 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   if (deviceDir === "CHECK_OUT") {
     const isPastCutoff = pTime.isAfter(cutoffLocal);
     const effectiveCheckOutDate = isPastCutoff ? cutoffUtc.toDate() : punchDate;
-    const autoClockedOut = isPastCutoff;
 
     if (!attendance) {
       // Create attendance record with Check-Out (Check-In pending)
@@ -752,7 +731,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
             checkOutMethod: punchMethod,
             checkOutDevice: deviceTag,
             status: "PRESENT",
-            autoClockedOut,
+            autoClockedOut: false,
           },
           update: {},
         });
@@ -767,7 +746,6 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       }
 
       if (attendance) {
-        // ALWAYS store the real physical punch in AttendancePunch
         await recordPunch(attendance.id, "CHECK_OUT", punchDate);
         console.log(`[Biometric Punch] [${deviceTag}] CHECK-OUT recorded for ${employee.firstName} ${employee.lastName} (${bioIdStr})`);
         return { success: true, type: "CHECK_OUT", employee, attendance };
@@ -775,19 +753,19 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     }
 
     // Attendance already exists
-    // ALWAYS store the real physical punch in AttendancePunch
+    // Real physical punch is ALWAYS stored in AttendancePunch
     await recordPunch(attendance.id, "CHECK_OUT", punchDate);
 
     // Update checkOutTime with latest exit punch (capped at cutoff if past cutoff)
     const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
-    const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment);
+    const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment) || attendance.autoClockedOut;
 
     if (isLatestOut) {
       const updateData = {
         checkOutTime: effectiveCheckOutDate,
         checkOutMethod: punchMethod,
         checkOutDevice: deviceTag,
-        autoClockedOut,
+        autoClockedOut: false, // User explicitly punched out!
       };
 
       if (attendance.checkInTime) {
@@ -803,14 +781,35 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       console.log(`[Biometric Punch] [${deviceTag}] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Capped: ${isPastCutoff})`);
     }
 
+    if (isPastCutoff) {
+      const existingAuto = await prisma.attendancePunch.findFirst({
+        where: { attendanceId: attendance.id, type: "AUTO_CLOCK_OUT" },
+      });
+      if (!existingAuto) {
+        await prisma.attendancePunch.create({
+          data: {
+            attendanceId: attendance.id,
+            employeeId: employee.id,
+            type: "AUTO_CLOCK_OUT",
+            punchTime: cutoffUtc.toDate(),
+            device: "Auto System Checkout",
+            method: "SYSTEM",
+          },
+        });
+      }
+    }
+
     return { success: true, type: "CHECK_OUT", employee, attendance };
   }
 
   // =========================================================================
   // ⚪ CASE C: DYNAMIC / UNASSIGNED TERMINALS (e.g. Enrolling Device)
   // =========================================================================
+  const isWayEarly = pTime.isBefore(earliestAllowedInLocal);
+  const effectiveInDate = isWayEarly ? earliestAllowedInLocal.toDate() : punchDate;
+
   if (!attendance) {
-    const { isLate, lateMinutes, status } = calcLateness(pTime);
+    const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
 
     try {
       attendance = await prisma.attendance.upsert({
@@ -825,7 +824,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
           date: shiftStartUtc,
           shiftStartTime: schedule.startTime,
           shiftEndTime: schedule.endTime,
-          checkInTime: punchDate,
+          checkInTime: effectiveInDate,
           checkInMethod: punchMethod,
           checkInDevice: deviceTag,
           isLate,
@@ -854,14 +853,9 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // Attendance already exists for dynamic terminal
   // If checkInTime is missing
   if (!attendance.checkInTime) {
-    if (pTime.isBefore(earliestAllowedInLocal)) {
-      await recordPunch(attendance.id, "CHECK_IN", punchDate);
-      return { success: true, type: "EARLY_PUNCH_RECORDED", employee, attendance };
-    }
-
-    const { isLate, lateMinutes, status } = calcLateness(pTime);
+    const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
     const updateData = {
-      checkInTime: punchDate,
+      checkInTime: effectiveInDate,
       checkInMethod: punchMethod,
       checkInDevice: deviceTag,
       isLate,
@@ -870,7 +864,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     };
 
     if (attendance.checkOutTime) {
-      const metrics = calculateAttendanceMetrics(punchDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
+      const metrics = calculateAttendanceMetrics(effectiveInDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
       Object.assign(updateData, metrics);
     }
 
@@ -883,39 +877,13 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     return { success: true, type: "CHECK_IN", employee, attendance };
   }
 
-  // If current checkInTime in this record is from before today's 2-hour window (an early morning punch from yesterday),
-  // replace it with today's real check-in, clear checkOutTime, and recalculate lateness!
-  if (attendance.checkInTime && moment(attendance.checkInTime).tz(timezone).isBefore(todayEarliestCheckInLocal)) {
-    const { isLate, lateMinutes, status } = calcLateness(pTime);
-    const updateData = {
-      checkInTime: punchDate,
-      checkOutTime: null,
-      totalWorkedMinutes: 0,
-      checkInMethod: punchMethod,
-      checkInDevice: deviceTag,
-      isLate,
-      lateMinutes,
-      status,
-    };
-    attendance = await prisma.attendance.update({
-      where: { id: attendance.id },
-      data: updateData,
-    });
-    await recordPunch(attendance.id, "CHECK_IN", punchDate);
-    return { success: true, type: "CHECK_IN", employee, attendance };
-  }
+  const inTimeMoment = moment(attendance.checkInTime);
 
   // If incoming punch is earlier than existing checkInTime
   if (pTime.isBefore(inTimeMoment)) {
-    if (pTime.isBefore(earliestAllowedInLocal)) {
-      // Abnormally early: store in punches only, do not shift checkInTime before 2h window
-      await recordPunch(attendance.id, "CHECK_IN", punchDate);
-      return { success: true, type: "EARLY_PUNCH_RECORDED", employee, attendance };
-    }
-
-    const { isLate, lateMinutes, status } = calcLateness(pTime);
+    const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
     const updateData = {
-      checkInTime: punchDate,
+      checkInTime: effectiveInDate,
       checkInMethod: punchMethod,
       checkInDevice: deviceTag,
       isLate,
@@ -924,7 +892,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     };
 
     if (attendance.checkOutTime) {
-      const metrics = calculateAttendanceMetrics(punchDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
+      const metrics = calculateAttendanceMetrics(effectiveInDate, attendance.checkOutTime, schedule, shiftDateString, timezone);
       Object.assign(updateData, metrics);
     }
 
@@ -946,15 +914,13 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   }
 
   // Record CHECK_OUT for dynamic terminal
-  // Real physical punch is ALWAYS stored in AttendancePunch
   await recordPunch(attendance.id, "CHECK_OUT", punchDate);
 
   const isPastCutoff = pTime.isAfter(cutoffLocal);
   const effectiveCheckOutDate = isPastCutoff ? cutoffUtc.toDate() : punchDate;
-  const autoClockedOut = isPastCutoff;
 
   const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
-  const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment);
+  const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment) || attendance.autoClockedOut;
 
   if (isLatestOut) {
     const metrics = calculateAttendanceMetrics(inTimeMoment, effectiveCheckOutDate, schedule, shiftDateString, timezone);
@@ -965,12 +931,30 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         checkOutTime: effectiveCheckOutDate,
         checkOutMethod: punchMethod,
         checkOutDevice: deviceTag,
-        autoClockedOut,
+        autoClockedOut: false,
         ...metrics,
       },
     });
 
     console.log(`[Biometric Punch] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Capped: ${isPastCutoff})`);
+  }
+
+  if (isPastCutoff) {
+    const existingAuto = await prisma.attendancePunch.findFirst({
+      where: { attendanceId: attendance.id, type: "AUTO_CLOCK_OUT" },
+    });
+    if (!existingAuto) {
+      await prisma.attendancePunch.create({
+        data: {
+          attendanceId: attendance.id,
+          employeeId: employee.id,
+          type: "AUTO_CLOCK_OUT",
+          punchTime: cutoffUtc.toDate(),
+          device: "Auto System Checkout",
+          method: "SYSTEM",
+        },
+      });
+    }
   }
 
   return { success: true, type: "CHECK_OUT", employee, attendance };
