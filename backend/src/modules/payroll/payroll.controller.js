@@ -171,6 +171,19 @@ exports.createPayroll = async (req, res) => {
       }
     });
 
+    // Add overtime component if approved overtime exists
+    if (Number(overtimeAmount) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "OVERTIME",
+          title: "Overtime",
+          amount: Number(overtimeAmount),
+          createdById: req.user.id
+        }
+      });
+    }
+
     // Add bonus/deduction components if provided
     if (Number(bonus) > 0) {
       await prisma.payrollComponent.create({
@@ -430,7 +443,7 @@ exports.generateBulkPayroll = async (req, res) => {
       // CREATE PAYROLL
       //////////////////////////////////////////////////////
 
-      await prisma.payroll.create({
+      const payroll = await prisma.payroll.create({
         data: {
           employeeId: emp.id,
           organizationId: emp.organizationId || user.orgId,
@@ -451,6 +464,18 @@ exports.generateBulkPayroll = async (req, res) => {
           createdById: user.id
         }
       });
+
+      if (overtimeAmount > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "OVERTIME",
+            title: "Overtime",
+            amount: overtimeAmount,
+            createdById: user.id
+          }
+        });
+      }
 
       generated++;
     }
@@ -564,7 +589,7 @@ exports.getPayrolls = async (req, res) => {
         )
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const overtimeAmount = (p.components || [])
+      let overtimeAmount = (p.components || [])
         .filter(c => String(c.type).toUpperCase() === "OVERTIME")
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
@@ -572,9 +597,17 @@ exports.getPayrolls = async (req, res) => {
         .filter(c => String(c.type).toUpperCase() === "BONUS")
         .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-      const grossEarnings = baseSalary + extraEarnings;
+      if (overtimeAmount === 0 && p.grossSalary > baseSalary && extraEarnings === 0) {
+        overtimeAmount = Number((p.grossSalary - baseSalary).toFixed(2));
+      }
+
+      const grossEarnings = (p.components && p.components.length > 0)
+        ? (baseSalary + extraEarnings)
+        : Number(p.grossSalary || baseSalary);
       const grossDeductions = extraDeductions;
-      const netSalary = Math.max(0, grossEarnings - grossDeductions);
+      const netSalary = (p.components && p.components.length > 0)
+        ? Math.max(0, grossEarnings - grossDeductions)
+        : Number(p.netSalary || grossEarnings);
 
       return {
         ...p,
@@ -684,9 +717,13 @@ exports.getSinglePayroll = async (req, res) => {
       )
       .reduce((s, c) => s + Number(c.amount || 0), 0);
 
-    const grossEarnings = baseSalary + extraEarnings;
+    const grossEarnings = (payroll.components && payroll.components.length > 0)
+      ? (baseSalary + extraEarnings)
+      : Number(payroll.grossSalary || baseSalary);
     const grossDeductions = extraDeductions;
-    const computedNetSalary = Math.max(0, grossEarnings - grossDeductions);
+    const computedNetSalary = (payroll.components && payroll.components.length > 0)
+      ? Math.max(0, grossEarnings - grossDeductions)
+      : Number(payroll.netSalary || grossEarnings);
 
     res.json({
       ...payroll,
@@ -1744,7 +1781,7 @@ exports.updatePayroll = async (req, res) => {
           data: {
             payrollId,
             type: "OVERTIME",
-            title: "Overtime Pay",
+            title: "Overtime",
             amount: Number(overtimeAmount)
           }
         });

@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { overtimeAPI, employeeAPI, locationAPI } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
-import { Plus, Calendar, Clock, Check, X, Pencil, Trash2 } from "lucide-react";
+import { Plus, Calendar, Clock, Check, X, Pencil, Trash2, GripHorizontal, RotateCcw, Move } from "lucide-react";
 
 import {
   Card, CardContent, CardHeader, CardTitle
@@ -64,6 +64,65 @@ export const Overtime: React.FC = () => {
     rate: "1.5",
     reason: "",
   });
+
+  // 🖱️ Draggable Dialog State for Add/Edit Modal
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
+
+  // Reset drag position whenever dialog opens
+  useEffect(() => {
+    if (open) {
+      setDragOffset({ x: 0, y: 0 });
+    }
+  }, [open]);
+
+  const handleHeaderPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button") || target.closest("input") || target.closest("a") || target.closest("select")) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initX: dragOffset.x,
+      initY: dragOffset.y,
+    };
+
+    const handlePointerMove = (ev: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      const dx = ev.clientX - dragStartRef.current.startX;
+      const dy = ev.clientY - dragStartRef.current.startY;
+      const newX = dragStartRef.current.initX + dx;
+      const newY = dragStartRef.current.initY + dy;
+
+      const maxDragX = Math.max(60, window.innerWidth / 2 - 120);
+      const maxDragY = Math.max(60, window.innerHeight / 2 - 80);
+
+      setDragOffset({
+        x: Math.max(-maxDragX, Math.min(maxDragX, newX)),
+        y: Math.max(-maxDragY, Math.min(maxDragY, newY)),
+      });
+    };
+
+    const handlePointerUp = () => {
+      setIsDragging(false);
+      dragStartRef.current = null;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }, [dragOffset]);
+
+  const resetDragPosition = useCallback(() => {
+    setDragOffset({ x: 0, y: 0 });
+  }, []);
 
   const [punchVerification, setPunchVerification] = useState<{
     loading: boolean;
@@ -570,21 +629,62 @@ export const Overtime: React.FC = () => {
       {/* Add/Edit Modal */}
       <Dialog open={open} onOpenChange={(v) => {
         setOpen(v);
-        if (!v) setEditing(null);
+        if (!v) {
+          setEditing(null);
+          resetDragPosition();
+        }
       }}>
-        <DialogContent className="sm:max-w-[450px]">
-          <DialogHeader>
-            <DialogTitle>
-              {user?.role === "ADMIN"
-                ? (editing ? "Edit Overtime Record" : "Add Overtime Record")
-                : (editing ? "Edit Overtime Request" : "Request Overtime")}
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent
+          style={{
+            left: `calc(50% + ${dragOffset.x}px)`,
+            top: `calc(50% + ${dragOffset.y}px)`,
+            userSelect: isDragging ? "none" : undefined,
+          }}
+          className="w-[95vw] sm:max-w-[490px] max-h-[92vh] sm:max-h-[88vh] p-0 flex flex-col gap-0 rounded-2xl shadow-2xl border border-gray-200/90 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden"
+        >
+          {/* Draggable Sticky Header */}
+          <div
+            onPointerDown={handleHeaderPointerDown}
+            onDoubleClick={resetDragPosition}
+            className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/60 flex items-center justify-between cursor-grab active:cursor-grabbing select-none shrink-0 pr-12 transition-colors hover:bg-gray-100/60 dark:hover:bg-gray-800/40"
+            title="Click and drag to move dialog. Double-click to center."
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-xs">
+                <Clock className="w-4 h-4" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">
+                  {user?.role === "ADMIN"
+                    ? (editing ? "Edit Overtime Record" : "Add Overtime Record")
+                    : (editing ? "Edit Overtime Request" : "Request Overtime")}
+                </DialogTitle>
+                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-normal mt-0.5">
+                  <GripHorizontal className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span>Movable window • Drag header</span>
+                  {(dragOffset.x !== 0 || dragOffset.y !== 0) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        resetDragPosition();
+                      }}
+                      className="ml-1 text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                      title="Reset dialog to center"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" /> reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
 
-          <div className="space-y-4 pt-2">
+          {/* Scrollable Body for Small Screens */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5 sm:space-y-4 min-h-0">
             {user?.role === "ADMIN" && (
               <div>
-                <label className="text-xs font-semibold text-gray-700 block mb-1">Employee</label>
+                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Employee</label>
                 <SearchableSelect
                   className="w-full"
                   placeholder="Select Employee"
@@ -610,7 +710,7 @@ export const Overtime: React.FC = () => {
             )}
 
             <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Date</label>
+              <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Date</label>
               <Input
                 type="date"
                 value={formData.date}
@@ -670,9 +770,9 @@ export const Overtime: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
-                <label className="text-xs font-semibold text-gray-700 block mb-1">Hours</label>
+                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Hours</label>
                 <Input
                   type="number"
                   placeholder="Hours (e.g. 2)"
@@ -683,7 +783,7 @@ export const Overtime: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-700 block mb-1">Rate Multiplier</label>
+                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Rate Multiplier</label>
                 <Input
                   type="number"
                   step="0.1"
@@ -726,8 +826,9 @@ export const Overtime: React.FC = () => {
             )}
 
             <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Reason</label>
+              <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Reason</label>
               <Textarea
+                rows={2}
                 placeholder="Reason for overtime..."
                 value={formData.reason}
                 onChange={(e) =>
@@ -735,33 +836,35 @@ export const Overtime: React.FC = () => {
                 }
               />
             </div>
+          </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleSubmit}
-                disabled={user?.role === "USER" && punchVerification.checked && !punchVerification.canRequest}
-              >
-                {user?.role === "ADMIN"
-                  ? (editing ? "Update Overtime" : "Save Overtime")
-                  : (editing ? "Update Request" : "Submit Request")}
-              </Button>
-            </div>
-
+          {/* Sticky Pinned Footer */}
+          <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/60 flex items-center justify-end gap-2.5 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              size="sm"
+              onClick={handleSubmit}
+              disabled={user?.role === "USER" && punchVerification.checked && !punchVerification.canRequest}
+              className="shadow-sm font-medium"
+            >
+              {user?.role === "ADMIN"
+                ? (editing ? "Update Overtime" : "Save Overtime")
+                : (editing ? "Update Request" : "Submit Request")}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Confirm Delete */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="w-[92vw] sm:max-w-[400px] rounded-2xl p-6 shadow-2xl">
           <DialogHeader>
             <DialogTitle>{user?.role === "ADMIN" ? "Confirm Delete" : "Cancel Overtime Request"}</DialogTitle>
           </DialogHeader>
 
-          <p className="text-gray-600 text-sm">
+          <p className="text-gray-600 dark:text-gray-300 text-sm">
             {user?.role === "ADMIN"
               ? "Are you sure you want to delete this overtime record? This action cannot be undone."
               : "Are you sure you want to cancel this overtime request?"}

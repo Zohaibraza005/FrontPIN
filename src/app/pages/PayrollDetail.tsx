@@ -317,7 +317,10 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
   ];
 
   defaultEarningsTitles.forEach((t) => {
-    const existing = customEarnings.find((c: any) => String(c.title || "").toLowerCase() === t.toLowerCase());
+    const existing = customEarnings.find((c: any) =>
+      String(c.title || "").toLowerCase() === t.toLowerCase() ||
+      (t.toLowerCase() === "overtime" && String(c.type || "").toUpperCase() === "OVERTIME")
+    );
     earningsList.push({
       title: t,
       amount: existing ? Number(existing.amount || 0) : 0,
@@ -325,7 +328,8 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
   });
 
   customEarnings.forEach((c: any) => {
-    if (!earningsList.some((e) => e.title.toLowerCase() === String(c.title || "").toLowerCase())) {
+    const isOvertimeMatched = String(c.type || "").toUpperCase() === "OVERTIME" || String(c.title || "").toLowerCase().includes("overtime");
+    if (!isOvertimeMatched && !earningsList.some((e) => e.title.toLowerCase() === String(c.title || "").toLowerCase())) {
       earningsList.push({ title: c.title, amount: Number(c.amount || 0) });
     }
   });
