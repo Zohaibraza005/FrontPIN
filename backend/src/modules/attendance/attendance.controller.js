@@ -1594,53 +1594,44 @@ exports.getAttendanceReport = async (req, res) => {
         const earliestAllowedInLocal = shiftStartLocal.clone().subtract(2, "hours");
         const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
 
+        const nextDateStr = moment(dateStr).add(1, "day").format("YYYY-MM-DD");
+        const prevDateStr = moment(dateStr).subtract(1, "day").format("YYYY-MM-DD");
+
         // Retrieve effective check-in and check-out from punches or existing record
         let effCheckIn = existing.checkInTime || null;
         let effCheckOut = existing.checkOutTime || null;
 
         const punchesList = existing.punches || [];
-        const checkInPunches = punchesList.filter((p) => p.type === "CHECK_IN");
-        const checkOutPunches = punchesList.filter((p) => p.type === "CHECK_OUT");
+        const checkInPunches = punchesList.filter((p) => {
+          if (p.type !== "CHECK_IN") return false;
+          const pDayStr = moment(p.punchTime).tz(empTz).format("YYYY-MM-DD");
+          return pDayStr === dateStr || (pDayStr === prevDateStr && !isDayOff);
+        });
+        const checkOutPunches = punchesList.filter((p) => {
+          if (p.type !== "CHECK_OUT") return false;
+          const pDayStr = moment(p.punchTime).tz(empTz).format("YYYY-MM-DD");
+          return pDayStr === dateStr || pDayStr === nextDateStr;
+        });
 
         // 1. Check-In: First CHECK_IN punch of the shift takes priority
         if (checkInPunches.length > 0) {
           effCheckIn = checkInPunches[0].punchTime;
         }
 
-        // Apply 2-hour early window condition: if punch is earlier than shiftStart - 2h, cap at shiftStart - 2h
-        if (effCheckIn && moment(effCheckIn).tz(empTz).isBefore(earliestAllowedInLocal)) {
-          effCheckIn = earliestAllowedInLocal.toDate();
-        }
-
         // 2. Check-Out: Last CHECK_OUT punch takes priority
         if (checkOutPunches.length > 0) {
           const lastOutPunch = checkOutPunches[checkOutPunches.length - 1];
-          const lastOutMoment = moment(lastOutPunch.punchTime).tz(empTz);
-          // Apply 2-hour overtime cutoff condition: if punch is later than shiftEnd + 2h, cap at shiftEnd + 2h
-          if (lastOutMoment.isAfter(cutoffLocal)) {
-            effCheckOut = cutoffLocal.toDate();
-          } else {
-            effCheckOut = lastOutPunch.punchTime;
-          }
-        } else if (effCheckOut) {
-          // If auto clocked out or recorded without CHECK_OUT punch, ensure it does not exceed cutoff or future
-          const outMoment = moment(effCheckOut).tz(empTz);
-          if (outMoment.isAfter(cutoffLocal)) {
-            effCheckOut = cutoffLocal.toDate();
-          }
+          effCheckOut = lastOutPunch.punchTime;
         }
-
-        const nextDateStr = moment(dateStr).add(1, "day").format("YYYY-MM-DD");
-        const prevDateStr = moment(dateStr).subtract(1, "day").format("YYYY-MM-DD");
 
         const checkInDayStr = effCheckIn ? moment(effCheckIn).tz(empTz).format("YYYY-MM-DD") : null;
         const checkOutDayStr = effCheckOut ? moment(effCheckOut).tz(empTz).format("YYYY-MM-DD") : null;
 
         const checkInDateMatch = Boolean(
-          checkInDayStr && (checkInDayStr === dateStr || checkInDayStr === nextDateStr || checkInDayStr === prevDateStr)
+          checkInDayStr && (checkInDayStr === dateStr || (checkInDayStr === prevDateStr && !isDayOff))
         );
         const checkOutDateMatch = Boolean(
-          checkOutDayStr && (checkOutDayStr === dateStr || checkOutDayStr === nextDateStr || checkOutDayStr === prevDateStr)
+          checkOutDayStr && (checkOutDayStr === dateStr || checkOutDayStr === nextDateStr)
         );
 
         let finalCheckIn = checkInDateMatch ? effCheckIn : null;
@@ -1663,7 +1654,7 @@ exports.getAttendanceReport = async (req, res) => {
         let finalStatus = existing.status;
         if (finalStatus === "LATE") finalStatus = "TARDY";
 
-        const hasWorkedShift = Boolean((finalCheckIn || finalCheckOut) || totalWorkedMinutes > 0);
+        const hasWorkedShift = Boolean((finalCheckIn && checkInDayStr === dateStr) || (finalCheckOut && checkOutDayStr === dateStr) || totalWorkedMinutes > 0);
 
         let isLate = false;
         let lateMinutes = 0;
@@ -1697,11 +1688,17 @@ exports.getAttendanceReport = async (req, res) => {
           }
         }
 
-        if (isDayOff && !hasWorkedShift && existing.status !== "LEAVE") {
+        if (isDayOff && existing.status !== "LEAVE") {
           finalStatus = "OFF_DAY";
-          totalWorkedMinutes = 0;
-          finalCheckIn = null;
-          finalCheckOut = null;
+          isLate = false;
+          lateMinutes = 0;
+          isEarlyOut = false;
+          earlyOutMinutes = 0;
+          if (!hasWorkedShift) {
+            totalWorkedMinutes = 0;
+            finalCheckIn = null;
+            finalCheckOut = null;
+          }
         } else if (!finalCheckIn && existing.status !== "PRESENT" && existing.status !== "LATE" && existing.status !== "TARDY") {
           totalWorkedMinutes = 0;
         } else if (finalCheckIn && finalCheckOut) {
@@ -1710,6 +1707,8 @@ exports.getAttendanceReport = async (req, res) => {
           if (outT > inT) {
             const totalMinutes = (outT - inT) / 1000 / 60;
             totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
+          } else {
+            totalWorkedMinutes = 0;
           }
         } else if (finalCheckIn && !finalCheckOut) {
           const inT = new Date(finalCheckIn).getTime();

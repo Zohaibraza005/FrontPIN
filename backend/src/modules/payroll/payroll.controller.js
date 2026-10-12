@@ -1,6 +1,130 @@
 const prisma = require("../../config/prisma");
-const moment = require("moment");
+const moment = require("moment-timezone");
 const { calculateHourlyRate } = require("../overtime/overtime.controller");
+const { getDayOverrides, resolveOverrideForEmployee } = require("../attendance/dayOverride.service");
+
+/**
+ * Shared helper to calculate working days, attendance, leaves, and absences.
+ * - Respects employee active Schedule (or Mon-Fri default)
+ * - Respects DayOverrides (Admin holidays or forced work days)
+ * - Weekend / Off-days are NEVER counted as absent!
+ * - Unmarked working days (missing biometric punch / no DB row and no leave) are correctly counted as ABSENT!
+ */
+function calculatePayrollAttendance({
+  employee,
+  periodStart,
+  periodEnd,
+  attendances,
+  leaves,
+  dayOverrides = []
+}) {
+  const activeSched = (employee.Schedule || []).find(s => !s.deletedAt) || employee.Schedule?.[0];
+  const rawScheduleDays = activeSched?.days || [];
+  const scheduleDays = Array.isArray(rawScheduleDays)
+    ? rawScheduleDays
+        .map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || d.short || "") : String(d || ""))
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+
+  const tz = employee?.company?.timezone || "Asia/Karachi";
+  const todayStr = moment().tz(tz).format("YYYY-MM-DD");
+
+  let workingDays = 0;
+  let presentDays = 0;
+  let absentDays = 0;
+  let paidLeaves = 0;
+  let unpaidLeaves = 0;
+  let lateDays = 0;
+
+  let cursor = periodStart.clone().startOf("day");
+  const endCursor = periodEnd.clone().startOf("day");
+
+  while (cursor.isSameOrBefore(endCursor)) {
+    const dateStr = cursor.format("YYYY-MM-DD");
+    const isPastOrToday = dateStr <= todayStr;
+
+    // 1. Resolve Day Override for this employee on this date
+    const override = resolveOverrideForEmployee(employee, dateStr, dayOverrides);
+
+    // 2. Check if this is a working day
+    let isWorkingDay = false;
+    if (override) {
+      isWorkingDay = (override.type === "WORK_DAY");
+    } else if (scheduleDays.length > 0) {
+      const dShort = cursor.format("ddd").toLowerCase();
+      const dFull = cursor.format("dddd").toLowerCase();
+      isWorkingDay = scheduleDays.includes(dShort) || scheduleDays.includes(dFull);
+    } else {
+      const dow = cursor.day();
+      isWorkingDay = (dow !== 0 && dow !== 6); // Monday to Friday default
+    }
+
+    // 3. Check for approved leave on this date
+    const leave = leaves.find(l => {
+      const start = moment(l.startDate).startOf("day");
+      const end = moment(l.endDate).startOf("day");
+      return cursor.isSameOrAfter(start) && cursor.isSameOrBefore(end);
+    });
+
+    // 4. Check for attendance record on this date
+    const att = attendances.find(a => {
+      if (!a.date && !a.checkInTime) return false;
+      const attDate = a.date
+        ? moment(a.date).tz(tz).format("YYYY-MM-DD")
+        : moment(a.checkInTime).tz(tz).format("YYYY-MM-DD");
+      return attDate === dateStr;
+    });
+
+    const isPresent = Boolean(att && (att.status === "PRESENT" || att.status === "HALF_DAY" || att.checkInTime));
+    const isExplicitAbsent = Boolean(att && att.status === "ABSENT");
+
+    if (isWorkingDay) {
+      workingDays++;
+
+      if (leave) {
+        if (leave.payType === "UNPAID") {
+          unpaidLeaves++;
+        } else {
+          paidLeaves++;
+        }
+      } else if (isPresent) {
+        presentDays++;
+        if (att && att.isLate) lateDays++;
+      } else if (isExplicitAbsent) {
+        absentDays++;
+      } else if (isPastOrToday) {
+        // Scheduled working day, but no biometric punch, no attendance row, and no leave!
+        // Unmarked attendance gap is correctly counted as ABSENT!
+        absentDays++;
+      } else {
+        // Future scheduled working day -> do not penalize
+      }
+    } else {
+      // Off-day / Weekend: NEVER count as absent!
+      if (isPresent) {
+        presentDays++;
+        if (att && att.isLate) lateDays++;
+      }
+    }
+
+    cursor.add(1, "day");
+  }
+
+  if (workingDays <= 0) {
+    workingDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
+  }
+
+  return {
+    workingDays,
+    presentDays,
+    absentDays,
+    paidLeaves,
+    unpaidLeaves,
+    leaveDays: paidLeaves + unpaidLeaves,
+    lateDays
+  };
+}
 
 exports.createPayroll = async (req, res) => {
   try {
@@ -15,6 +139,8 @@ exports.createPayroll = async (req, res) => {
       include: {
         payroll: true,
         jobInfo: true,
+        company: true,
+        department: true,
         Schedule: { where: { deletedAt: null } }
       }
     });
@@ -113,41 +239,57 @@ exports.createPayroll = async (req, res) => {
       0
     );
 
-    // 🔹 Day Calculation
-    const totalDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
-    const presentDays = attendances.filter(a => a.status === "PRESENT").length;
-    const lateDays = attendances.filter(a => a.isLate).length;
-
-    let leaveDays = 0;
-    leaves.forEach(l => {
-      leaveDays += Number(l.days) || (moment(l.endDate).diff(moment(l.startDate), "days") + 1);
+    // 🔹 Day Overrides (Admin holidays or forced work days)
+    const dayOverrides = await getDayOverrides({
+      organizationId: employee.organizationId || req.user.orgId,
+      startDate: periodStart.format("YYYY-MM-DD"),
+      endDate: periodEnd.format("YYYY-MM-DD")
     });
 
-    const absentDays = Math.max(0, totalDays - presentDays - leaveDays);
+    // 🔹 Day & Attendance Calculation (Using shared helper)
+    const {
+      workingDays,
+      presentDays,
+      absentDays,
+      paidLeaves,
+      unpaidLeaves,
+      leaveDays,
+      lateDays
+    } = calculatePayrollAttendance({
+      employee,
+      periodStart,
+      periodEnd,
+      attendances,
+      leaves,
+      dayOverrides
+    });
 
     // 🔹 Salary Calculation
-    let grossSalary = Number(rate) || 0;
+    const numRate = Number(rate) || 0;
+    let dailyRate = workingDays > 0 ? (numRate / workingDays) : (numRate / 30);
+    let absentDeduction = 0;
+    let baseSalary = numRate;
 
     if (payoutType === "daily") {
-      grossSalary = rate * presentDays;
+      dailyRate = numRate;
+      baseSalary = (presentDays + paidLeaves) * dailyRate;
+      absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
     } else if (payoutType === "hourly") {
       const totalMinutes = attendances.reduce(
         (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
         0
       );
       const hoursWorked = totalMinutes / 60;
-      grossSalary = rate * hoursWorked;
+      baseSalary = numRate * hoursWorked;
     } else {
-      // monthly
-      const dailyRate = rate / totalDays;
-      const deduction = absentDays * dailyRate;
-      grossSalary = Math.max(0, rate - deduction);
+      // Monthly: calculate absent deduction based on dailyRate
+      absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
     }
 
-    grossSalary += overtimeAmount;
-    grossSalary += Number(bonus);
-    grossSalary -= Number(deductions);
-    grossSalary = Math.max(0, grossSalary);
+    // Gross salary is the earnings before deductions: base + overtime + bonus
+    const grossSalary = Math.max(0, baseSalary + overtimeAmount + Number(bonus || 0));
+    // Net salary is gross salary minus absent deduction and extra deductions
+    const netSalary = Math.max(0, grossSalary - absentDeduction - Number(deductions || 0));
 
     const payroll = await prisma.payroll.create({
       data: {
@@ -156,16 +298,16 @@ exports.createPayroll = async (req, res) => {
         periodStart: periodStart.toDate(),
         periodEnd: periodEnd.toDate(),
         payoutType: payoutType || "monthly",
-        rate: Number(rate) || 0,
+        rate: numRate,
         currency: currency || "PKR",
-        workingDays: totalDays,
+        workingDays,
         presentDays,
         absentDays,
         leaveDays,
         lateDays,
         overtimeHours,
         grossSalary,
-        netSalary: grossSalary,
+        netSalary,
         status: "GENERATED",
         createdById: req.user.id
       }
@@ -184,7 +326,7 @@ exports.createPayroll = async (req, res) => {
       });
     }
 
-    // Add bonus/deduction components if provided
+    // Add bonus component if provided
     if (Number(bonus) > 0) {
       await prisma.payrollComponent.create({
         data: {
@@ -197,6 +339,20 @@ exports.createPayroll = async (req, res) => {
       });
     }
 
+    // Add absent / unpaid days deduction component if employee had absences
+    if (Number(absentDeduction) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "DEDUCTION",
+          title: "Unpaid Days",
+          amount: Math.round(Number(absentDeduction) * 100) / 100,
+          createdById: req.user.id
+        }
+      });
+    }
+
+    // Add general deduction component if provided
     if (Number(deductions) > 0) {
       await prisma.payrollComponent.create({
         data: {
@@ -208,6 +364,15 @@ exports.createPayroll = async (req, res) => {
         }
       });
     }
+
+    // Add audit log
+    await prisma.payrollAuditLog.create({
+      data: {
+        payrollId: payroll.id,
+        action: "CREATED",
+        performedById: req.user.id
+      }
+    });
 
     res.json({ success: true, payroll });
 
@@ -236,6 +401,8 @@ exports.generateBulkPayroll = async (req, res) => {
     const baseInclude = {
       payroll: true,
       jobInfo: true,
+      company: true,
+      department: true,
       Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } }
     };
 
@@ -260,6 +427,13 @@ exports.generateBulkPayroll = async (req, res) => {
         include: baseInclude
       });
     }
+
+    // Fetch day overrides once for the full cycle range
+    const dayOverrides = await getDayOverrides({
+      organizationId: user.orgId,
+      startDate: moment({ year: Number(year), month: Number(month) - 1 }).subtract(1, "month").format("YYYY-MM-DD"),
+      endDate: moment({ year: Number(year), month: Number(month) - 1 }).add(1, "month").format("YYYY-MM-DD")
+    });
 
     let generated = 0;
     let skipped = 0;
@@ -340,104 +514,78 @@ exports.generateBulkPayroll = async (req, res) => {
       });
 
       //////////////////////////////////////////////////////
-      // WORKING DAYS USING SCHEDULE
-      //////////////////////////////////////////////////////
-
-      const rawScheduleDays = emp.Schedule?.[0]?.days || [];
-      const scheduleDays = Array.isArray(rawScheduleDays)
-        ? rawScheduleDays
-            .map(d => typeof d === "object" && d !== null ? (d.day || d.dayFull || d.name || "") : String(d || ""))
-            .map(s => s.trim().toLowerCase())
-            .filter(Boolean)
-        : [];
-
-      let workingDays = 0;
-      let cursor = periodStart.clone();
-
-      while (cursor.isSameOrBefore(periodEnd)) {
-        const dShort = cursor.format("ddd").toLowerCase();
-        const dFull = cursor.format("dddd").toLowerCase();
-        if (scheduleDays.length > 0) {
-          if (scheduleDays.includes(dShort) || scheduleDays.includes(dFull)) {
-            workingDays++;
-          }
-        } else {
-          // Standard weekdays Mon-Fri
-          const dayOfWeek = cursor.day();
-          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-            workingDays++;
-          }
-        }
-        cursor.add(1, "day");
-      }
-
-      if (workingDays <= 0) {
-        workingDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
-      }
-
-      //////////////////////////////////////////////////////
-      // ATTENDANCE COUNTS
-      //////////////////////////////////////////////////////
-
-      const presentDays = attendance.filter(a => a.status === "PRESENT").length;
-      const absentDays  = attendance.filter(a => a.status === "ABSENT").length;
-      const lateDays    = attendance.filter(a => a.isLate).length;
-
-      //////////////////////////////////////////////////////
-      // LEAVES
-      //////////////////////////////////////////////////////
-
-      let paidLeaves = 0;
-      let unpaidLeaves = 0;
-
-      for (const leave of leaves) {
-        const dCount = Number(leave.days) || 1;
-        if (leave.payType === "PAID") paidLeaves += dCount;
-        if (leave.payType === "UNPAID") unpaidLeaves += dCount;
-      }
-
-      //////////////////////////////////////////////////////
       // OVERTIME
       //////////////////////////////////////////////////////
 
-      const overtime = await prisma.overtime.aggregate({
+      const overtimes = await prisma.overtime.findMany({
         where: {
           employeeId: emp.id,
           status: "APPROVED",
           date: { gte: periodStart.toDate(), lte: periodEnd.toDate() }
-        },
-        _sum: { hours: true, amount: true }
+        }
       });
 
-      const overtimeHours = Number(overtime._sum.hours || 0);
-      const overtimeAmount = Number(overtime._sum.amount || 0);
+      const hourlyRate = calculateHourlyRate(emp.payroll, emp.Schedule);
+      const overtimeHours = overtimes.reduce((sum, o) => sum + (Number(o.hours) || 0), 0);
+      const overtimeAmount = overtimes.reduce(
+        (sum, o) => {
+          if (o.amount !== undefined && o.amount !== null && Number(o.amount) > 0) {
+            return sum + Number(o.amount);
+          }
+          return sum + ((Number(o.hours) || 0) * hourlyRate * (Number(o.rate) || 1.5));
+        },
+        0
+      );
+
+      //////////////////////////////////////////////////////
+      // ATTENDANCE & WORKING DAYS (USING SHARED HELPER)
+      //////////////////////////////////////////////////////
+
+      const {
+        workingDays,
+        presentDays,
+        absentDays,
+        paidLeaves,
+        unpaidLeaves,
+        leaveDays,
+        lateDays
+      } = calculatePayrollAttendance({
+        employee: emp,
+        periodStart,
+        periodEnd,
+        attendances: attendance,
+        leaves,
+        dayOverrides
+      });
 
       //////////////////////////////////////////////////////
       // SALARY LOGIC
       //////////////////////////////////////////////////////
 
       const rate = Number(emp.payroll.rate) || 0;
-      let grossSalary = rate;
-      let dailyRate = rate / (workingDays || 30);
+      const payoutType = emp.payroll.payoutType || "monthly";
+      let dailyRate = workingDays > 0 ? (rate / workingDays) : (rate / 30);
+      let absentDeduction = 0;
+      let baseSalary = rate;
 
-      if (emp.payroll.payoutType === "daily") {
+      if (payoutType === "daily") {
         dailyRate = rate;
-        grossSalary = Math.max(0, (presentDays + paidLeaves) * dailyRate - (absentDays + unpaidLeaves) * dailyRate);
-      } else if (emp.payroll.payoutType === "hourly") {
+        baseSalary = (presentDays + paidLeaves) * dailyRate;
+        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
+      } else if (payoutType === "hourly") {
         const totalMinutes = attendance.reduce(
           (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
           0
         );
         const totalHours = totalMinutes / 60;
-        grossSalary = totalHours * rate;
+        baseSalary = totalHours * rate;
       } else {
-        // Monthly
-        const deduction = (absentDays + unpaidLeaves) * dailyRate;
-        grossSalary = Math.max(0, rate - deduction);
+        // Monthly: calculate absent deduction based on dailyRate
+        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
       }
 
-      grossSalary += overtimeAmount;
-      const netSalary = Math.max(0, grossSalary);
+      const grossSalary = Math.max(0, baseSalary + overtimeAmount);
+      const netSalary = Math.max(0, grossSalary - absentDeduction);
 
       //////////////////////////////////////////////////////
       // CREATE PAYROLL
@@ -449,13 +597,13 @@ exports.generateBulkPayroll = async (req, res) => {
           organizationId: emp.organizationId || user.orgId,
           periodStart: periodStart.toDate(),
           periodEnd: periodEnd.toDate(),
-          payoutType: emp.payroll.payoutType || "monthly",
+          payoutType: payoutType,
           rate,
           currency: emp.payroll.currency || "PKR",
           workingDays,
           presentDays,
           absentDays,
-          leaveDays: paidLeaves + unpaidLeaves,
+          leaveDays,
           lateDays,
           overtimeHours,
           grossSalary,
@@ -471,11 +619,31 @@ exports.generateBulkPayroll = async (req, res) => {
             payrollId: payroll.id,
             type: "OVERTIME",
             title: "Overtime",
-            amount: overtimeAmount,
+            amount: Number(overtimeAmount),
             createdById: user.id
           }
         });
       }
+
+      if (Number(absentDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Unpaid Days",
+            amount: Math.round(Number(absentDeduction) * 100) / 100,
+            createdById: user.id
+          }
+        });
+      }
+
+      await prisma.payrollAuditLog.create({
+        data: {
+          payrollId: payroll.id,
+          action: "CREATED",
+          performedById: user.id
+        }
+      });
 
       generated++;
     }
@@ -1852,3 +2020,5 @@ exports.updatePayroll = async (req, res) => {
     res.status(500).json({ message: "Failed to update payroll" });
   }
 };
+
+exports.calculatePayrollAttendance = calculatePayrollAttendance;

@@ -269,9 +269,6 @@ function getDeviceDirection(deviceName, deviceTag, configuredDirection = null) {
   if (configuredDirection === "CHECK_IN" || configuredDirection === "CHECK_OUT") {
     return configuredDirection;
   }
-  if (configuredDirection === "AUTO") {
-    return null;
-  }
 
   const combined = `${deviceName || ""} ${deviceTag || ""}`.toLowerCase();
 
@@ -283,6 +280,10 @@ function getDeviceDirection(deviceName, deviceTag, configuredDirection = null) {
   // Dedicated Check-Out terminals fallback
   if (/\b(gate\s*2|gate\s*3)\b/i.test(combined)) {
     return "CHECK_OUT";
+  }
+
+  if (configuredDirection === "AUTO") {
+    return null;
   }
 
   return null;
@@ -446,12 +447,25 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
   // Decide shift date:
   // - If punch happens BEFORE today's earliest check-in window (2 hours before shift start):
-  //   It belongs to YESTERDAY'S shift (the shift that started yesterday)!
+  //   It belongs to YESTERDAY'S shift if yesterday was scheduled or an attendance exists from yesterday!
   // - If punch happens AT OR AFTER today's earliest check-in window:
   //   It belongs to TODAY'S shift!
   let shiftDateMoment = pTime.clone();
-  if (pTime.isBefore(todayEarliestCheckInLocal)) {
-    shiftDateMoment = yesterdayMoment.clone();
+  const yesterdayWasOff = isOffDay(employee.Schedule, yesterdayDateString, timezone);
+  if (pTime.isBefore(todayEarliestCheckInLocal) && deviceDir !== "CHECK_IN") {
+    const yesterdayAtt = await prisma.attendance.findFirst({
+      where: {
+        employeeId: employee.id,
+        date: {
+          gte: yesterdayMoment.clone().startOf("day").utc().toDate(),
+          lte: yesterdayMoment.clone().endOf("day").utc().toDate(),
+        },
+        checkInTime: { not: null },
+      },
+    });
+    if (yesterdayAtt || !yesterdayWasOff) {
+      shiftDateMoment = yesterdayMoment.clone();
+    }
   }
 
   const shiftDateString = shiftDateMoment.format("YYYY-MM-DD");
@@ -516,32 +530,43 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   };
 
   const recordPunch = async (attendanceId, type, time) => {
+    // Deduplicate against any punch for this employee within 1 minute
     const existing = await prisma.attendancePunch.findFirst({
       where: {
-        attendanceId,
         employeeId: employee.id,
-        type,
         punchTime: {
           gte: moment(time).subtract(1, "minutes").toDate(),
           lte: moment(time).add(1, "minutes").toDate(),
         },
       },
     });
-    if (!existing) {
-      await prisma.attendancePunch.create({
-        data: {
-          attendanceId,
-          employeeId: employee.id,
-          type,
-          punchTime: time,
-          device: deviceTag,
-          method: punchMethod,
-        },
-      });
+    if (existing) {
+      if (deviceDir && existing.type !== deviceDir) {
+        await prisma.attendancePunch.update({
+          where: { id: existing.id },
+          data: {
+            type: deviceDir,
+            device: deviceTag,
+            method: punchMethod,
+            attendanceId: attendanceId || existing.attendanceId,
+          },
+        });
+      }
+      return existing;
     }
+    return await prisma.attendancePunch.create({
+      data: {
+        attendanceId,
+        employeeId: employee.id,
+        type,
+        punchTime: time,
+        device: deviceTag,
+        method: punchMethod,
+      },
+    });
   };
 
-  // Find existing attendance for today
+  // Find existing attendance for target shift
   let attendance = null;
 
   try {
@@ -556,37 +581,22 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       orderBy: { checkInTime: "asc" },
     });
 
-    // If no attendance found for today, check for an active unclosed shift from yesterday within 11 hours (shift + 2h OT)
+    // If no attendance found for target shift date, check for yesterday's shift if this is an exit punch
     if (!attendance) {
-      const activeRecent = await prisma.attendance.findFirst({
+      const yesterdayAtt = await prisma.attendance.findFirst({
         where: {
           employeeId: employee.id,
+          date: {
+            gte: yesterdayMoment.clone().startOf("day").utc().toDate(),
+            lte: yesterdayMoment.clone().endOf("day").utc().toDate(),
+          },
           checkInTime: { not: null },
-          checkOutTime: null,
         },
         orderBy: { checkInTime: "desc" },
       });
 
-      if (activeRecent && activeRecent.checkInTime) {
-        const diffHoursFromCheckIn = pTime.diff(moment(activeRecent.checkInTime), "hours", true);
-        if (diffHoursFromCheckIn >= 0 && diffHoursFromCheckIn < 16) {
-          // If direction is CHECK_OUT or dynamic, close yesterday's shift
-          if (deviceDir === "CHECK_OUT" || deviceDir === null) {
-            attendance = activeRecent;
-          }
-        } else if (diffHoursFromCheckIn >= 16) {
-          // Auto-close past unclosed attendance at 11 hours limit (max 9h shift + 2h OT)
-          const autoOutTime = moment(activeRecent.checkInTime).add(11, "hours").toDate();
-          await prisma.attendance.update({
-            where: { id: activeRecent.id },
-            data: {
-              checkOutTime: autoOutTime,
-              autoClockedOut: true,
-              totalWorkedMinutes: 11 * 60,
-              overtimeMinutes: 120,
-            },
-          });
-        }
+      if (yesterdayAtt && (deviceDir === "CHECK_OUT" || deviceDir === null)) {
+        attendance = yesterdayAtt;
       }
     }
   } catch (err) {
@@ -597,8 +607,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // 🟢 CASE A: DEDICATED CHECK-IN TERMINAL (e.g. HIKVISION Gate Pass, Gate 1)
   // =========================================================================
   if (deviceDir === "CHECK_IN") {
-    const isWayEarly = pTime.isBefore(earliestAllowedInLocal);
-    const effectiveInDate = isWayEarly ? earliestAllowedInLocal.toDate() : punchDate;
+    const effectiveInDate = punchDate;
 
     // 1. If no attendance exists, record check-in
     if (!attendance) {
@@ -730,7 +739,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
             checkOutTime: effectiveCheckOutDate,
             checkOutMethod: punchMethod,
             checkOutDevice: deviceTag,
-            status: "PRESENT",
+            status: isOffDay(employee.Schedule, shiftDateString, timezone) ? "OFF_DAY" : "PRESENT",
             autoClockedOut: false,
           },
           update: {},
@@ -805,8 +814,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // =========================================================================
   // ⚪ CASE C: DYNAMIC / UNASSIGNED TERMINALS (e.g. Enrolling Device)
   // =========================================================================
-  const isWayEarly = pTime.isBefore(earliestAllowedInLocal);
-  const effectiveInDate = isWayEarly ? earliestAllowedInLocal.toDate() : punchDate;
+  const effectiveInDate = punchDate;
 
   if (!attendance) {
     const { isLate, lateMinutes, status } = calcLateness(moment(effectiveInDate));
