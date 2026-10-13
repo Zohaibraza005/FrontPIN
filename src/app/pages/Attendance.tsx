@@ -388,11 +388,15 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
   const isFutureDate = isAfter(startOfDay(new Date(date)), startOfDay(new Date()));
 
   const prevDateStr = format(subDays(new Date(date), 1), "yyyy-MM-dd");
+  const nextDateStr = format(addDays(new Date(date), 1), "yyyy-MM-dd");
   const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
-  const isCheckInOnShift = checkInDateStr === targetDateStr || (checkInDateStr === prevDateStr && !isEmpDayOff);
+  const isCheckInOnShift =
+    checkInDateStr === targetDateStr ||
+    (checkInDateStr === prevDateStr && !isEmpDayOff) ||
+    (checkInDateStr === nextDateStr && !isEmpDayOff);
   const hasActualCheckInOnThisDate = Boolean(
     record?.checkInTime &&
-    checkInDateStr === targetDateStr &&
+    isCheckInOnShift &&
     (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(String(record.status).toUpperCase())))
   );
 
@@ -400,7 +404,7 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
   const sched = getEmployeeScheduleForDate(emp?.Schedule, date, record);
   const sTime = sched?.startTime || "09:00";
   const [sh, sm] = sTime.split(":").map(Number);
-  const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+  const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
   const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
   const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
@@ -421,8 +425,9 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
     const [sh, sm] = sTime.split(":").map(Number);
     const inDate = new Date(record.checkInTime);
     const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
-    const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
-    const diffFromStart = inTotalMins - shiftStartTotalMins;
+    const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+    const adjustedInMins = checkInDateStr === nextDateStr ? inTotalMins + 1440 : inTotalMins;
+    const diffFromStart = adjustedInMins - shiftStartTotalMins;
 
     if (diffFromStart > graceMinutes) {
       rawStatus = "TARDY";
@@ -731,12 +736,15 @@ export const Attendance: React.FC = () => {
     const checkInDateStr = effCellCheckIn ? getFormattedDateStr(effCellCheckIn) : null;
     const checkOutDateStr = effCellCheckOut ? getFormattedDateStr(effCellCheckOut) : null;
 
-    const isCellCheckInOnShift = checkInDateStr === cellDateStr || (checkInDateStr === prevCellDateStr && !isEmpDayOff);
+    const isCellCheckInOnShift =
+      checkInDateStr === cellDateStr ||
+      (checkInDateStr === prevCellDateStr && !isEmpDayOff) ||
+      (checkInDateStr === nextCellDateStr && !isEmpDayOff);
     const isCellCheckOutOnShift = checkOutDateStr === cellDateStr || checkOutDateStr === nextCellDateStr;
 
     const hasActualCheckInOnThisDate = Boolean(
       effCellCheckIn &&
-      checkInDateStr === cellDateStr &&
+      isCellCheckInOnShift &&
       (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
     );
 
@@ -744,7 +752,7 @@ export const Attendance: React.FC = () => {
     const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, day, record);
     const sTime = daySchedule?.startTime || "09:00";
     const [sh, sm] = sTime.split(":").map(Number);
-    const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+    const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
     const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
     const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
@@ -765,8 +773,9 @@ export const Attendance: React.FC = () => {
       const [sh, sm] = sTime.split(":").map(Number);
       const inDate = new Date(effCellCheckIn);
       const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
-      const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
-      const diffFromStart = inTotalMins - shiftStartTotalMins;
+      const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+      const adjustedInMins = checkInDateStr === nextCellDateStr ? inTotalMins + 1440 : inTotalMins;
+      const diffFromStart = adjustedInMins - shiftStartTotalMins;
 
       if (diffFromStart > graceMinutes) {
         rawStatus = "TARDY";
@@ -788,14 +797,14 @@ export const Attendance: React.FC = () => {
       const inT = new Date(cellCheckIn).getTime();
       const outT = new Date(cellCheckOut).getTime();
       if (outT > inT) {
-        cellWorkedMins = Math.max(0, Math.floor((outT - inT) / 60000) - (record?.totalBreakMinutes || 0));
+        cellWorkedMins = Math.max(0, Math.min(660, Math.floor((outT - inT) / 60000) - (record?.totalBreakMinutes || 0)));
       }
     } else if (!isOffCell && cellCheckIn && !cellCheckOut && isSameDay(day, new Date())) {
       const inMs = new Date(cellCheckIn).getTime();
       const nowMs = Date.now();
       if (nowMs > inMs) {
         const diffMins = Math.floor((nowMs - inMs) / 60000);
-        cellWorkedMins = Math.max(0, Math.min(diffMins, 900) - (record?.totalBreakMinutes || 0));
+        cellWorkedMins = Math.max(0, Math.min(diffMins, 660) - (record?.totalBreakMinutes || 0));
       }
     }
 
@@ -1927,12 +1936,15 @@ export const Attendance: React.FC = () => {
                       const checkInDateStr = effCheckIn ? getFormattedDateStr(effCheckIn) : null;
                       const checkOutDateStr = effCheckOut ? getFormattedDateStr(effCheckOut) : null;
 
-                      const isCheckInOnShift = checkInDateStr === targetDateStr || (checkInDateStr === prevDateStr && !isEmpDayOff);
+                      const isCheckInOnShift =
+                        checkInDateStr === targetDateStr ||
+                        (checkInDateStr === prevDateStr && !isEmpDayOff) ||
+                        (checkInDateStr === nextDateStr && !isEmpDayOff);
                       const isCheckOutOnShift = checkOutDateStr === targetDateStr || checkOutDateStr === nextDateStr;
 
                       const hasActualCheckInOnThisDate = Boolean(
                         effCheckIn &&
-                        checkInDateStr === targetDateStr &&
+                        isCheckInOnShift &&
                         (Number(record?.totalWorkedMinutes) > 0 || (record?.status && ["PRESENT", "LATE", "TARDY"].includes(record.status.toUpperCase())))
                       );
 
@@ -1940,7 +1952,7 @@ export const Attendance: React.FC = () => {
                       const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
                       const sTime = daySchedule?.startTime || "09:00";
                       const [sh, sm] = sTime.split(":").map(Number);
-                      const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
+                      const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
                       const currentNowMins = new Date().getHours() * 60 + new Date().getMinutes();
                       const shiftNotStartedYet = isToday && currentNowMins < shiftStartTotalMins;
 
@@ -1961,8 +1973,9 @@ export const Attendance: React.FC = () => {
                         const [sh, sm] = sTime.split(":").map(Number);
                         const inDate = new Date(effCheckIn);
                         const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
-                        const shiftStartTotalMins = (sh || 9) * 60 + (sm || 0);
-                        const diffFromStart = inTotalMins - shiftStartTotalMins;
+                        const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+                        const adjustedInMins = checkInDateStr === nextDateStr ? inTotalMins + 1440 : inTotalMins;
+                        const diffFromStart = adjustedInMins - shiftStartTotalMins;
 
                         if (diffFromStart > graceMinutes) {
                           rawStatus = "TARDY";
@@ -1981,14 +1994,14 @@ export const Attendance: React.FC = () => {
                         const inMs = new Date(effCheckIn).getTime();
                         const outMs = new Date(effCheckOut).getTime();
                         if (outMs > inMs) {
-                          workedMins = Math.max(0, Math.floor((outMs - inMs) / 60000) - (record?.totalBreakMinutes || 0));
+                          workedMins = Math.max(0, Math.min(660, Math.floor((outMs - inMs) / 60000) - (record?.totalBreakMinutes || 0)));
                         }
                       } else if (effCheckIn && !effCheckOut && isSameDay(selectedDate, new Date())) {
                         const inMs = new Date(effCheckIn).getTime();
                         const nowMs = Date.now();
                         if (nowMs > inMs) {
                           const diffMins = Math.floor((nowMs - inMs) / 60000);
-                          workedMins = Math.max(0, Math.min(diffMins, 900) - (record.totalBreakMinutes || 0));
+                          workedMins = Math.max(0, Math.min(diffMins, 660) - (record.totalBreakMinutes || 0));
                         }
                       }
 

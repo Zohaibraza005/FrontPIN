@@ -8,7 +8,7 @@ let autoCheckoutTask = null;
 
 /**
  * Initializes a cron job to automatically sync attendance punches
- * from all registered biometric machines every 30 minutes.
+ * from all registered biometric machines every 5 minutes.
  */
 function initMachineSyncCron() {
   if (machineSyncTask) {
@@ -16,14 +16,15 @@ function initMachineSyncCron() {
     return;
   }
 
-  console.log("[Cron] Scheduling automatic machine punch sync every 30 minutes (cron: '*/30 * * * *')...");
+  console.log("[Cron] Scheduling automatic machine punch sync every 5 minutes (cron: '*/5 * * * *')...");
 
-  // Schedule task every 30 minutes
-  machineSyncTask = cron.schedule("*/30 * * * *", async () => {
+  // Schedule task every 5 minutes
+  machineSyncTask = cron.schedule("*/5 * * * *", async () => {
     const now = new Date().toISOString();
-    console.log(`[Cron Machine Sync] [${now}] Starting scheduled 30-minute punch sync...`);
+    console.log(`[Cron Machine Sync] [${now}] Starting scheduled 5-minute punch sync...`);
     try {
       const summary = await syncAllActiveDevices(prisma, processBiometricPunch);
+      await autoCheckoutOverdueAttendances();
       console.log(
         `[Cron Machine Sync] [${now}] Finished: ${summary.count} punches processed from ${summary.devicesSynced}/${summary.totalDevices} machine(s).`
       );
@@ -32,7 +33,7 @@ function initMachineSyncCron() {
     }
   });
 
-  console.log("[Cron] Automatic 30-minute machine punch sync scheduled successfully.");
+  console.log("[Cron] Automatic 5-minute machine punch sync scheduled successfully.");
 }
 
 /**

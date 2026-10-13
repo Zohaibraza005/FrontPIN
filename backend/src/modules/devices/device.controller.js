@@ -310,9 +310,9 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
   if (schedule?.startTime && schedule?.endTime) {
     const [sh, sm] = schedule.startTime.split(":").map(Number);
     const [eh, em] = schedule.endTime.split(":").map(Number);
-    let sMins = (sh || 9) * 60 + (sm || 0);
-    let eMins = (eh || 18) * 60 + (em || 0);
-    if (eMins < sMins) {
+    let sMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+    let eMins = (!isNaN(eh) ? eh : 18) * 60 + (!isNaN(em) ? em : 0);
+    if (eMins <= sMins) {
       eMins += 24 * 60; // Cross-midnight shift
     }
     if (eMins > sMins) {
@@ -325,7 +325,7 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
   if (schedule && schedule.overtimeAllowed === false) {
     maxOtMinutes = 0;
   } else if (schedule?.overtimeMinutes && Number(schedule.overtimeMinutes) > 0) {
-    maxOtMinutes = Number(schedule.overtimeMinutes);
+    maxOtMinutes = Math.max(120, Number(schedule.overtimeMinutes));
   }
 
   const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes; // Default 540 + 120 = 660 mins (11 hours max)
@@ -359,17 +359,23 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
       "YYYY-MM-DD HH:mm",
       timezone
     );
-    if (shiftEndLocal.isBefore(shiftStartLocal)) {
+    if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
       shiftEndLocal.add(1, "day");
     }
 
     const shiftEndUTC = shiftEndLocal.clone().utc();
     const punchUTC = outMoment.clone().utc();
+    const inLocal = inMoment.clone().tz(timezone);
 
     const allowedEarlyOutMins = schedule.allowEarlyOut ? (Number(schedule.earlyOutMinutes) || 0) : 0;
     const earlyOutThresholdUTC = shiftEndUTC.clone().subtract(allowedEarlyOutMins, "minutes");
 
-    if (punchUTC.isBefore(earlyOutThresholdUTC)) {
+    // Only flag early-out if employee checked in within 4 hours of scheduled shift start
+    if (
+      inLocal.diff(shiftStartLocal, "minutes") < 240 &&
+      punchUTC.isBefore(earlyOutThresholdUTC) &&
+      punchUTC.isAfter(inMoment.clone().utc())
+    ) {
       earlyOutMinutes = Math.max(0, shiftEndUTC.diff(punchUTC, "minutes"));
       if (earlyOutMinutes > 0) {
         isEarlyOut = true;
@@ -428,8 +434,6 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const deviceDir = getDeviceDirection(deviceName, deviceTag, deviceDirectionConfig);
 
   const todayDateString = pTime.format("YYYY-MM-DD");
-  const todayStart = pTime.clone().startOf("day").utc().toDate();
-  const todayEnd = pTime.clone().endOf("day").utc().toDate();
 
   const rawSchedule = employee.Schedule?.find((s) => !s.deletedAt) || { startTime: "09:00", endTime: "18:00" };
 
@@ -445,14 +449,25 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const todayShiftStartLocal = moment.tz(`${todayDateString} ${todayShiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
   const todayEarliestCheckInLocal = todayShiftStartLocal.clone().subtract(2, "hours");
 
+  // Yesterday's shift start and end in employee's timezone
+  const yesterdayShiftStartTime = yesterdayShift.startTime || rawSchedule.startTime || "09:00";
+  const yesterdayShiftEndTime = yesterdayShift.endTime || rawSchedule.endTime || "18:00";
+  const yesterdayShiftStartLocal = moment.tz(`${yesterdayDateString} ${yesterdayShiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
+  let yesterdayShiftEndLocal = moment.tz(`${yesterdayDateString} ${yesterdayShiftEndTime}`, "YYYY-MM-DD HH:mm", timezone);
+  if (yesterdayShiftEndLocal.isSameOrBefore(yesterdayShiftStartLocal)) {
+    yesterdayShiftEndLocal.add(1, "day");
+  }
+  const isYesterdayCrossMidnight =
+    yesterdayShiftEndLocal.format("YYYY-MM-DD") === todayDateString ||
+    yesterdayShiftStartLocal.hour() >= 12;
+
   // Decide shift date:
-  // - If punch happens BEFORE today's earliest check-in window (2 hours before shift start):
-  //   It belongs to YESTERDAY'S shift if yesterday was scheduled or an attendance exists from yesterday!
-  // - If punch happens AT OR AFTER today's earliest check-in window:
-  //   It belongs to TODAY'S shift!
+  // Early-morning punches (< 11:00 AM) that occur before today's earliest check-in window
+  // belong to yesterday's shift if the employee is on an afternoon/night shift OR has an active
+  // afternoon/night shift attendance from yesterday (even if they re-enter via a CHECK_IN gate after midnight).
   let shiftDateMoment = pTime.clone();
   const yesterdayWasOff = isOffDay(employee.Schedule, yesterdayDateString, timezone);
-  if (pTime.isBefore(todayEarliestCheckInLocal) && deviceDir !== "CHECK_IN") {
+  if (pTime.isBefore(todayEarliestCheckInLocal) && pTime.hour() < 11) {
     const yesterdayAtt = await prisma.attendance.findFirst({
       where: {
         employeeId: employee.id,
@@ -460,10 +475,37 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
           gte: yesterdayMoment.clone().startOf("day").utc().toDate(),
           lte: yesterdayMoment.clone().endOf("day").utc().toDate(),
         },
-        checkInTime: { not: null },
+      },
+      include: {
+        punches: { orderBy: { punchTime: "asc" } },
       },
     });
-    if (yesterdayAtt || !yesterdayWasOff) {
+
+    const punchMinsOfDay = pTime.hour() * 60 + pTime.minute();
+
+    if (todayShiftStartLocal.hour() >= 12 || isYesterdayCrossMidnight) {
+      if (yesterdayAtt || !yesterdayWasOff) {
+        shiftDateMoment = yesterdayMoment.clone();
+      }
+    } else if (punchMinsOfDay < 330 && todayShiftStartLocal.hour() >= 8) {
+      // Any punch between 12:00 AM and 05:29 AM for a shift starting at 08:00 AM or later
+      // is part of yesterday's night shift (never a 09:00 AM check-in 3.5+ hours early)
+      shiftDateMoment = yesterdayMoment.clone();
+    } else if (yesterdayAtt) {
+      const yInPunches = (yesterdayAtt.punches || []).filter((p) => p.type === "CHECK_IN");
+      const yFirstIn = yInPunches.length > 0 ? yInPunches[0].punchTime : yesterdayAtt.checkInTime;
+      if (yFirstIn) {
+        const yInLocal = moment(yFirstIn).tz(timezone);
+        const hoursSinceYesterdayIn = pTime.diff(yInLocal, "hours", true);
+        if (deviceDir === "CHECK_OUT" && hoursSinceYesterdayIn <= 18) {
+          shiftDateMoment = yesterdayMoment.clone();
+        } else if (yInLocal.hour() >= 13 || hoursSinceYesterdayIn <= 14) {
+          shiftDateMoment = yesterdayMoment.clone();
+        }
+      } else if (deviceDir === "CHECK_OUT") {
+        shiftDateMoment = yesterdayMoment.clone();
+      }
+    } else if (deviceDir === "CHECK_OUT" && !yesterdayWasOff) {
       shiftDateMoment = yesterdayMoment.clone();
     }
   }
@@ -489,23 +531,45 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     "YYYY-MM-DD HH:mm",
     timezone
   );
-  if (shiftEndLocal.isBefore(shiftStartLocal)) {
+  if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
     shiftEndLocal.add(1, "day");
   }
+
+  const [sh, sm] = (schedule.startTime || "09:00").split(":").map(Number);
+  const [eh, em] = (schedule.endTime || "18:00").split(":").map(Number);
+  let sMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+  let eMins = (!isNaN(eh) ? eh : 18) * 60 + (!isNaN(em) ? em : 0);
+  if (eMins <= sMins) eMins += 24 * 60;
+  const scheduledDurationMinutes = eMins > sMins ? eMins - sMins : 540;
 
   // Max extra hours (allowed overtime, default 120 mins = 2h)
   let maxOtMinutes = 120;
   if (schedule.overtimeAllowed === false) {
     maxOtMinutes = 0;
-  } else if (schedule.overtimeMinutes && Number(schedule.overtimeMinutes) > 0) {
-    maxOtMinutes = Number(schedule.overtimeMinutes);
-  } else if (employee.jobInfo?.maxExtraHours != null) {
-    maxOtMinutes = Number(employee.jobInfo.maxExtraHours) * 60;
+  } else {
+    const schedOt = Number(schedule.overtimeMinutes) || 0;
+    const jobOt = employee.jobInfo?.maxExtraHours != null ? Number(employee.jobInfo.maxExtraHours) * 60 : 0;
+    maxOtMinutes = Math.max(120, schedOt, jobOt);
   }
 
-  const earliestAllowedInLocal = shiftStartLocal.clone().subtract(2, "hours");
-  const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
-  const cutoffUtc = cutoffLocal.clone().utc();
+  const nominalCutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+
+  const getEffectiveCutoff = (inTimeVal) => {
+    if (!inTimeVal) {
+      return { cutoffLocal: nominalCutoffLocal, cutoffUtc: nominalCutoffLocal.clone().utc() };
+    }
+    const inLocal = moment(inTimeVal).tz(timezone);
+    if (inLocal.diff(shiftStartLocal, "minutes") >= 240) {
+      const dynamicCutoffLocal = moment.max(
+        nominalCutoffLocal,
+        inLocal.clone().add(scheduledDurationMinutes + maxOtMinutes, "minutes")
+      );
+      return { cutoffLocal: dynamicCutoffLocal, cutoffUtc: dynamicCutoffLocal.clone().utc() };
+    }
+    return { cutoffLocal: nominalCutoffLocal, cutoffUtc: nominalCutoffLocal.clone().utc() };
+  };
+
+  let { cutoffLocal, cutoffUtc } = getEffectiveCutoff(null);
 
   const calcLateness = (mPunch) => {
     if (isOffDay(employee.Schedule, shiftDateString, timezone)) {
@@ -601,6 +665,10 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     }
   } catch (err) {
     console.error("[Biometric Punch] Error finding attendance:", err.message);
+  }
+
+  if (attendance?.checkInTime) {
+    ({ cutoffLocal, cutoffUtc } = getEffectiveCutoff(attendance.checkInTime));
   }
 
   // =========================================================================
@@ -717,7 +785,8 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // 🔴 CASE B: DEDICATED CHECK-OUT TERMINAL (e.g. HIKVISION Gate 2, Gate 3)
   // =========================================================================
   if (deviceDir === "CHECK_OUT") {
-    const isPastCutoff = pTime.isAfter(cutoffLocal);
+    const hasValidIn = Boolean(attendance?.checkInTime);
+    const isPastCutoff = hasValidIn && pTime.isAfter(cutoffLocal) && cutoffUtc.isAfter(moment(attendance.checkInTime));
     const effectiveCheckOutDate = isPastCutoff ? cutoffUtc.toDate() : punchDate;
 
     if (!attendance) {
@@ -767,7 +836,11 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
     // Update checkOutTime with latest exit punch (capped at cutoff if past cutoff)
     const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
-    const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment) || attendance.autoClockedOut;
+    const isLatestOut =
+      !currentOutMoment ||
+      pTime.isAfter(currentOutMoment) ||
+      attendance.autoClockedOut ||
+      (attendance.checkInTime && currentOutMoment.isSameOrBefore(moment(attendance.checkInTime)));
 
     if (isLatestOut) {
       const updateData = {
@@ -1208,7 +1281,11 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
 }
 
 /**
- * Sync ALL registered active biometric devices in parallel
+ * Sync ALL registered active biometric devices:
+ * 1. Fetch raw punch logs from all devices in parallel for speed.
+ * 2. Merge and sort all punches strictly in chronological order (with CHECK_IN before CHECK_OUT on ties).
+ * 3. Process sequentially so entry punches are always recorded before exit punches.
+ * 4. Run autoCheckoutOverdueAttendances() after processing.
  */
 async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null) {
   const devices = await prismaInstance.biometricDevice.findMany({
@@ -1219,10 +1296,16 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
     return { success: true, count: 0, devicesSynced: 0, totalDevices: 0, message: "No registered biometric devices found." };
   }
 
-  // Run all device syncs concurrently in parallel for maximum speed
+  const collectedPunches = [];
+  const collectPunch = async (punchData) => {
+    collectedPunches.push(punchData);
+    return { success: true };
+  };
+
+  // 1. Fetch logs from all devices concurrently in parallel
   const syncPromises = devices.map(async (device) => {
     try {
-      const res = await syncSingleDevice(device, prismaInstance, processPunchCallback, startTime, endTime);
+      const res = await syncSingleDevice(device, prismaInstance, collectPunch, startTime, endTime);
       return res;
     } catch (err) {
       console.error(`[Device Sync Failed] ${device.name} (${device.ipAddress}):`, err.message);
@@ -1243,7 +1326,6 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
 
   const settledResults = await Promise.allSettled(syncPromises);
 
-  let totalCount = 0;
   let successfulDevices = 0;
   const results = [];
 
@@ -1251,7 +1333,6 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
     if (item.status === "fulfilled") {
       const res = item.value;
       if (res && res.success) {
-        totalCount += res.count || 0;
         successfulDevices++;
       }
       results.push(res);
@@ -1261,6 +1342,39 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
         error: item.reason?.message || "Device communication error",
       });
     }
+  }
+
+  // 2. Sort all collected punches strictly by timestamp ASC (CHECK_IN before CHECK_OUT on ties)
+  collectedPunches.sort((a, b) => {
+    const tA = new Date(a.punchTime).getTime() || 0;
+    const tB = new Date(b.punchTime).getTime() || 0;
+    if (tA !== tB) return tA - tB;
+    const dirA = getDeviceDirection(a.deviceName, a.brand, a.direction);
+    const dirB = getDeviceDirection(b.deviceName, b.brand, b.direction);
+    if (dirA === "CHECK_IN" && dirB !== "CHECK_IN") return -1;
+    if (dirB === "CHECK_IN" && dirA !== "CHECK_IN") return 1;
+    return 0;
+  });
+
+  // 3. Process chronologically
+  let totalCount = 0;
+  for (const punch of collectedPunches) {
+    try {
+      const punchRes = await processPunchCallback(punch);
+      if (punchRes?.success) totalCount++;
+    } catch (err) {
+      console.error(`[Chronological Punch Sync Error] (${punch.deviceName}):`, err.message);
+    }
+  }
+
+  // 4. Reconcile & auto-checkout overdue attendances immediately after sync
+  try {
+    const { autoCheckoutOverdueAttendances } = require("../attendance/attendance.controller");
+    if (typeof autoCheckoutOverdueAttendances === "function") {
+      await autoCheckoutOverdueAttendances();
+    }
+  } catch (err) {
+    console.error("[Post-Sync Auto-Checkout Error]:", err.message);
   }
 
   return {

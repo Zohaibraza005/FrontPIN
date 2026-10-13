@@ -140,7 +140,7 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
       port: targetPort,
       path: path,
       method: method,
-      timeout: 3000,
+      timeout: 10000,
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(postData),
@@ -475,11 +475,12 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
   let allEvents = [];
   let position = 0;
   const pageSize = 30;
+  const searchID = `sync_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   while (true) {
     const payload = {
       AcsEventCond: {
-        searchID: `sync_${Date.now()}`,
+        searchID,
         searchResultPosition: position,
         maxResults: pageSize,
         major: 0,
@@ -489,17 +490,22 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
       },
     };
 
-    const res = await sendHikvisionDigest(
-      ipAddress,
-      targetPort,
-      username || "admin",
-      password || "",
-      "POST",
-      "/ISAPI/AccessControl/AcsEvent?format=json",
-      payload
-    );
+    let res = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      res = await sendHikvisionDigest(
+        ipAddress,
+        targetPort,
+        username || "admin",
+        password || "",
+        "POST",
+        "/ISAPI/AccessControl/AcsEvent?format=json",
+        payload
+      );
+      if (res && res.status === 200 && res.body) break;
+      await new Promise((r) => setTimeout(r, 300 * attempt));
+    }
 
-    if (res.status !== 200 || !res.body) break;
+    if (!res || res.status !== 200 || !res.body) break;
 
     let data;
     try {
@@ -597,14 +603,15 @@ async function initHikvisionStreams(prisma, processPunchCallback) {
     for (const device of devices) {
       // 1. Start live alert stream
       startHikvisionStream(device, processPunchCallback);
-
-      // 2. Catch up today's logs immediately in background
-      syncHikvisionDeviceLogs(device, processPunchCallback).catch((err) => {
-        console.error(`[Hikvision Initial Sync Error] ${device.name}:`, err.message);
-      });
     }
 
-    // Note: Periodic machine sync is handled centrally by cron.service.js every 30 minutes
+    // 2. Catch up logs across all devices chronologically in background
+    const { syncAllActiveDevices } = require("./device.controller");
+    if (typeof syncAllActiveDevices === "function") {
+      syncAllActiveDevices(prisma, processPunchCallback).catch((err) => {
+        console.error(`[Hikvision Initial Chronological Sync Error]:`, err.message);
+      });
+    }
   } catch (error) {
     console.error(`[Hikvision Streams Init Error]:`, error.message);
   }

@@ -921,8 +921,6 @@ export const Payroll: React.FC = () => {
                   <TableHead className="font-bold text-gray-700 text-xs pl-6">Employee</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Base Salary</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Overtime</TableHead>
-                  <TableHead className="font-bold text-gray-700 text-xs">Bonus</TableHead>
-                  <TableHead className="font-bold text-gray-700 text-xs">Deductions</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Net Pay</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Status</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs text-right pr-6">Actions</TableHead>
@@ -975,20 +973,6 @@ export const Payroll: React.FC = () => {
                       <TableCell className="py-3.5">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-100">
                           +Rs. {payroll.overtimeAmount?.toLocaleString() || 0}
-                        </span>
-                      </TableCell>
-
-                      {/* Bonus Cell */}
-                      <TableCell className="py-3.5">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-100">
-                          +Rs. {payroll.bonus?.toLocaleString() || 0}
-                        </span>
-                      </TableCell>
-
-                      {/* Deductions Cell */}
-                      <TableCell className="py-3.5">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold font-mono bg-rose-50 text-rose-700 border border-rose-100">
-                          -Rs. {payroll.grossDeductions?.toLocaleString() || 0}
                         </span>
                       </TableCell>
 

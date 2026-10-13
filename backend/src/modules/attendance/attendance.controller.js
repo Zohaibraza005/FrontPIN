@@ -297,20 +297,39 @@ async function autoCheckoutOverdueAttendances() {
         "YYYY-MM-DD HH:mm",
         timezone
       );
-      if (shiftEndLocal.isBefore(shiftStartLocal)) {
+      if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
         shiftEndLocal.add(1, "day");
+      }
+
+      let scheduledDurationMinutes = 540;
+      const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
+      if (diffShiftMins > 0) {
+        scheduledDurationMinutes = diffShiftMins;
       }
 
       let maxOtMinutes = 120; // 2 hours allowed extra time by default
       if (activeSchedule.overtimeAllowed === false) {
         maxOtMinutes = 0;
-      } else if (activeSchedule.overtimeMinutes && Number(activeSchedule.overtimeMinutes) > 0) {
-        maxOtMinutes = Number(activeSchedule.overtimeMinutes);
-      } else if (emp.jobInfo?.maxExtraHours != null) {
-        maxOtMinutes = Number(emp.jobInfo.maxExtraHours) * 60;
+      } else {
+        const schedOt = Number(activeSchedule.overtimeMinutes) || 0;
+        const jobOt = emp.jobInfo?.maxExtraHours != null ? Number(emp.jobInfo.maxExtraHours) * 60 : 0;
+        maxOtMinutes = Math.max(120, schedOt, jobOt);
       }
 
-      const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+      const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
+      const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
+      const trueInLocal = trueInMoment.clone().tz(timezone);
+
+      const nominalCutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+      let cutoffLocal = nominalCutoffLocal;
+      // If employee checked in >= 4 hours after nominal shift start (e.g. night-shift employee on default 09:00-18:00 schedule),
+      // compute cutoff relative to actual check-in time + scheduled duration + allowed OT
+      if (trueInLocal.diff(shiftStartLocal, "minutes") >= 240) {
+        cutoffLocal = moment.max(
+          nominalCutoffLocal,
+          trueInLocal.clone().add(scheduledDurationMinutes + maxOtMinutes, "minutes")
+        );
+      }
       const cutoffUtc = cutoffLocal.clone().utc();
 
       // Check if employee ALREADY has a physical CHECK_OUT punch
@@ -322,7 +341,7 @@ async function autoCheckoutOverdueAttendances() {
         const lastPunchUtc = lastPunchMoment.clone().utc();
 
         // If user punched out after 2h cutoff, cap checkOutTime at cutoff; otherwise use exact punch time
-        const isPastCutoff = lastPunchUtc.isAfter(cutoffUtc);
+        const isPastCutoff = lastPunchUtc.isAfter(cutoffUtc) && cutoffUtc.isAfter(trueInMoment);
         const effectiveOutUtc = isPastCutoff ? cutoffUtc : lastPunchUtc;
         const effectiveOutDate = effectiveOutUtc.toDate();
 
@@ -340,16 +359,6 @@ async function autoCheckoutOverdueAttendances() {
               },
             });
           }
-        }
-
-        // Calculate worked minutes based on real first check-in
-        const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
-        const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
-
-        let scheduledDurationMinutes = 540;
-        const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
-        if (diffShiftMins > 0) {
-          scheduledDurationMinutes = diffShiftMins;
         }
 
         const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutUtc.diff(trueInMoment, "minutes")));
@@ -387,16 +396,8 @@ async function autoCheckoutOverdueAttendances() {
 
       // If NO physical CHECK_OUT punch exists:
       // Auto-checkout ONLY if current time has passed the shift end + 2h OT cutoff!
-      if (nowUtc.isAfter(cutoffUtc)) {
-        const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
-        const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
+      if (nowUtc.isAfter(cutoffUtc) && cutoffUtc.isAfter(trueInMoment)) {
         const cutoffDate = cutoffUtc.toDate();
-
-        let scheduledDurationMinutes = 540;
-        const diffShiftMins = shiftEndLocal.diff(shiftStartLocal, "minutes");
-        if (diffShiftMins > 0) {
-          scheduledDurationMinutes = diffShiftMins;
-        }
 
         const rawWorkedMinutes = Math.max(0, Math.round(cutoffUtc.diff(trueInMoment, "minutes")));
         const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
@@ -1580,22 +1581,29 @@ exports.getAttendanceReport = async (req, res) => {
         let maxOtMinutes = 120;
         if (activeSched?.overtimeAllowed === false) {
           maxOtMinutes = 0;
-        } else if (activeSched?.overtimeMinutes && Number(activeSched.overtimeMinutes) > 0) {
-          maxOtMinutes = Number(activeSched.overtimeMinutes);
-        } else if (emp.jobInfo?.maxExtraHours != null) {
-          maxOtMinutes = Number(emp.jobInfo.maxExtraHours) * 60;
+        } else {
+          const schedOt = Number(activeSched?.overtimeMinutes) || 0;
+          const jobOt = emp.jobInfo?.maxExtraHours != null ? Number(emp.jobInfo.maxExtraHours) * 60 : 0;
+          maxOtMinutes = Math.max(120, schedOt, jobOt);
         }
 
         const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
         let shiftEndLocal = moment.tz(`${dateStr} ${eTime}`, "YYYY-MM-DD HH:mm", empTz);
-        if (shiftEndLocal.isBefore(shiftStartLocal)) {
+        if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
           shiftEndLocal.add(1, "day");
         }
-        const earliestAllowedInLocal = shiftStartLocal.clone().subtract(2, "hours");
-        const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
+        const [sh, sm] = sTime.split(":").map(Number);
+        const [eh, em] = eTime.split(":").map(Number);
+        let startMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+        let endMins = (!isNaN(eh) ? eh : 18) * 60 + (!isNaN(em) ? em : 0);
+        if (endMins <= startMins) endMins += 24 * 60;
+        const scheduledMins = endMins > startMins ? endMins - startMins : 540;
+
+        const nominalCutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
 
         const nextDateStr = moment(dateStr).add(1, "day").format("YYYY-MM-DD");
         const prevDateStr = moment(dateStr).subtract(1, "day").format("YYYY-MM-DD");
+        const isCrossMidnightShift = shiftEndLocal.format("YYYY-MM-DD") !== dateStr || shiftStartLocal.hour() >= 12;
 
         // Retrieve effective check-in and check-out from punches or existing record
         let effCheckIn = existing.checkInTime || null;
@@ -1605,7 +1613,11 @@ exports.getAttendanceReport = async (req, res) => {
         const checkInPunches = punchesList.filter((p) => {
           if (p.type !== "CHECK_IN") return false;
           const pDayStr = moment(p.punchTime).tz(empTz).format("YYYY-MM-DD");
-          return pDayStr === dateStr || (pDayStr === prevDateStr && !isDayOff);
+          return (
+            pDayStr === dateStr ||
+            (pDayStr === prevDateStr && !isDayOff) ||
+            (pDayStr === nextDateStr && isCrossMidnightShift)
+          );
         });
         const checkOutPunches = punchesList.filter((p) => {
           if (p.type !== "CHECK_OUT") return false;
@@ -1618,17 +1630,37 @@ exports.getAttendanceReport = async (req, res) => {
           effCheckIn = checkInPunches[0].punchTime;
         }
 
-        // 2. Check-Out: Last CHECK_OUT punch takes priority
+        let cutoffLocal = nominalCutoffLocal;
+        if (effCheckIn) {
+          const inLocal = moment(effCheckIn).tz(empTz);
+          if (inLocal.diff(shiftStartLocal, "minutes") >= 240) {
+            cutoffLocal = moment.max(
+              nominalCutoffLocal,
+              inLocal.clone().add(scheduledMins + maxOtMinutes, "minutes")
+            );
+          }
+        }
+
+        // 2. Check-Out: Last CHECK_OUT punch takes priority (capped at cutoffLocal if past cutoff)
         if (checkOutPunches.length > 0) {
           const lastOutPunch = checkOutPunches[checkOutPunches.length - 1];
-          effCheckOut = lastOutPunch.punchTime;
+          const lastOutMoment = moment(lastOutPunch.punchTime).tz(empTz);
+          if (effCheckIn && lastOutMoment.isAfter(cutoffLocal) && cutoffLocal.isAfter(moment(effCheckIn))) {
+            effCheckOut = cutoffLocal.toDate();
+          } else {
+            effCheckOut = lastOutPunch.punchTime;
+          }
         }
 
         const checkInDayStr = effCheckIn ? moment(effCheckIn).tz(empTz).format("YYYY-MM-DD") : null;
         const checkOutDayStr = effCheckOut ? moment(effCheckOut).tz(empTz).format("YYYY-MM-DD") : null;
 
         const checkInDateMatch = Boolean(
-          checkInDayStr && (checkInDayStr === dateStr || (checkInDayStr === prevDateStr && !isDayOff))
+          checkInDayStr && (
+            checkInDayStr === dateStr ||
+            (checkInDayStr === prevDateStr && !isDayOff) ||
+            (checkInDayStr === nextDateStr && (isCrossMidnightShift || checkOutDayStr === nextDateStr))
+          )
         );
         const checkOutDateMatch = Boolean(
           checkOutDayStr && (checkOutDayStr === dateStr || checkOutDayStr === nextDateStr)
@@ -1679,14 +1711,21 @@ exports.getAttendanceReport = async (req, res) => {
         }
 
         if (finalCheckIn && finalCheckOut && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
+          const checkInMoment = moment(finalCheckIn).tz(empTz);
           const checkOutMoment = moment(finalCheckOut).tz(empTz);
           const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
 
-          if (checkOutMoment.isBefore(earlyOutThreshold) && checkOutMoment.isAfter(shiftStartLocal)) {
+          if (
+            checkInMoment.diff(shiftStartLocal, "minutes") < 240 &&
+            checkOutMoment.isBefore(earlyOutThreshold) &&
+            checkOutMoment.isAfter(checkInMoment)
+          ) {
             earlyOutMinutes = Math.max(0, shiftEndLocal.diff(checkOutMoment, "minutes"));
             if (earlyOutMinutes > 0) isEarlyOut = true;
           }
         }
+
+        const maxAllowedWorkedMins = scheduledMins + maxOtMinutes;
 
         if (isDayOff && existing.status !== "LEAVE") {
           finalStatus = "OFF_DAY";
@@ -1706,30 +1745,28 @@ exports.getAttendanceReport = async (req, res) => {
           const outT = new Date(finalCheckOut).getTime();
           if (outT > inT) {
             const totalMinutes = (outT - inT) / 1000 / 60;
-            totalWorkedMinutes = Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0);
+            totalWorkedMinutes = Math.min(maxAllowedWorkedMins, Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0));
           } else {
             totalWorkedMinutes = 0;
           }
         } else if (finalCheckIn && !finalCheckOut) {
           const inT = new Date(finalCheckIn).getTime();
-          const diffHours = (now.getTime() - inT) / 1000 / 3600;
-          if (diffHours >= 11) {
-            totalWorkedMinutes = 11 * 60;
-          } else {
-            const totalMinutes = (now.getTime() - inT) / 1000 / 60;
-            totalWorkedMinutes = Math.min(660, Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0));
-          }
+          const totalMinutes = (now.getTime() - inT) / 1000 / 60;
+          totalWorkedMinutes = Math.min(maxAllowedWorkedMins, Math.max(Math.floor(totalMinutes - totalBreakMinutes), 0));
         } else if (!finalCheckIn && (existing.status === "PRESENT" || existing.status === "LATE" || existing.status === "TARDY") && (!totalWorkedMinutes || totalWorkedMinutes === 0)) {
-          const [sh, sm] = sTime.split(":").map(Number);
-          const [eh, em] = eTime.split(":").map(Number);
-          const startMins = (sh || 9) * 60 + (sm || 0);
-          const endMins = (eh || 18) * 60 + (em || 0);
-          if (endMins > startMins) {
-            totalWorkedMinutes = Math.min(660, Math.max(endMins - startMins - totalBreakMinutes, 0));
-          } else {
-            totalWorkedMinutes = 540;
+          totalWorkedMinutes = Math.min(maxAllowedWorkedMins, Math.max(scheduledMins - totalBreakMinutes, 0));
+        }
+
+        let calculatedOtMinutes = 0;
+        if (maxOtMinutes > 0 && totalWorkedMinutes > scheduledMins) {
+          const rawExtra = totalWorkedMinutes - scheduledMins;
+          if (rawExtra >= 30) {
+            calculatedOtMinutes = Math.min(rawExtra, maxOtMinutes);
           }
         }
+
+        const finalOtMinutes = Math.min(maxOtMinutes || 120, approvedOtMinutes || calculatedOtMinutes || existing.overtimeMinutes || 0);
+        const finalOtHours = Number((finalOtMinutes / 60).toFixed(2));
 
         // Asynchronously persist any corrected schedule/lateness/punch fields to the DB
         if (existing?.id && (
@@ -1739,13 +1776,15 @@ exports.getAttendanceReport = async (req, res) => {
           existing.shiftStartTime !== sTime ||
           existing.shiftEndTime !== eTime ||
           (!existing.checkInTime && finalCheckIn) ||
-          (!existing.checkOutTime && finalCheckOut)
+          (!existing.checkOutTime && finalCheckOut) ||
+          (finalCheckIn && finalCheckOut && existing.totalWorkedMinutes !== totalWorkedMinutes)
         )) {
           prisma.attendance.update({
             where: { id: existing.id },
             data: {
               ...(finalCheckIn && !existing.checkInTime ? { checkInTime: finalCheckIn } : {}),
               ...(finalCheckOut && !existing.checkOutTime ? { checkOutTime: finalCheckOut } : {}),
+              ...(finalCheckIn && finalCheckOut ? { totalWorkedMinutes, overtimeMinutes: finalOtMinutes } : {}),
               isLate,
               lateMinutes,
               status: finalStatus,
@@ -1762,24 +1801,6 @@ exports.getAttendanceReport = async (req, res) => {
               .filter(log => log.type === "TASK")
               .map(log => log.title)
           : [];
-
-        // Scheduled shift duration
-        const [sh, sm] = sTime.split(":").map(Number);
-        const [eh, em] = eTime.split(":").map(Number);
-        const startMins = (sh || 9) * 60 + (sm || 0);
-        const endMins = (eh || 18) * 60 + (em || 0);
-        const scheduledMins = endMins > startMins ? endMins - startMins : 540;
-
-        let calculatedOtMinutes = 0;
-        if (totalWorkedMinutes > scheduledMins) {
-          const rawExtra = totalWorkedMinutes - scheduledMins;
-          if (rawExtra >= 30) {
-            calculatedOtMinutes = Math.min(rawExtra, 120);
-          }
-        }
-
-        const finalOtMinutes = Math.min(120, approvedOtMinutes || existing.overtimeMinutes || calculatedOtMinutes);
-        const finalOtHours = Number((finalOtMinutes / 60).toFixed(2));
 
         return {
           ...existing,
@@ -1899,9 +1920,9 @@ exports.getAttendanceReport = async (req, res) => {
 
       const [sh, sm] = sTime.split(":").map(Number);
       const [eh, em] = eTime.split(":").map(Number);
-      let sMins = (sh || 9) * 60 + (sm || 0);
-      let eMins = (eh || 18) * 60 + (em || 0);
-      if (eMins < sMins) eMins += 24 * 60;
+      let sMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+      let eMins = (!isNaN(eh) ? eh : 18) * 60 + (!isNaN(em) ? em : 0);
+      if (eMins <= sMins) eMins += 24 * 60;
       const scheduledDurationMinutes = eMins > sMins ? eMins - sMins : 540;
 
       let totalWorkedMinutes = 0;
@@ -1942,7 +1963,7 @@ exports.getAttendanceReport = async (req, res) => {
         const checkOutMoment = moment(finalCheckOut).tz(timezone);
         const shiftStartLocal = moment.tz(`${targetDateStr} ${sTime}`, "YYYY-MM-DD HH:mm", timezone);
         let shiftEndLocal = moment.tz(`${targetDateStr} ${eTime}`, "YYYY-MM-DD HH:mm", timezone);
-        if (shiftEndLocal.isBefore(shiftStartLocal)) {
+        if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
           shiftEndLocal.add(1, "day");
         }
         const allowedEarlyOutMins = activeSched?.allowEarlyOut ? (Number(activeSched.earlyOutMinutes) || 0) : 0;
@@ -2120,9 +2141,9 @@ exports.getAttendanceReport = async (req, res) => {
 
       const [sh, sm] = sTime.split(":").map(Number);
       const [eh, em] = eTime.split(":").map(Number);
-      let sMins = (sh || 9) * 60 + (sm || 0);
-      let eMins = (eh || 18) * 60 + (em || 0);
-      if (eMins < sMins) eMins += 24 * 60;
+      let sMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
+      let eMins = (!isNaN(eh) ? eh : 18) * 60 + (!isNaN(em) ? em : 0);
+      if (eMins <= sMins) eMins += 24 * 60;
       const scheduledDurationMinutes = eMins > sMins ? eMins - sMins : 540;
 
       let totalWorkedMinutes = 0;
