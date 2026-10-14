@@ -284,7 +284,7 @@ exports.getLeaves = async (req, res) => {
     const leaves = await prisma.leaveRequest.findMany({
       where,
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true } },
+        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true, companyId: true } },
         leaveType: true,
         reviewedBy: { select: { id: true, firstName: true, lastName: true } },
       },
@@ -351,6 +351,10 @@ exports.getEmployeeLeaveSummary = async (req, res) => {
     }
 
     res.json({
+      total,
+      approved,
+      rejected,
+      approvedForDate,
       summary: { total, approved, rejected, approvedForDate },
     });
   } catch (e) {
@@ -434,7 +438,7 @@ exports.createLeave = async (req, res) => {
         reason: reason || null,
       },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true } },
+        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true, companyId: true } },
         leaveType: true,
       },
     });
@@ -515,7 +519,7 @@ exports.updateLeaveStatus = async (req, res) => {
       where: { id },
       data,
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true } },
+        employee: { select: { id: true, firstName: true, lastName: true, profileImage: true, companyId: true } },
         leaveType: true,
       },
     });
@@ -526,34 +530,6 @@ exports.updateLeaveStatus = async (req, res) => {
     res.status(500).json({ message: "Failed to update leave status" });
   }
 };
-
-exports.getEmployeeLeaveSummary = async (req, res) => {
-    try {
-      const { employeeId } = req.params;
-  
-      const total = await prisma.leaveRequest.count({
-        where: { employeeId: Number(employeeId) }
-      });
-  
-      const approved = await prisma.leaveRequest.count({
-        where: { employeeId: Number(employeeId), status: "APPROVED" }
-      });
-  
-      const rejected = await prisma.leaveRequest.count({
-        where: { employeeId: Number(employeeId), status: "REJECTED" }
-      });
-  
-      res.json({
-        total,
-        approved,
-        rejected,
-      });
-  
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Error fetching leave summary" });
-    }
-  };
   
   exports.getEligibleEmployees = async (req, res) => {
     try {
@@ -646,6 +622,13 @@ exports.getEmployeeLeaveSummary = async (req, res) => {
         return res.status(404).json({ message: "Leave request not found" });
       }
 
+      if (
+        req.user.role === "USER" &&
+        (leave.employeeId !== req.user.id || leave.status !== "PENDING")
+      ) {
+        return res.status(403).json({ message: "You can only edit your own pending leave requests" });
+      }
+
       const data = {};
       if (leaveTypeId) data.leaveTypeId = Number(leaveTypeId);
       if (startDate) data.startDate = toStartOfDay(new Date(startDate));
@@ -678,7 +661,7 @@ exports.getEmployeeLeaveSummary = async (req, res) => {
         where: { id: Number(id) },
         data,
         include: {
-          employee: { select: { id: true, firstName: true, lastName: true, profileImage: true } },
+          employee: { select: { id: true, firstName: true, lastName: true, profileImage: true, companyId: true } },
           leaveType: true,
         },
       });

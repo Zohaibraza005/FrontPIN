@@ -998,11 +998,11 @@ export const overtimeAPI = {
       }),
     LockPayroll: (
       id: number | string,
-      data: { status: "PAID" | "GENERATED" | "DRAFT" }
+      data?: { status?: "PAID" | "GENERATED" | "DRAFT" }
     ) =>
       apiCall(`/payroll/${id}/lock`, {
         method: "PATCH",
-        body: JSON.stringify(data)
+        body: JSON.stringify(data || {})
       }),
       generateBulk: (data: {
         month: number;

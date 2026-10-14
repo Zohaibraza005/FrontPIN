@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
-import { DollarSign, Download, Plus, Wallet, CreditCard, Users, TrendingUp, Eye, Pencil, Trash2, Calendar, AlertTriangle, PieChart as PieChartIcon, Calculator, CheckCircle2, Loader2, Search, X } from 'lucide-react';
+import { DollarSign, Download, Plus, Wallet, CreditCard, Users, TrendingUp, Eye, Pencil, Trash2, Calendar, AlertTriangle, PieChart as PieChartIcon, Calculator, CheckCircle2, Loader2, Search, X, Lock, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import {   DropdownMenu,
   DropdownMenuContent,
@@ -142,6 +142,14 @@ export const Payroll: React.FC = () => {
   const [editDeductions, setEditDeductions] = useState<number | string>('');
   const [editStatus, setEditStatus] = useState<string>('GENERATED');
   const [updating, setUpdating] = useState(false);
+
+  // Lock Confirmation Modal States
+  const [lockModalOpen, setLockModalOpen] = useState(false);
+  const [payrollToLock, setPayrollToLock] = useState<any>(null);
+  const [locking, setLocking] = useState(false);
+
+  // Incomplete Month Warning Confirmation Modal
+  const [incompleteWarningOpen, setIncompleteWarningOpen] = useState(false);
 
   // Adjustment Modal States
   const [openAdjust, setOpenAdjust] = useState(false);
@@ -419,7 +427,15 @@ export const Payroll: React.FC = () => {
     setGenerateOpen(true);
   };
 
-  const handleGeneratePayroll = async () => {
+  // Check if selected period is incomplete (current running month or future)
+  const isPeriodIncomplete = (m: number | null, y: number | null) => {
+    if (!m || !y) return false;
+    const currentMoment = moment();
+    const periodEnd = moment({ year: y, month: m - 1 }).endOf("month");
+    return periodEnd.isAfter(currentMoment);
+  };
+
+  const handleGeneratePayroll = () => {
     if (!selectedMonth || !selectedYear) {
       return toast.error("Select month and year");
     } 
@@ -432,6 +448,16 @@ export const Payroll: React.FC = () => {
       return toast.error("Please select at least one option");
     }
 
+    // If month is not completed yet, show warning dialog to confirm
+    if (isPeriodIncomplete(selectedMonth, selectedYear)) {
+      setIncompleteWarningOpen(true);
+      return;
+    }
+
+    executePayrollGeneration();
+  };
+
+  const executePayrollGeneration = async () => {
     try {
       setLoading(true);
       setProgress(30);
@@ -459,18 +485,41 @@ export const Payroll: React.FC = () => {
         toast.info("No payroll records were generated.");
       }
 
+      setIncompleteWarningOpen(false);
       setGenerateOpen(false);
 
       // Instantly switch view to the generated month & year and reload realtime
-      setFilterMonth(selectedMonth);
-      setFilterYear(selectedYear);
-      await loadPayrolls(selectedMonth, selectedYear, filterStatus);
-      await loadAnalytics(selectedMonth, selectedYear);
+      setFilterMonth(selectedMonth!);
+      setFilterYear(selectedYear!);
+      await loadPayrolls(selectedMonth!, selectedYear!, filterStatus);
+      await loadAnalytics(selectedMonth!, selectedYear!);
 
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Generation failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenLockConfirm = (payroll: any) => {
+    setPayrollToLock(payroll);
+    setLockModalOpen(true);
+  };
+
+  const handleConfirmLock = async () => {
+    if (!payrollToLock) return;
+    try {
+      setLocking(true);
+      await payrollAPI.LockPayroll(payrollToLock.id);
+      toast.success(`Payroll record for ${payrollToLock?.employee?.firstName || 'employee'} locked successfully`);
+      setLockModalOpen(false);
+      setPayrollToLock(null);
+      await loadPayrolls(filterMonth, filterYear, filterStatus);
+      await loadAnalytics(filterMonth, filterYear);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to lock payroll");
+    } finally {
+      setLocking(false);
     }
   };
 
@@ -609,6 +658,16 @@ export const Payroll: React.FC = () => {
                 </Select>
               </div>
             </div>
+
+            {/* Incomplete Period Notice */}
+            {isPeriodIncomplete(selectedMonth, selectedYear) && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Incomplete Cycle Notice:</span> This month is currently in progress or in the future. Full attendance data is not complete yet.
+                </div>
+              </div>
+            )}
 
             {/* Scope Type */}
             <div className="space-y-1.5">
@@ -783,6 +842,55 @@ export const Payroll: React.FC = () => {
                 </>
               ) : (
                 "Generate Payroll"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* INCOMPLETE MONTH CONFIRMATION DIALOG */}
+      <Dialog open={incompleteWarningOpen} onOpenChange={setIncompleteWarningOpen}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+          <div className="flex items-start gap-3.5">
+            <div className="size-11 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0">
+              <AlertTriangle className="size-6 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900 leading-snug">
+                Incomplete Month Warning
+              </h3>
+              <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                The selected payroll period (<strong>{moment.months()[Number(selectedMonth) - 1]} {selectedYear}</strong>) is not yet complete. If you generate payroll now, calculations will only be based on attendance records up to today.
+              </p>
+              <p className="text-xs font-semibold text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200 mt-3">
+                Are you sure you want to proceed with generating payroll for this period?
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-5 flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={() => setIncompleteWarningOpen(false)}
+              className="rounded-xl border-gray-300 text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={loading}
+              onClick={executePayrollGeneration}
+              className="rounded-xl bg-amber-600 hover:bg-amber-700 font-bold text-xs px-4 text-white shadow-xs"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Proceed Anyway"
               )}
             </Button>
           </DialogFooter>
@@ -1026,18 +1134,40 @@ export const Payroll: React.FC = () => {
                             variant="outline"
                             size="sm"
                             onClick={() => handleOpenEdit(payroll)}
-                            disabled={payroll.locked}
-                            className="h-8 px-2.5 text-xs font-semibold text-amber-700 border-amber-200 bg-amber-50/50 hover:bg-amber-100/70 rounded-lg flex items-center gap-1"
+                            disabled={payroll.locked || payroll.status === "PAID"}
+                            title={payroll.locked ? "Locked record cannot be edited" : payroll.status === "PAID" ? "Paid record cannot be edited" : "Edit Payroll"}
+                            className="h-8 px-2.5 text-xs font-semibold text-amber-700 border-amber-200 bg-amber-50/50 hover:bg-amber-100/70 rounded-lg flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Pencil className="size-3.5 text-amber-600" />
                             <span>Edit</span>
                           </Button>
 
+                          {/* Lock Action Button */}
+                          {payroll.locked ? (
+                            <span className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg cursor-default select-none">
+                              <Lock className="size-3.5 text-slate-500" />
+                              <span>Locked</span>
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenLockConfirm(payroll)}
+                              title="Lock payroll to prevent further edits"
+                              className="h-8 px-2.5 text-xs font-semibold text-slate-700 border-slate-300 bg-white hover:bg-slate-50 rounded-lg flex items-center gap-1"
+                            >
+                              <LockOpen className="size-3.5 text-slate-500" />
+                              <span>Lock</span>
+                            </Button>
+                          )}
+
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleDelete(payroll.id)}
-                            className="h-8 px-2.5 text-xs font-semibold text-rose-600 border-gray-200 hover:bg-rose-50 hover:border-rose-200 rounded-lg flex items-center gap-1"
+                            disabled={payroll.locked || payroll.status === "PAID"}
+                            title={payroll.locked ? "Locked record cannot be deleted" : payroll.status === "PAID" ? "Paid record cannot be deleted" : "Delete Payroll"}
+                            className="h-8 px-2.5 text-xs font-semibold text-rose-600 border-gray-200 hover:bg-rose-50 hover:border-rose-200 rounded-lg flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Trash2 className="size-3.5" />
                             <span>Delete</span>
@@ -1397,6 +1527,67 @@ export const Payroll: React.FC = () => {
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
             >
               {addingAdjustment ? "Saving..." : (editingComponentId ? 'Save Changes' : 'Add Adjustment')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* LOCK CONFIRMATION DIALOG */}
+      <Dialog open={lockModalOpen} onOpenChange={setLockModalOpen}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+          <div className="flex items-start gap-3.5">
+            <div className="size-11 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0">
+              <Lock className="size-5.5 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900 leading-snug">
+                Lock Payroll Record
+              </h3>
+              <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                Are you sure you want to lock the payroll for <strong>{payrollToLock?.employee ? `${payrollToLock.employee.firstName} ${payrollToLock.employee.lastName || ''}` : 'this employee'}</strong>?
+              </p>
+              <div className="text-xs text-amber-800 bg-amber-50/80 p-3 rounded-xl border border-amber-200/80 mt-3 space-y-1">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
+                  Irreversible Action Notice:
+                </p>
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  Once locked, this salary record <strong>cannot be edited or deleted</strong>. All earnings and deductions will be finalized.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-5 flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={locking}
+              onClick={() => {
+                setLockModalOpen(false);
+                setPayrollToLock(null);
+              }}
+              className="rounded-xl border-gray-300 text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={locking}
+              onClick={handleConfirmLock}
+              className="rounded-xl bg-gray-900 hover:bg-black font-bold text-xs px-4 text-white shadow-xs flex items-center gap-1.5"
+            >
+              {locking ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Locking...
+                </>
+              ) : (
+                <>
+                  <Lock className="size-3.5" />
+                  Confirm & Lock
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

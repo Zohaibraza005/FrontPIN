@@ -41,6 +41,7 @@ import {
   Trash2,
   Plus,
   ArrowLeft,
+  Lock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_URL, payrollAPI } from '../services/api';
@@ -628,32 +629,34 @@ export const PayrollDetail = () => {
           </div>
           
           <div className="flex gap-3">
-          <Button
-  variant="outline"
-  disabled={loading}
-  onClick={async () => {
-    try {
-      const newStatus =
-        payroll.status === "PAID" ? "GENERATED" : "PAID";
+            <Button
+              variant="outline"
+              disabled={loading || payroll.locked}
+              title={payroll.locked ? "Payroll is locked and status cannot be changed" : undefined}
+              className="disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={async () => {
+                try {
+                  const newStatus =
+                    payroll.status === "PAID" ? "GENERATED" : "PAID";
 
-      await payrollAPI.updateStatus(payroll.id, {
-        status: newStatus,
-      });
+                  await payrollAPI.updateStatus(payroll.id, {
+                    status: newStatus,
+                  });
 
-      toast.success(
-        newStatus === "PAID"
-          ? "Payroll marked as Paid"
-          : "Payroll reverted to Draft"
-      );
+                  toast.success(
+                    newStatus === "PAID"
+                      ? "Payroll marked as Paid"
+                      : "Payroll reverted to Draft"
+                  );
 
-      loadPayroll();
-    } catch {
-      toast.error("Failed to update status");
-    }
-  }}
->
-  {payroll.status === "PAID" ? "Mark as Draft" : "Mark as Paid"}
-</Button>
+                  loadPayroll();
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.message || err?.message || "Failed to update status");
+                }
+              }}
+            >
+              {payroll.status === "PAID" ? "Mark as Draft" : "Mark as Paid"}
+            </Button>
             <PDFDownloadLink
               document={<PayrollSlipPDF payroll={payroll} />}
               fileName={`payslip_${payroll.employee.firstName}_${moment(payroll.periodStart).format('MMM-YYYY')}.pdf`}
@@ -731,9 +734,17 @@ export const PayrollDetail = () => {
                 </div>
               </div>
 
-              <Badge variant="outline" className="self-start">
-                {payroll.status || 'Generated'}
-              </Badge>
+              <div className="flex items-center gap-2 self-start">
+                {payroll.locked && (
+                  <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-300 flex items-center gap-1 font-semibold text-xs">
+                    <Lock className="w-3 h-3 text-slate-600" />
+                    Locked
+                  </Badge>
+                )}
+                <Badge variant="outline">
+                  {payroll.status || 'Generated'}
+                </Badge>
+              </div>
             </div>
           </CardContent>
         </Card>

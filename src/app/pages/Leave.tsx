@@ -63,7 +63,10 @@ export const Leave: React.FC = () => {
   const [leaveTypes, setLeaveTypes] = useState<any[]>([]);
   const [newLeaveOpen, setNewLeaveOpen] = useState(false);
   const [employees, setEmployees] = useState<any[]>([]);
-  const getInitialLeaveLoc = () => localStorage.getItem("selectedLocation") || "all";
+  const getInitialLeaveLoc = () => {
+    const loc = localStorage.getItem("selectedLocation") || localStorage.getItem("dashboard-selected-location") || "all";
+    return loc.toLowerCase() === "all" ? "all" : loc;
+  };
   const [selectedLocation, setSelectedLocation] = useState(getInitialLeaveLoc);
   const [locations, setLocations] = useState<any[]>([]);
 
@@ -79,7 +82,7 @@ export const Leave: React.FC = () => {
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
       const loc = e.detail || localStorage.getItem("selectedLocation") || "all";
-      setSelectedLocation(loc);
+      setSelectedLocation(loc.toLowerCase() === "all" ? "all" : loc);
     };
     window.addEventListener("location-changed", handleLocationEvent);
     return () => {
@@ -201,11 +204,36 @@ const calculateDays = (start: string, end: string) => {
     loadLeaves();
     loadLeaveTypes();
     loadEmployees();
+
+    const onFocus = () => loadLeaves();
+    window.addEventListener("focus", onFocus);
+
+    const interval = setInterval(() => {
+      loadLeaves();
+    }, 10000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearInterval(interval);
+    };
   }, []);
+
+  useEffect(() => {
+    if (newLeaveOpen) {
+      const empId = user?.role === "USER" ? user?.id : selectedEmployee;
+      if (empId) {
+        setSelectedEmployee(String(empId));
+        leaveAPI.getEmployeeLeaveSummary(Number(empId)).then((res: any) => {
+          setEmployeeSummary(res.summary || res);
+        }).catch(() => {});
+      }
+    }
+  }, [newLeaveOpen, user]);
+
   const handleEmployeeSelect = async (id: string) => {
     setSelectedEmployee(id);
     const summary = await leaveAPI.getEmployeeLeaveSummary(Number(id));
-    setEmployeeSummary(summary);
+    setEmployeeSummary(summary?.summary || summary);
   };
   
 
@@ -233,16 +261,30 @@ const calculateDays = (start: string, end: string) => {
 
   // 🔹 Submit Leave
   const handleSubmit = async () => {
+    const targetEmpId = user?.role === "USER" ? user?.id : Number(selectedEmployee);
+    if (!targetEmpId) {
+      toast.error("Please select an employee");
+      return;
+    }
+    if (!formData.leaveTypeId) {
+      toast.error("Please select a leave type");
+      return;
+    }
+    if (!formData.startDate || !formData.endDate) {
+      toast.error("Please select start and end dates");
+      return;
+    }
+
     try {
-      await leaveAPI.createLeave({
-        employeeId: Number(selectedEmployee),
+      const res = await leaveAPI.createLeave({
+        employeeId: Number(targetEmpId),
         leaveTypeId: Number(formData.leaveTypeId),
         startDate: formData.startDate,
         endDate: formData.endDate,
         reason: formData.reason,
       });
 
-      toast.success("Leave Request Submitted");
+      toast.success("Leave Request Submitted Successfully");
       setNewLeaveOpen(false);
       setFormData({
         leaveTypeId: "",
@@ -250,6 +292,11 @@ const calculateDays = (start: string, end: string) => {
         endDate: "",
         reason: "",
       });
+
+      // Optimistic update: show created leave immediately in real time
+      if (res?.leave) {
+        setLeaves((prev) => [res.leave, ...(prev || []).filter((l) => l.id !== res.leave.id)]);
+      }
       loadLeaves();
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.data?.message || err?.message || "Error submitting leave");
@@ -270,7 +317,8 @@ const calculateDays = (start: string, end: string) => {
   };
 
   const filteredLeaves = (leaves || []).filter((leave) => {
-    if (selectedLocation !== "all") {
+    const isPrivileged = user?.role === "ADMIN" || user?.role === "SUPERVISOR";
+    if (isPrivileged && selectedLocation && selectedLocation.toLowerCase() !== "all") {
       const empCompId = String(leave.employee?.companyId || leave.employee?.company?.id || leave.employee?.locationId || "");
       if (empCompId !== String(selectedLocation)) return false;
     }
@@ -364,20 +412,34 @@ const calculateDays = (start: string, end: string) => {
               </div>
             )}
             <div className="space-y-4">
-              <div>
-                <Label>Employee</Label>
-                <SearchableSelect
-                  className="w-full"
-                  placeholder="Select Employee"
-                  searchPlaceholder="Search employee..."
-                  value={selectedEmployee}
-                  onValueChange={handleEmployeeSelect}
-                  options={employees.map((emp) => ({
-                    value: String(emp.id),
-                    label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
-                  }))}
-                />
-              </div>
+              {user?.role === "USER" ? (
+                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-xl border border-blue-100 dark:border-blue-900/60 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Applying As</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || "You"}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-semibold text-xs">
+                    Self
+                  </Badge>
+                </div>
+              ) : (
+                <div>
+                  <Label>Employee</Label>
+                  <SearchableSelect
+                    className="w-full"
+                    placeholder="Select Employee"
+                    searchPlaceholder="Search employee..."
+                    value={selectedEmployee}
+                    onValueChange={handleEmployeeSelect}
+                    options={employees.map((emp) => ({
+                      value: String(emp.id),
+                      label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
+                    }))}
+                  />
+                </div>
+              )}
 
               <div>
                 <Label>Leave Type</Label>
@@ -511,17 +573,18 @@ const calculateDays = (start: string, end: string) => {
                 />
               )}
 
-              {locations.length > 0 && (
+              {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && locations.length > 0 && (
                 <SearchableSelect
                   className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0"
                   placeholder="Location"
                   searchPlaceholder="Search location..."
-                  value={selectedLocation}
+                  value={selectedLocation.toLowerCase() === "all" ? "all" : selectedLocation}
                   onValueChange={(val) => {
-                    setSelectedLocation(val);
-                    localStorage.setItem("selectedLocation", val);
-                    localStorage.setItem("dashboard-selected-location", val);
-                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+                    const norm = val.toLowerCase() === "all" ? "all" : val;
+                    setSelectedLocation(norm);
+                    localStorage.setItem("selectedLocation", norm);
+                    localStorage.setItem("dashboard-selected-location", norm);
+                    window.dispatchEvent(new CustomEvent("location-changed", { detail: norm }));
                   }}
                   options={[
                     { value: "all", label: "All Locations" },
@@ -546,9 +609,7 @@ const calculateDays = (start: string, end: string) => {
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Start Date</TableHead>
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">End Date</TableHead>
                   <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Status</TableHead>
-                  {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
-                    <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
-                  )}
+                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -592,57 +653,63 @@ const calculateDays = (start: string, end: string) => {
                       </TableCell>
                       <TableCell>{getStatusBadge(leave.status)}</TableCell>
 
-                      {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
-                        <TableCell className="text-right pr-6">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
-                              onClick={() => openApproveModal(leave.id)}
-                              title="Approve Leave"
-                            >
-                              <Check className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
-                              onClick={() => openRejectModal(leave.id)}
-                              title="Reject Leave"
-                            >
-                              <X className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
-                              onClick={() => openViewModal(leave)}
-                              title="View Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
-                              onClick={() => openEditModal(leave)}
-                              title="Edit Leave Request"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
-                              onClick={() => setDeleteConfirm(leave)}
-                              title="Delete Leave Request"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      )}
+                      <TableCell className="text-right pr-6">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                                onClick={() => openApproveModal(leave.id)}
+                                title="Approve Leave"
+                              >
+                                <Check className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                onClick={() => openRejectModal(leave.id)}
+                                title="Reject Leave"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
+                            onClick={() => openViewModal(leave)}
+                            title="View Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          {(user?.role === "ADMIN" || user?.role === "SUPERVISOR" || (user?.id === leave.employeeId && leave.status === "PENDING")) && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                                onClick={() => openEditModal(leave)}
+                                title="Edit Leave Request"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                onClick={() => setDeleteConfirm(leave)}
+                                title="Delete Leave Request"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
