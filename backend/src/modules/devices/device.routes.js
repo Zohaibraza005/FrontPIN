@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const controller = require("./device.controller");
 const { protect } = require("../../middleware/auth");
+const { bridgeAuth } = require("../../middleware/bridgeAuth");
+const bridge = require("./bridge.controller");
 
 const express = require("express");
 
@@ -10,6 +12,11 @@ router.post(
   express.text({ type: "*/*", limit: "10mb" }),
   controller.handleHikvisionEvent
 );
+
+// 🟠 ON-PREMISE BRIDGE AGENT ROUTES (authenticated with BRIDGE_TOKEN)
+router.get("/bridge/devices", bridgeAuth, bridge.getBridgeDevices);
+router.post("/bridge/punches", bridgeAuth, express.json({ limit: "5mb" }), bridge.receiveBridgePunches);
+router.post("/bridge/heartbeat", bridgeAuth, bridge.bridgeHeartbeat);
 
 // 🟢 PROTECTED MANAGEMENT ROUTES (Admin only)
 router.get("/", protect, controller.getDevices);

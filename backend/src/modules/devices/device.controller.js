@@ -142,52 +142,17 @@ async function findEmployee(biometricId, employeeName) {
     }
   }
 
-  // 3. Match in soft-deleted employees and restore if active punch arrives
-  try {
-    const deletedCandidates = await prisma.employee.findMany({
-      where: {
-        organizationId: { not: 1 },
-        deletedAt: { not: null },
-        OR: [
-          bioIdStr ? { biometricId: bioIdStr } : null,
-          bioIdStr ? { employeeId: bioIdStr } : null,
-          bioIdStr ? { username: { contains: bioIdStr } } : null,
-          employeeName ? { firstName: { contains: employeeName.split(/\s+/)[0] } } : null,
-        ].filter(Boolean),
-      },
-      include: {
-        company: true,
-        Schedule: { orderBy: { id: "desc" } },
-        jobInfo: true,
-      },
+  // 3. Deleted employees stay deleted. Terminals keep their old event logs after a user is
+  //    removed, so a re-sync would otherwise resurrect them (or auto-create a duplicate).
+  if (bioIdStr) {
+    const deleted = await prisma.employee.findFirst({
+      where: { biometricId: bioIdStr, deletedAt: { not: null } },
+      select: { firstName: true, lastName: true },
     });
-
-    for (const d of deletedCandidates) {
-      const full = `${d.firstName || ''} ${d.lastName || ''}`.trim().toLowerCase();
-      const matchName = employeeName
-        ? full.includes(employeeName.trim().toLowerCase()) || employeeName.trim().toLowerCase().includes(full)
-        : false;
-      const matchBio = bioIdStr && (d.biometricId === bioIdStr || (d.username && d.username.includes(bioIdStr)));
-
-      if (matchBio || matchName) {
-        const restored = await prisma.employee.update({
-          where: { id: d.id },
-          data: {
-            deletedAt: null,
-            biometricId: bioIdStr || d.biometricId,
-          },
-          include: {
-            company: true,
-            Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
-            jobInfo: true,
-          },
-        });
-        console.log(`[Biometric Punch] Restored previously deleted employee: ${restored.firstName} ${restored.lastName} (Bio: ${bioIdStr})`);
-        return restored;
-      }
+    if (deleted) {
+      console.log(`[Biometric Punch] Ignored punch for deleted employee: ${deleted.firstName} ${deleted.lastName} (Bio: ${bioIdStr})`);
+      return null;
     }
-  } catch (err) {
-    console.error("[Biometric Punch] Error checking deleted employees:", err.message);
   }
 
   // 4. Auto-provision new employee if completely new user punches on machine
@@ -203,18 +168,11 @@ async function findEmployee(biometricId, employeeName) {
       });
 
       if (existingBio) {
+        // A deleted employee must stay deleted: terminals keep old event logs after a user is
+        // removed, so re-syncing them would otherwise resurrect the employee. Ignore the punch.
         if (existingBio.deletedAt) {
-          const restored = await prisma.employee.update({
-            where: { id: existingBio.id },
-            data: { deletedAt: null },
-            include: {
-              company: true,
-              Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
-              jobInfo: true,
-            },
-          });
-          console.log(`[Biometric Punch] Restored previously deleted employee: ${restored.firstName} ${restored.lastName} (Bio: ${bioIdStr})`);
-          return restored;
+          console.log(`[Biometric Punch] Ignored punch for deleted employee: ${existingBio.firstName} ${existingBio.lastName} (Bio: ${bioIdStr})`);
+          return null;
         }
         return existingBio;
       }
@@ -224,7 +182,7 @@ async function findEmployee(biometricId, employeeName) {
       const lastName = parts.slice(1).join(" ") || bioIdStr;
       const uniqueSuffix = Date.now().toString().slice(-4);
       const username = `emp_${bioIdStr}_${uniqueSuffix}`;
-      const email = `emp_${bioIdStr}_${uniqueSuffix}@frontpin.local`;
+      const email = `emp_${bioIdStr}_${uniqueSuffix}@hrpro.local`;
 
       const firstComp = await prisma.company.findFirst({
         where: { deletedAt: null },

@@ -9,6 +9,12 @@ exports.getLocations = async (req, res) => {
       deletedAt: null,
     },
     orderBy: { createdAt: "desc" },
+    include: {
+      // active (non-deleted, non-admin) employees bound to the location, shown against capacity
+      _count: {
+        select: { employees: { where: { deletedAt: null, NOT: { role: "ADMIN" } } } },
+      },
+    },
   });
 
   res.json({ success: true, data: locations });

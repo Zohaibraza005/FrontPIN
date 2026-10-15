@@ -56,7 +56,10 @@ import {
   User,
   Search,
   Building2,
+  MapPin,
+  ArrowRight,
 } from "lucide-react";
+import { avatarColor } from "../utils/avatar";
 import {
   BarChart,
   Bar,
@@ -122,8 +125,17 @@ export const Dashboard: React.FC = () => {
   const DATE_KEY = "dashboard-selected-date";
   const LOCATION_KEY = "dashboard-selected-location";
 
-  // ── Initialize with today's local date for real-time live attendance ──
+  // ── Restore the date the user last picked; it only changes when they change it ──
+  // (survives reloads and midnight; falls back to today the very first time)
   const getInitialDate = () => {
+    try {
+      const saved = localStorage.getItem(DATE_KEY);
+      if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved) && moment(saved, "YYYY-MM-DD", true).isValid()) {
+        return saved;
+      }
+    } catch {
+      // storage unavailable (private mode etc.) – use today
+    }
     return moment().format("YYYY-MM-DD");
   };
 
@@ -394,9 +406,14 @@ export const Dashboard: React.FC = () => {
     return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
+  // Persist the selected date so reloads (and the date rolling over at midnight) don't reset it
   useEffect(() => {
-    localStorage.removeItem(DATE_KEY);
-  }, []);
+    try {
+      if (selectedDate) localStorage.setItem(DATE_KEY, selectedDate);
+    } catch {
+      // ignore storage errors
+    }
+  }, [selectedDate]);
 
   useEffect(() => {
     localStorage.setItem("selectedLocation", selectedLocation);
@@ -548,10 +565,10 @@ export const Dashboard: React.FC = () => {
     name: a.name || (a.employee?.firstName ? `${a.employee.firstName} ${a.employee.lastName || ""}`.trim() : "Unknown"),
     status: (a?.status || "").toLowerCase(),
     clockIn: a?.checkInTime
-      ? new Date(a.checkInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      ? new Date(a.checkInTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
       : null,
     clockOut: a?.checkOutTime
-      ? new Date(a.checkOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      ? new Date(a.checkOutTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
       : null,
     activities: a.activities || [],
     department: a.department || a.employee?.department?.title || "No Department",
@@ -573,7 +590,6 @@ export const Dashboard: React.FC = () => {
   const chartData = weeklyDummyData.map(item => ({
     day: item.day,
     working:   Number(item.workingHours),
-    break:     Number(item.breakHours),
     overtime:  Number(item.overtimeHours),
   }));
 
@@ -897,7 +913,7 @@ export const Dashboard: React.FC = () => {
 
   // ────────────── RENDER ──────────────
   return (
-    <div className="tour-dashboard space-y-6 p-4 md:p-6">
+    <div className="tour-dashboard space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
       {isAdminOrSupervisor ? (
         <>
           {/* ── Stats + Attendance ── */}
@@ -906,11 +922,11 @@ export const Dashboard: React.FC = () => {
             <div className="xl:col-span-8 space-y-6">
               {user?.role === "SUPERVISOR" ? (
                 /* Supervisor Welcome Card – Clock In / Clock Out Attendance Box */
-                <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 md:p-7 min-h-[175px]">
+                <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-gradient-to-br from-white to-blue-50/60 dark:from-gray-950 dark:to-gray-900 flex flex-col justify-between p-6 md:p-7 min-h-[175px]">
                   <div className="flex justify-between items-start">
                     <div>
                       <h2 className="text-xl font-bold text-gray-900">
-                        Welcome To {companyName || user?.company?.name || "Frontpin"}
+                        Welcome To {companyName || user?.company?.name || "HR Pro"}
                       </h2>
                       <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                     </div>
@@ -1023,100 +1039,46 @@ export const Dashboard: React.FC = () => {
                     </div>
                   </div>
                 </Card>
-              ) : (
-                /* Admin Welcome Card – clean white card with vector illustration */
-                <div className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-6 md:p-7 flex flex-row items-center justify-between gap-4 min-h-[175px]">
-                  {/* LEFT SIDE: Welcome Text + Date Filter */}
-                  <div className="space-y-4 max-w-[65%] sm:max-w-[70%]">
-                    <div>
-                      <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 leading-tight">
-                        Welcome back
-                         {/* {user?.name || "User"}! */}
-                      </h1>
-                      <p className="text-sm text-gray-500 font-medium mt-1">
-                        Here's what's happening with your company today.
-                      </p>
-                    </div>
+              ) : null}
 
-                    {/* DATE FILTER */}
-                    <div className="inline-flex items-center gap-2.5 bg-gray-50/90 border border-gray-200/80 p-2.5 rounded-2xl">
-                      <Calendar className="w-4 h-4 text-blue-600 ml-1 shrink-0" />
-                      <DatePicker
-                        selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                        maxDate={new Date()}
-                        onChange={(date: Date | null) => {
-                          if (!date) return;
-                          const today = new Date();
-                          today.setHours(23, 59, 59, 999);
-                          if (date > today) return;
-                          setSelectedDate(moment(date).format("YYYY-MM-DD"));
-                        }}
-                        dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
-                        showMonthDropdown
-                        showYearDropdown
-                        dropdownMode="select"
-                        className="text-gray-900 font-semibold bg-white w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-xs cursor-pointer"
-                        placeholderText="Select date..."
-                      />
-                      {selectedDate !== moment().format("YYYY-MM-DD") && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
-                          className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs"
-                        >
-                          Today
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* RIGHT SIDE: SVG Vector Illustration */}
-                  <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
-                    <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
-                      {/* Background soft circle */}
-                      <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
-                      
-                      {/* Laptop screen base */}
-                      <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
-                      <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
-                      
-                      {/* Laptop keyboard area */}
-                      <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
-                      <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
-                      
-                      {/* Coffee mug */}
-                      <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
-                      <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
-                      <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
-                      
-                      {/* Potted Plant */}
-                      <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
-                      <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
-                      <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
-                      <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
-                      
-                      {/* Large clock */}
-                      <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
-                      <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                      <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                      <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
-                      
-                      {/* Code symbols on screen */}
-                      <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
-                      <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
-                      <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
-                      
-                      {/* Floating calendar checklist checkmark */}
-                      <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
-                      <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Attendance Stats</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Click a card to see the employees behind the number</p>
                 </div>
-              )}
-
-              <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                Attendance Stats
-              </h2>
+                {/* Date filter (moved from the removed welcome card) */}
+                {user?.role !== "SUPERVISOR" && (
+                <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 pl-3 pr-1.5 py-1 rounded-xl shadow-2xs h-10">
+                  <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                  <DatePicker
+                    selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
+                    maxDate={new Date()}
+                    onChange={(date: Date | null) => {
+                      if (!date) return;
+                      const today = new Date();
+                      today.setHours(23, 59, 59, 999);
+                      if (date > today) return;
+                      setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                    }}
+                    dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
+                    showMonthDropdown
+                    showYearDropdown
+                    dropdownMode="select"
+                    className="w-32 bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-sm focus:outline-none cursor-pointer p-0"
+                    placeholderText="Select date..."
+                  />
+                  {selectedDate !== moment().format("YYYY-MM-DD") && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                      className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs"
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+                )}
+              </div>
 
               <div className="grid gap-3.5 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 <StatCard
@@ -1181,127 +1143,158 @@ export const Dashboard: React.FC = () => {
               
 
 
-              <div className="mt-8">
-  <h2 className="text-xl font-semibold text-gray-800 mb-5 flex items-center gap-2">
-    
-    Weekly TimeSheet Overview
-  </h2>
+              {/* Weekly Timesheet – working hours & overtime from attendance records */}
+              {(() => {
+                const weekData = (weeklyDummyData || []).map((d: any) => ({
+                  ...d,
+                  workingHours: Number(d.workingHours) || 0,
+                  overtimeHours: Number(d.overtimeHours) || 0,
+                }));
+                const totalWorking = weekData.reduce((sum: number, d: any) => sum + d.workingHours, 0);
+                const totalOvertime = weekData.reduce((sum: number, d: any) => sum + d.overtimeHours, 0);
+                const workedDays = weekData.filter((d: any) => d.workingHours > 0).length;
+                const avgPerDay = workedDays ? totalWorking / workedDays : 0;
+                const locationName =
+                  !selectedLocation || String(selectedLocation).toUpperCase() === "ALL"
+                    ? "All locations"
+                    : (locations as any[]).find((l: any) => String(l.id) === String(selectedLocation))?.name || "Selected location";
+                const fmtH = (h: number) => `${h.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
+                const weekLabel = weekData.length
+                  ? `${moment(weekData[0].date).format("D MMM")} – ${moment(weekData[weekData.length - 1].date).format("D MMM YYYY")}`
+                  : "No data";
 
-  <Card className="border shadow-sm">
-    <CardHeader className="pb-2">
-      <CardTitle className="text-lg">Working Hours Breakdown</CardTitle>
-      <p className="text-sm text-muted-foreground">
-        {weeklyDummyData?.[0]?.date ? `Week: ${weeklyDummyData[0].date} – ${weeklyDummyData[6].date}` : "No data"}
-      </p>
-    </CardHeader>
+                return (
+                  <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+                    <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                            Weekly Timesheet Overview
+                          </CardTitle>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            Working hours &amp; overtime from attendance · checked-out shifts only
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-2.5 py-1 rounded-lg">
+                            <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                            {weekLabel}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-2.5 py-1 rounded-lg">
+                            <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                            {locationName}
+                          </span>
+                        </div>
+                      </div>
+                    </CardHeader>
 
-    <CardContent>
-      <div className="h-[340px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={weeklyDummyData}
-            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
-            <XAxis 
-              dataKey="day" 
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 13 }}
-            />
-            <YAxis 
-              label={{ 
-                value: 'Hours', 
-                angle: -90, 
-                position: 'insideLeft',
-                fill: '#64748b',
-                fontSize: 13
-              }}
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 12 }}
-              tickFormatter={(value) => `${value}h`}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: 'white',
-                border: '1px solid #e2e8f0',
-                borderRadius: '6px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
-              }}
-              formatter={(value: string) => [`${Number(value).toFixed(1)} hrs`, '']}
-              labelFormatter={(label) => `Day: ${label}`}
-            />
-            <Legend 
-              verticalAlign="top" 
-              height={36}
-              wrapperStyle={{ fontSize: '13px' }}
-            />
+                    <CardContent className="p-4 sm:p-5 space-y-5">
+                      {/* Totals */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+                            Total working
+                          </div>
+                          <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 mt-1">{fmtH(totalWorking)}</p>
+                        </div>
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                            <span className="w-2.5 h-2.5 rounded-sm bg-violet-500" />
+                            Total overtime
+                          </div>
+                          <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 mt-1">{fmtH(totalOvertime)}</p>
+                        </div>
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                            <Clock className="w-3.5 h-3.5 text-gray-400" />
+                            Avg per working day
+                          </div>
+                          <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 mt-1">{fmtH(avgPerDay)}</p>
+                        </div>
+                      </div>
 
-            <Bar 
-              dataKey="workingHours" 
-              name="Working Time" 
-              stackId="a" 
-              fill="#22c55e" 
-              radius={[4, 4, 0, 0]} 
-            />
-            <Bar 
-              dataKey="breakHours" 
-              name="Break Time" 
-              stackId="a" 
-              fill="#eab308" 
-              radius={[4, 4, 0, 0]} 
-            />
-            <Bar 
-              dataKey="overtimeHours" 
-              name="Overtime" 
-              fill="#a855f7" 
-              radius={[4, 4, 0, 0]} 
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Summary row – dynamic */}
-      {weeklyDummyData?.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mt-6 text-center text-sm">
-          <div>
-            <p className="text-gray-500">Total Working</p>
-            <p className="font-semibold text-green-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.workingHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500">Total Break</p>
-            <p className="font-semibold text-yellow-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.breakHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500">Total Overtime</p>
-            <p className="font-semibold text-purple-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.overtimeHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-        </div>
-      )}
-    </CardContent>
-  </Card>
-</div>
+                      {/* Chart: working on the left axis, overtime on the right axis (different scales) */}
+                      {weekData.length > 0 ? (
+                        <div className="h-[300px] w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={weekData} margin={{ top: 8, right: 4, left: -8, bottom: 0 }} barGap={4}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                              <XAxis
+                                dataKey="day"
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fill: "#6b7280", fontSize: 12 }}
+                              />
+                              <YAxis
+                                yAxisId="working"
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fill: "#6b7280", fontSize: 11 }}
+                                tickFormatter={(v) => `${v}h`}
+                              />
+                              <YAxis
+                                yAxisId="overtime"
+                                orientation="right"
+                                axisLine={false}
+                                tickLine={false}
+                                tick={{ fill: "#8b5cf6", fontSize: 11 }}
+                                tickFormatter={(v) => `${v}h`}
+                              />
+                              <Tooltip
+                                cursor={{ fill: "rgba(59,130,246,0.06)" }}
+                                contentStyle={{
+                                  backgroundColor: "white",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "10px",
+                                  boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+                                  fontSize: "12px",
+                                }}
+                                labelFormatter={(_, payload: any) => {
+                                  const d = payload?.[0]?.payload;
+                                  return d?.date ? moment(d.date).format("ddd, D MMM YYYY") : "";
+                                }}
+                                formatter={(value: any, name: any) => [fmtH(Number(value) || 0), name]}
+                              />
+                              <Legend
+                                verticalAlign="top"
+                                align="right"
+                                height={28}
+                                iconType="square"
+                                iconSize={10}
+                                wrapperStyle={{ fontSize: "12px" }}
+                              />
+                              <Bar yAxisId="working" dataKey="workingHours" name="Working" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                              <Bar yAxisId="overtime" dataKey="overtimeHours" name="Overtime" fill="#8b5cf6" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      ) : (
+                        <div className="h-[200px] flex flex-col items-center justify-center gap-2 text-gray-500">
+                          <BarChart3 className="w-8 h-8 text-gray-300" />
+                          <span className="text-sm font-medium">No attendance this week</span>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
             </div>
 
             {/* Right: Today's Attendance Widget ── sleek & professional */}
             <div className="xl:col-span-4 xl:sticky xl:top-6">
-              <Card className="h-full shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col">
-                <CardHeader className="bg-white p-5 pb-4 border-b border-gray-100">
+              <Card className="h-full gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 flex flex-col">
+                <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="size-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                        <Clock className="size-5" />
+                      <div className="size-9 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-300 flex items-center justify-center shrink-0">
+                        <Clock className="size-4" />
                       </div>
                       <div>
-                        <CardTitle className="text-base font-bold text-gray-900">
+                        <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
                           Today's Attendance
                         </CardTitle>
-                        <p className="text-xs text-gray-400 font-medium">Real-time tracking</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Real-time tracking</p>
                       </div>
                     </div>
                     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
@@ -1313,7 +1306,7 @@ export const Dashboard: React.FC = () => {
 
                 <CardContent className="p-4 flex flex-col flex-1 min-h-[460px]">
                   <Tabs defaultValue="present" className="flex flex-col flex-1">
-                    <TabsList className="grid grid-cols-3 gap-1.5 bg-gray-100/80 p-1.5 rounded-xl mb-4 border border-gray-200/60 h-auto">
+                    <TabsList className="grid w-full grid-cols-3 bg-gray-100/80 dark:bg-gray-900 p-1 rounded-xl mb-4 h-auto">
                       <TabsTrigger
                         value="present"
                         className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-xs transition-all"
@@ -1532,10 +1525,10 @@ export const Dashboard: React.FC = () => {
                     {selectedAttendance.activities.map((act: any, idx: number) => {
                       const isTask = act.type === "task";
                       const startTimeFormatted = act.startTime
-                        ? new Date(act.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                        ? new Date(act.startTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
                         : "—";
                       const endTimeFormatted = act.endTime
-                        ? new Date(act.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                        ? new Date(act.endTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
                         : null;
 
                       return (
@@ -1618,11 +1611,11 @@ export const Dashboard: React.FC = () => {
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Card 1: Welcome Box */}
-            <Card className="shadow-sm border rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 min-h-[350px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-gradient-to-br from-white to-blue-50/60 dark:from-gray-950 dark:to-gray-900 flex flex-col justify-between p-6 min-h-[350px]">
               <div className="flex justify-between items-start">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
-                    Welcome To {companyName || "Frontpin"}
+                    Welcome To {companyName || "HR Pro"}
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                 </div>
@@ -1708,10 +1701,10 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             {/* Card 3: My Attendance Box */}
-            <Card className="shadow-sm border rounded-2xl overflow-hidden bg-white flex flex-col p-6 min-h-[350px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 flex flex-col p-6 min-h-[350px]">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-900">
-                  Attendance
+                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  My Attendance
                 </h2>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-semibold text-gray-700">
@@ -1768,17 +1761,19 @@ export const Dashboard: React.FC = () => {
 
                     // Background color determination
                     let bgStyle = "";
-                    if (record && (record.status === "PRESENT" || record.status === "LATE")) {
-                      bgStyle = "bg-teal-500 text-white font-semibold";
+                    if (record && record.status === "PRESENT") {
+                      bgStyle = "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 font-semibold";
+                    } else if (record && (record.status === "LATE" || record.status === "TARDY")) {
+                      bgStyle = "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 font-semibold";
                     } else if (isCurrentMonth && !isWeekend && isPast) {
                       // Weekday in the past with no check-in -> absent/leave
-                      bgStyle = "bg-gray-100 text-gray-400";
+                      bgStyle = "bg-gray-50 text-gray-400";
                     }
 
                     const tooltipTrigger = (
                       <div
                         className={`flex flex-col items-center justify-center h-8 w-8 mx-auto rounded-lg text-xs ${bgStyle} ${dayStyle} ${
-                          isToday ? "ring-2 ring-indigo-600 font-bold" : ""
+                          isToday ? "ring-2 ring-blue-600 font-bold" : ""
                         }`}
                       >
                         {day.getDate()}
@@ -1809,7 +1804,7 @@ export const Dashboard: React.FC = () => {
                             </p>
                             <p className="flex justify-between items-center gap-4 border-t border-gray-100 pt-1.5">
                               <span className="text-gray-600 font-semibold">Worked:</span>
-                              <span className="font-bold text-teal-600">{workedHours}</span>
+                              <span className="font-bold text-emerald-600">{workedHours}</span>
                             </p>
                           </UITooltipContent>
                         </UITooltip>
@@ -1823,6 +1818,12 @@ export const Dashboard: React.FC = () => {
                     );
                   })}
                 </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-3 mt-2 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-50 ring-1 ring-emerald-200" />Present</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-50 ring-1 ring-amber-200" />Late</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-50 ring-1 ring-gray-200" />No record</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded ring-2 ring-blue-600" />Today</span>
+                </div>
               </div>
             </Card>
           </div>
@@ -1830,15 +1831,15 @@ export const Dashboard: React.FC = () => {
           {/* Row 2: 4 Real-time Functional Summary Cards (Unified Theme) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Card 1: Present Days (This Month) */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 p-5 flex flex-col justify-between min-h-[175px]">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Present Days</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Present Days</h3>
                 <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                  <div className="size-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
                     <UserCheck className="size-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
+                    <p className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 leading-none mb-1.5">
                       {(() => {
                         const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
                         const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
@@ -1882,15 +1883,15 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             {/* Card 2: Monthly Leaves */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 p-5 flex flex-col justify-between min-h-[175px]">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Monthly Leaves</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Monthly Leaves</h3>
                 <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                  <div className="size-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
                     <Calendar className="size-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
+                    <p className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 leading-none mb-1.5">
                       {(() => {
                         const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
                         const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
@@ -1943,15 +1944,15 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             {/* Card 3: Monthly Tardies */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 p-5 flex flex-col justify-between min-h-[175px]">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Monthly Tardies</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Monthly Tardies</h3>
                 <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                  <div className="size-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
                     <AlertCircle className="size-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
+                    <p className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 leading-none mb-1.5">
                       {(() => {
                         const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
                         const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
@@ -1987,11 +1988,11 @@ export const Dashboard: React.FC = () => {
             </Card>
 
             {/* Card 4: Payroll Summary */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
+            <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 p-5 flex flex-col justify-between min-h-[175px]">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Payroll Summary</h3>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">Payroll Summary</h3>
                 <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                  <div className="size-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
                     <Wallet className="size-5" />
                   </div>
                   <div className="min-w-0">
@@ -2571,37 +2572,38 @@ export const StatCard = ({
   return (
     <Card
       onClick={handleClick}
-      className="shadow-xs border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-4.5 sm:p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all group"
+      className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 p-4 sm:p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 transition-all group"
     >
-      <div>
-        <h3 className="text-sm font-bold text-gray-900 mb-3">{title}</h3>
-        <div className="flex items-center gap-3.5">
-          <div
-            className={`size-11 rounded-xl ${styleMap.bgIcon} flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105`}
-          >
-            {Icon ? (
-              <Icon className="size-5" />
-            ) : img ? (
-              <img
-                src={img}
-                alt={title}
-                width={22}
-                height={22}
-                className="object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <span className="font-bold text-sm">{label?.charAt(0)}</span>
-            )}
-          </div>
-          <div>
-            <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
-              {value}
-            </p>
-            <p className="text-xs font-semibold text-gray-700">{label}</p>
-          </div>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</h3>
+        <div
+          className={`size-9 rounded-lg ${styleMap.bgIcon} flex items-center justify-center flex-shrink-0`}
+        >
+          {Icon ? (
+            <Icon className="size-4" />
+          ) : img ? (
+            <img
+              src={img}
+              alt={title}
+              width={18}
+              height={18}
+              className="object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <span className="font-bold text-sm">{label?.charAt(0)}</span>
+          )}
+        </div>
+      </div>
+      <div className="mt-3">
+        <p className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100 leading-none">
+          {value}
+        </p>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+          <ArrowRight className="size-3.5 text-gray-300 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all" />
         </div>
       </div>
     </Card>
@@ -2691,7 +2693,7 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
             placeholder={`Search ${title.toLowerCase()} employees...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/80 border-gray-200/80 rounded-xl focus:bg-white transition-all"
+            className="w-full h-9 pl-9 pr-3 text-sm bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-800 rounded-xl"
           />
         </div>
 
@@ -2725,23 +2727,20 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
                     handleView(emp);
                   }}
                   className={`
-                    flex items-center justify-between 
-                    p-2.5 rounded-xl border border-gray-100
-                    bg-white hover:bg-blue-50/40 hover:border-blue-200
-                    transition-all duration-150 cursor-pointer shadow-2xs group
+                    flex items-center justify-between px-2.5 py-2 rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 hover:bg-blue-50/40 hover:border-blue-200 dark:hover:bg-gray-900 transition-colors duration-150 cursor-pointer group
                   `}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${currentBadge.bg} ${currentBadge.text}`}>
-                      {emp.name?.charAt(0)?.toUpperCase() || "E"}
+                    <div className={`size-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${avatarColor(emp.name || "")}`}>
+                      {emp.name?.split(" ").map((p: string) => p.charAt(0)).slice(0, 2).join("").toUpperCase() || "E"}
                     </div>
-                    <span className="font-semibold text-xs text-gray-900 truncate group-hover:text-blue-600 transition-colors">
+                    <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-blue-600 transition-colors">
                       {emp.name}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 border border-gray-200/70 px-2 py-0.5 rounded-lg shrink-0">
-                    <Clock className="w-3 h-3 text-blue-500" />
+                  <div className="flex items-center gap-1 text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     <span>{emp.clockIn || "—"}</span>
                   </div>
                 </div>

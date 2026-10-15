@@ -65,9 +65,10 @@ import {
   Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { attendanceAPI, departmentAPI, employeeAPI, entityAPI, locationAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
+import { avatarColor } from '../utils/avatar';
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import {
@@ -93,6 +94,7 @@ import {
   SheetTitle,
 } from '../components/ui/sheet';
 
+import { timeRange12h } from "../utils/time";
 function convertTo12Hour(timeStr) {
   // Input check
   if (!timeStr || typeof timeStr !== 'string') {
@@ -129,66 +131,79 @@ const STATUS_CONFIG: Record<string, any> = {
   PRESENT: {
     label: "Present",
     badge: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800",
-    cell: "bg-emerald-600 text-white font-medium shadow-sm hover:bg-emerald-700 transition-colors",
+    cell: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-900 font-semibold transition-colors",
     dot: "bg-emerald-500",
     tooltip: "bg-emerald-900 text-white border-emerald-700",
   },
   LATE: {
     label: "Tardy",
     badge: "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
-    cell: "bg-amber-400 text-amber-950 font-semibold shadow-sm hover:bg-amber-500 transition-colors",
+    cell: "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-900 font-semibold transition-colors",
     dot: "bg-amber-500",
     tooltip: "bg-amber-900 text-white border-amber-700",
   },
   TARDY: {
     label: "Tardy",
     badge: "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
-    cell: "bg-amber-400 text-amber-950 font-semibold shadow-sm hover:bg-amber-500 transition-colors",
+    cell: "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-900 font-semibold transition-colors",
     dot: "bg-amber-500",
     tooltip: "bg-amber-900 text-white border-amber-700",
   },
   ABSENT: {
     label: "Absent",
     badge: "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800",
-    cell: "bg-rose-600 text-white font-medium shadow-sm hover:bg-rose-700 transition-colors",
+    cell: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-900 font-semibold transition-colors",
     dot: "bg-rose-500",
     tooltip: "bg-rose-900 text-white border-rose-700",
   },
   LEAVE: {
     label: "Leave",
     badge: "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800",
-    cell: "bg-sky-500 text-white font-medium shadow-sm hover:bg-sky-600 transition-colors",
+    cell: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200 hover:bg-sky-100 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-900 font-semibold transition-colors",
     dot: "bg-sky-500",
     tooltip: "bg-sky-900 text-white border-sky-700",
   },
   OFF_DAY: {
     label: "Off Day",
     badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800",
-    cell: "bg-slate-100 text-slate-600 font-medium shadow-xs hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-400 transition-colors",
+    cell: "bg-gray-50 text-gray-400 ring-1 ring-inset ring-gray-100 dark:bg-gray-900/60 dark:text-gray-500 dark:ring-gray-800 font-medium transition-colors",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   OFF: {
     label: "Off Day",
     badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800",
-    cell: "bg-slate-100 text-slate-600 font-medium shadow-xs hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-400 transition-colors",
+    cell: "bg-gray-50 text-gray-400 ring-1 ring-inset ring-gray-100 dark:bg-gray-900/60 dark:text-gray-500 dark:ring-gray-800 font-medium transition-colors",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   UPCOMING_DAY: {
     label: "Upcoming",
     badge: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-800",
-    cell: "bg-slate-100/90 text-slate-500 font-medium shadow-2xs hover:bg-slate-200 dark:bg-slate-900/80 dark:text-slate-400 transition-colors border border-slate-200/50",
+    cell: "bg-transparent text-gray-300 ring-1 ring-inset ring-dashed ring-gray-200 dark:text-gray-600 dark:ring-gray-800 font-medium transition-colors",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   UPCOMING: {
     label: "Upcoming",
     badge: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-800",
-    cell: "bg-slate-100/90 text-slate-500 font-medium shadow-2xs hover:bg-slate-200 dark:bg-slate-900/80 dark:text-slate-400 transition-colors border border-slate-200/50",
+    cell: "bg-transparent text-gray-300 ring-1 ring-inset ring-dashed ring-gray-200 dark:text-gray-600 dark:ring-gray-800 font-medium transition-colors",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   }
+};
+
+
+const STATUS_LABELS: Record<string, string> = {
+  PRESENT: "Present",
+  TARDY: "Tardy",
+  LATE: "Tardy",
+  ABSENT: "Absent",
+  LEAVE: "Leave",
+  OFF_DAY: "Off Day",
+  OFF: "Off Day",
+  UPCOMING_DAY: "Upcoming",
+  UPCOMING: "Upcoming",
 };
 
 const formatMinutes = (mins: number) => {
@@ -473,6 +488,95 @@ const getPaginationRange = (current: number, total: number) => {
   return range;
 };
 
+// Read-only list of raw device punches, shared by the View panel and the Edit dialog
+const PunchLogs: React.FC<{ punches?: any[] }> = ({ punches }) => (
+  <div>
+    <div className="flex items-center justify-between mb-2.5">
+      <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+        <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+        <span>Punch Logs ({punches?.length || 0})</span>
+      </h4>
+      <span className="text-[11px] text-gray-400 font-mono">
+        Real-time Device Logs
+      </span>
+    </div>
+
+    {punches?.length ? (
+      <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {punches.map((punch: any, idx: number) => {
+            const isCheckIn = punch.type === "CHECK_IN";
+            const isCheckOut = punch.type === "CHECK_OUT";
+
+            return (
+              <div
+                key={punch.id || idx}
+                className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
+              >
+                {/* Punch # and Direction */}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                    #{idx + 1}
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
+                          isCheckIn
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300"
+                            : isCheckOut
+                            ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300"
+                            : "bg-gray-50 text-gray-700 border-gray-300"
+                        }`}
+                      >
+                        {isCheckIn ? (
+                          <span className="inline-flex items-center gap-0.5">
+                            <ArrowDownRight className="w-3 h-3 text-emerald-600" />
+                            IN
+                          </span>
+                        ) : isCheckOut ? (
+                          <span className="inline-flex items-center gap-0.5">
+                            <ArrowUpRight className="w-3 h-3 text-blue-600" />
+                            OUT
+                          </span>
+                        ) : (
+                          punch.type
+                        )}
+                      </Badge>
+                      <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {punch.device || "Biometric Terminal"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+                      <span className="capitalize">{punch.method || "Biometric"}</span>
+                      {punch.ip && <span>• IP: {punch.ip}</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Timestamp */}
+                <div className="text-right shrink-0">
+                  <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                    {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
+                  </div>
+                  <div className="text-[10px] text-gray-400 font-mono">
+                    {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : (
+      <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+        No raw biometric punches recorded for this date.
+      </div>
+    )}
+  </div>
+);
+
 export const Attendance: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState(user?.role === 'USER' ? 'monthly' : 'daily');
@@ -491,11 +595,13 @@ export const Attendance: React.FC = () => {
   const [viewRecord, setViewRecord] = useState(null);
 
   const [report, setReport] = useState<any[]>([]);
-  const [departmentId, setDepartmentId] = useState<string>();
+  const [departmentId, setDepartmentId] = useState<string>("all");
   const [locationId, setLocationId] = useState<string>(() => localStorage.getItem("selectedLocation") || "all");
   const [companyId, setCompanyId] = useState<string>();
+  const [entityId, setEntityId] = useState<string>("all");
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [entities, setEntities] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -634,7 +740,7 @@ export const Attendance: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId, statusFilter]);
+  }, [activeTab, selectedDate, departmentId, locationId, entityId, selectedEmployeeId, statusFilter]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -655,6 +761,7 @@ export const Attendance: React.FC = () => {
         date: selectedDate,
         departmentId,
         locationId,
+        entityId,
         employeeId: selectedEmployeeId !== "all" ? selectedEmployeeId : undefined,
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
@@ -849,10 +956,10 @@ export const Attendance: React.FC = () => {
           setSelectedRecord(finalRecord);
           setEditModalOpen(true);
         }}
-        className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.05] hover:shadow-md"} ${
+        className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:shadow-sm"} ${
           isUserMonthly
             ? "w-8 h-8 rounded-lg flex items-center justify-center mx-auto"
-            : "rounded-md p-1"
+            : "rounded-lg px-1 py-0.5"
         } ${config.cell}`}
       >
         {/* Visual indicator dot for Day Override */}
@@ -881,9 +988,9 @@ export const Attendance: React.FC = () => {
               : status ? status.charAt(0) : "A"}
           </span>
         ) : (
-          <div className="flex flex-col items-center justify-center min-h-[34px] px-1">
+          <div className="flex flex-col items-center justify-center min-h-[30px] px-0.5">
             {activeTab !== "monthly" ? (
-              <span className="font-semibold tracking-tight">
+              <span className="text-xs font-semibold tracking-tight tabular-nums whitespace-nowrap">
                 {isUpcoming
                   ? "Upcoming"
                   : isOff
@@ -1070,35 +1177,90 @@ export const Attendance: React.FC = () => {
   
   const loadFilters = async () => {
     if (user?.role === "ADMIN") {
-      const dept = await departmentAPI.getDepartments();
-      const loc = await locationAPI.getLocations();
-      const emp = await employeeAPI.getEmployees();
-  
+      const [dept, loc, emp, ent] = await Promise.all([
+        departmentAPI.getDepartments(),
+        locationAPI.getLocations(),
+        employeeAPI.getEmployees(),
+        entityAPI.getEntities().catch(() => ({ data: [] })),
+      ]);
+
       setDepartments(dept.data || []);
       setLocations(loc.data || []);
+      setEntities(ent.data || []);
       setEmployees((emp.data || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin'));
     }
   };
-  
+
+  const changeLocation = (val: string) => {
+    setLocationId(val);
+    localStorage.setItem("selectedLocation", val);
+    localStorage.setItem("dashboard-selected-location", val);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
+  };
+
+  const isSet = (v?: string) => Boolean(v) && v !== "all";
+
+  // Active filters shown as removable tags under the filter bar
+  const activeFilterTags = useMemo(() => {
+    const tags: { key: string; label: string; clear: () => void }[] = [];
+    if (isSet(departmentId)) {
+      const d = departments.find((x) => String(x.id) === String(departmentId));
+      tags.push({ key: "department", label: `Department: ${d?.title || departmentId}`, clear: () => setDepartmentId("all") });
+    }
+    if (isSet(locationId)) {
+      const l = locations.find((x) => String(x.id) === String(locationId));
+      tags.push({ key: "location", label: `Location: ${l?.name || locationId}`, clear: () => changeLocation("all") });
+    }
+    if (isSet(entityId)) {
+      const en = entities.find((x) => String(x.id) === String(entityId));
+      tags.push({ key: "entity", label: `Entity: ${en?.name || entityId}`, clear: () => setEntityId("all") });
+    }
+    if (isSet(selectedEmployeeId)) {
+      const e = employees.find((x) => String(x.id) === String(selectedEmployeeId));
+      tags.push({
+        key: "employee",
+        label: `Employee: ${e ? `${e.firstName} ${e.lastName || ""}`.trim() : selectedEmployeeId}`,
+        clear: () => setSelectedEmployeeId("all"),
+      });
+    }
+    if (isSet(statusFilter)) {
+      tags.push({ key: "status", label: `Status: ${statusFilter.replace("_", " ").toLowerCase()}`, clear: () => setStatusFilter("all") });
+    }
+    return tags;
+  }, [departmentId, locationId, entityId, selectedEmployeeId, statusFilter, departments, locations, entities, employees]);
+
+  const clearAllFilters = () => {
+    setDepartmentId("all");
+    changeLocation("all");
+    setEntityId("all");
+    setSelectedEmployeeId("all");
+    setStatusFilter("all");
+  };
+
   useEffect(() => {
     loadReport();
 
-    // ⚡ Real-time live polling every 10 seconds
+    // ⚡ Live polling every 30 seconds, paused while the browser tab is hidden
     const interval = setInterval(() => {
-      loadReport(false);
-    }, 10000);
+      if (!document.hidden) loadReport(false);
+    }, 30000);
 
     // ⚡ Real-time event listener for immediate clock-in/out or punch sync
     const handleAttendanceUpdate = () => {
       loadReport(false);
     };
+    const handleVisibility = () => {
+      if (!document.hidden) loadReport(false);
+    };
     window.addEventListener("attendance-updated", handleAttendanceUpdate);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener("attendance-updated", handleAttendanceUpdate);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId]);
+  }, [activeTab, selectedDate, departmentId, locationId, entityId, selectedEmployeeId]);
   
   const loadReport = async (showFeedback = false) => {
     try {
@@ -1108,6 +1270,7 @@ export const Attendance: React.FC = () => {
         date: selectedDate,
         departmentId,
         locationId,
+        entityId,
         employeeId:
           user?.role === "ADMIN" && selectedEmployeeId !== "all"
             ? selectedEmployeeId
@@ -1368,20 +1531,20 @@ export const Attendance: React.FC = () => {
     }
 
     return (
-      <div className="w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950" style={{ width: "1000px" }}>
+      <div className="w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
         {/* Scrollable container with sticky headers and sticky employee column */}
         <div className="overflow-x-auto w-full max-w-full">
           <table className="w-full border-collapse text-left text-sm">
-            <thead className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md border-b border-gray-200 dark:bg-gray-900/95 dark:border-gray-800">
+            <thead className="sticky top-0 z-30 bg-gray-50 border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800">
               <tr>
                 {/* Employee column – sticky left */}
                 <th
                   scope="col"
-                  className="sticky left-0 z-40 bg-gray-50 px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider border-r border-gray-200 min-w-[160px] md:min-w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800"
+                  className="sticky left-0 z-40 bg-gray-50 px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider border-r border-gray-200 min-w-[200px] md:min-w-[230px] dark:bg-gray-900 dark:text-gray-400 dark:border-gray-800"
                 >
                   <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-gray-400" />
-                    <span>Employee ({filteredReport.length})</span>
+                    <span>Employee</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">{filteredReport.length}</span>
                   </div>
                 </th>
   
@@ -1394,15 +1557,15 @@ export const Attendance: React.FC = () => {
                     <th
                       key={day.toISOString()}
                       scope="col"
-                      className={`px-1 py-2.5 text-center text-xs font-medium border-r border-gray-200 dark:border-gray-800 ${
+                      className={`px-1 py-2 text-center text-xs font-medium border-r border-gray-100 dark:border-gray-800 ${
                         isMonthly 
-                          ? (user?.role === 'USER' ? 'min-w-[42px]' : 'min-w-[68px] sm:min-w-[72px]') 
-                          : 'min-w-[75px] md:min-w-[85px]'
+                          ? (user?.role === 'USER' ? 'min-w-[42px]' : 'min-w-[46px]') 
+                          : 'min-w-[96px]'
                       } transition-colors ${
                         isToday 
-                          ? 'bg-blue-50/80 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' 
+                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' 
                           : isWeekend 
-                          ? 'bg-gray-100/50 text-gray-500 dark:bg-gray-900/40 dark:text-gray-400' 
+                          ? 'bg-gray-100/70 text-gray-500 dark:bg-gray-900/60 dark:text-gray-400' 
                           : 'text-gray-700 dark:text-gray-300'
                       }`}
                     >
@@ -1410,7 +1573,7 @@ export const Attendance: React.FC = () => {
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
                           {format(day, "EEE")}
                         </span>
-                        <span className={`text-sm font-extrabold mt-0.5 rounded-full w-6 h-6 flex items-center justify-center ${
+                        <span className={`text-xs font-bold mt-0.5 rounded-full w-6 h-6 flex items-center justify-center tabular-nums ${
                           isToday ? 'bg-blue-600 text-white shadow-sm' : ''
                         }`}>
                           {format(day, "d")}
@@ -1423,14 +1586,14 @@ export const Attendance: React.FC = () => {
                 {/* Total Hours Column */}
                 <th
                   scope="col"
-                  className="sticky right-0 z-40 bg-gray-50 px-4 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider border-l border-gray-200 min-w-[110px] shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800"
+                  className="sticky right-0 z-40 bg-gray-50 px-4 py-3 text-center text-[11px] font-semibold text-gray-500 uppercase tracking-wider border-l border-gray-200 min-w-[104px] dark:bg-gray-900 dark:text-gray-400 dark:border-gray-800"
                 >
                   Total Hours
                 </th>
               </tr>
             </thead>
   
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-gray-950">
               {paginatedReport.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
@@ -1471,20 +1634,18 @@ export const Attendance: React.FC = () => {
                 }, 0);
                 
                 return (
-                  <tr key={emp.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
+                  <tr key={emp.id} className="group hover:bg-slate-50 dark:hover:bg-gray-900 transition-colors">
                     {/* Employee cell – sticky left */}
-                    <td className="sticky left-0 z-20 bg-white px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                    <td className="sticky left-0 z-20 bg-white group-hover:bg-slate-50 dark:group-hover:bg-gray-900 px-4 py-2.5 border-r border-gray-200 dark:bg-gray-950 dark:border-gray-800">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(`${emp.firstName} ${emp.lastName || ""}`)}`}>
                           {emp.firstName?.charAt(0)}{(emp.lastName || "").charAt(0)}
                         </div>
-                        <div className="flex flex-col truncate">
-                          <span className="truncate">{emp.firstName} {emp.lastName || ""}</span>
-                          {emp.department && (
-                            <span className="text-[11px] text-gray-400 font-normal truncate">
-                              {emp.department.title || emp.department}
-                            </span>
-                          )}
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{emp.firstName} {emp.lastName || ""}</span>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                            {[emp.employeeId, emp.department?.title || (typeof emp.department === "string" ? emp.department : "")].filter(Boolean).join(" · ") || "—"}
+                          </span>
                         </div>
                       </div>
                     </td>
@@ -1496,9 +1657,9 @@ export const Attendance: React.FC = () => {
                       return (
                         <td
                           key={day.toISOString()}
-                          className={`px-1 py-2 text-center border-r border-gray-100 dark:border-gray-900 ${
-                            isMonthly ? 'min-w-[68px] sm:min-w-[72px]' : 'min-w-[75px]'
-                          }`}
+                          className={`px-1 py-2 text-center border-r border-gray-50 dark:border-gray-900 ${
+                            isMonthly ? 'min-w-[46px]' : 'min-w-[96px]'
+                          } ${isSameDay(day, new Date()) ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''}`}
                         >
                           {renderAttendanceCell(record, day, emp)}
                         </td>
@@ -1506,8 +1667,8 @@ export const Attendance: React.FC = () => {
                     })}
   
                     {/* Total cell – sticky right */}
-                    <td className="sticky right-0 z-20 bg-white px-4 py-3 text-center text-sm font-bold text-gray-900 border-l border-gray-200 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800">
-                      <span className="inline-block px-2.5 py-1 rounded-md bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 font-mono text-xs">
+                    <td className="sticky right-0 z-20 bg-white group-hover:bg-slate-50 dark:group-hover:bg-gray-900 px-4 py-2.5 text-center border-l border-gray-200 dark:bg-gray-950 dark:border-gray-800">
+                      <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                         {formatMinutes(totalMinutes)}
                       </span>
                     </td>
@@ -1625,15 +1786,15 @@ export const Attendance: React.FC = () => {
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
       {/* Simple Header with Refresh & Export Excel */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Attendance Management</h2>
-          <p className="text-gray-500 text-sm">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Attendance Management</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">
             Track, edit, and audit daily, weekly, and monthly employee timesheets effortlessly.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {user?.role !== 'USER' && (
             <Button
               variant="outline"
@@ -1646,7 +1807,7 @@ export const Attendance: React.FC = () => {
               title="Advance Settings: Turn Off-Days ON or On-Days OFF"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Advance Settings</span>
+              <span>Settings</span>
             </Button>
           )}
 
@@ -1659,7 +1820,7 @@ export const Attendance: React.FC = () => {
             title="Fetch real-time punches from machine and update attendance"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncingMachine ? "animate-spin text-blue-600" : "text-gray-500"}`} />
-            <span>{syncingMachine ? "Syncing..." : "Sync From Machine"}</span>
+            <span>{syncingMachine ? "Syncing..." : "Sync"}</span>
           </Button>
 
           <Button
@@ -1670,7 +1831,7 @@ export const Attendance: React.FC = () => {
             className="shrink-0 h-9 px-3 text-xs font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-xl transition-all whitespace-nowrap"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Export Excel</span>
+            <span>Export</span>
           </Button>
         </div>
       </div>
@@ -1678,7 +1839,10 @@ export const Attendance: React.FC = () => {
       {/* Main Filter & Content Card */}
       <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
         <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          <div className="@container">
+          <div className="flex flex-col @6xl:flex-row @6xl:items-center gap-2.5">
+            {/* Date controls */}
+            <div className="flex items-center gap-2 shrink-0">
             {/* Date Navigation */}
             <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
               <Button 
@@ -1755,11 +1919,14 @@ export const Attendance: React.FC = () => {
                 </button>
               )}
             </div>
+            </div>
 
+            {/* Filters: equal-width grid, single row on wide screens */}
+            <div className={`flex-1 min-w-0 grid gap-2.5 grid-cols-2 @xl:grid-cols-3 ${user?.role === "ADMIN" ? "@3xl:grid-cols-5" : ""}`}>
             {user?.role === "ADMIN" && (
               <>
                 <SearchableSelect
-                  className="w-32 sm:w-36 shrink-0"
+                  className="w-full min-w-0 h-9 rounded-xl"
                   icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="Department"
                   searchPlaceholder="Search department..."
@@ -1775,17 +1942,12 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
-                  className="w-32 sm:w-36 shrink-0"
+                  className="w-full min-w-0 h-9 rounded-xl"
                   icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={locationId}
-                  onValueChange={(val) => {
-                    setLocationId(val);
-                    localStorage.setItem("selectedLocation", val);
-                    localStorage.setItem("dashboard-selected-location", val);
-                    window.dispatchEvent(new CustomEvent("location-changed", { detail: val }));
-                  }}
+                  onValueChange={changeLocation}
                   options={[
                     { value: "all", label: "All Locations" },
                     ...locations.map((l) => ({
@@ -1796,7 +1958,26 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
-                  className="w-36 sm:w-40 shrink-0"
+                  className="w-full min-w-0 h-9 rounded-xl"
+                  icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="Entity"
+                  searchPlaceholder="Search entity..."
+                  value={entityId}
+                  onValueChange={(val) => {
+                    setEntityId(val);
+                    setSelectedEmployeeId("all");
+                  }}
+                  options={[
+                    { value: "all", label: "All Entities" },
+                    ...entities.map((en) => ({
+                      value: String(en.id),
+                      label: en.name,
+                    })),
+                  ]}
+                />
+
+                <SearchableSelect
+                  className="w-full min-w-0 h-9 rounded-xl"
                   icon={<User className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="All Employees"
                   searchPlaceholder="Search employee..."
@@ -1804,7 +1985,9 @@ export const Attendance: React.FC = () => {
                   onValueChange={setSelectedEmployeeId}
                   options={[
                     { value: "all", label: "All Employees" },
-                    ...employees.map((emp) => ({
+                    ...employees
+                      .filter((emp) => entityId === "all" || String(emp.entityId) === entityId)
+                      .map((emp) => ({
                       value: String(emp.id),
                       label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
                     })),
@@ -1815,7 +1998,7 @@ export const Attendance: React.FC = () => {
 
             {/* Attendance Status Filter */}
             <SearchableSelect
-              className="w-32 sm:w-36 shrink-0"
+              className="w-full min-w-0 h-9 rounded-xl"
               icon={<Filter className="w-3.5 h-3.5 text-gray-400" />}
               placeholder="All Statuses"
               searchPlaceholder="Filter status..."
@@ -1830,7 +2013,39 @@ export const Attendance: React.FC = () => {
                 { value: "OFF_DAY", label: "Off Day" },
               ]}
             />
+            </div>
           </div>
+          </div>
+
+          {activeFilterTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+              {activeFilterTags.map((tag) => (
+                <span
+                  key={tag.key}
+                  className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-900 capitalize"
+                >
+                  {tag.label}
+                  <button
+                    type="button"
+                    onClick={tag.clear}
+                    className="p-0.5 rounded-full hover:bg-blue-200/70 dark:hover:bg-blue-900"
+                    aria-label={`Remove ${tag.key} filter`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950 transition-colors"
+                title="Clear all filters"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear Filters
+              </button>
+            </div>
+          )}
         </CardHeader>
 
         <CardContent className="p-3 sm:p-4">
@@ -1842,19 +2057,19 @@ export const Attendance: React.FC = () => {
                     value="daily" 
                     className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
                   >
-                    Daily View
+                    Daily
                   </TabsTrigger>
                   <TabsTrigger 
                     value="weekly" 
                     className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
                   >
-                    Weekly View
+                    Weekly
                   </TabsTrigger>
                   <TabsTrigger 
                     value="monthly" 
                     className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
                   >
-                    Monthly View
+                    Monthly
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -1862,30 +2077,29 @@ export const Attendance: React.FC = () => {
 
             {/* Legend - Only show in Weekly and Monthly views, positioned in the next row */}
             {activeTab !== 'daily' && (
-              <div className="flex items-center gap-3 text-xs text-gray-600 bg-gray-50/80 dark:bg-gray-900/60 px-3.5 py-2 rounded-xl border border-gray-200/80 dark:border-gray-800 flex-wrap sm:flex-nowrap w-fit">
-                <span className="font-bold text-gray-700 dark:text-gray-300">Legend:</span>
+              <div className="flex items-center gap-x-4 gap-y-2 text-xs text-gray-600 dark:text-gray-400 flex-wrap">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
+                  <span className="w-3 h-3 rounded bg-emerald-100 ring-1 ring-emerald-300 inline-block"></span>
                   <span className="font-medium">Present (P)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+                  <span className="w-3 h-3 rounded bg-amber-100 ring-1 ring-amber-300 inline-block"></span>
                   <span className="font-medium">Tardy (T)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-600 inline-block"></span>
+                  <span className="w-3 h-3 rounded bg-rose-100 ring-1 ring-rose-300 inline-block"></span>
                   <span className="font-medium">Absent (A)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span>
+                  <span className="w-3 h-3 rounded bg-sky-100 ring-1 ring-sky-300 inline-block"></span>
                   <span className="font-medium">Leave (L)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+                  <span className="w-3 h-3 rounded bg-gray-100 ring-1 ring-gray-200 inline-block"></span>
                   <span className="font-medium">Off Day (O)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block"></span>
+                  <span className="w-3 h-3 rounded ring-1 ring-dashed ring-gray-300 inline-block"></span>
                   <span className="font-medium">Upcoming (U)</span>
                 </div>
               </div>
@@ -1893,18 +2107,35 @@ export const Attendance: React.FC = () => {
 
             {/* ── DAILY VIEW ────────────────────────────────────────────────── */}
             <TabsContent value="daily" className="mt-0 space-y-4">
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm bg-white dark:bg-gray-950">
-                <Table>
-                  <TableHeader className="bg-gray-50/80 dark:bg-gray-900">
-                    <TableRow>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Employee</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Date</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Check In</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Check Out</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Total Hours</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Overtime</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Status</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
+                {/* Table toolbar: which day + how many rows */}
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {format(selectedDate, "EEEE, d MMMM yyyy")}
+                    </span>
+                    {isSameDay(selectedDate, new Date()) && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {totalEmployees} {totalEmployees === 1 ? "employee" : "employees"}
+                  </span>
+                </div>
+
+                <Table className="min-w-[860px]">
+                  <TableHeader className="bg-gray-50/80 dark:bg-gray-900/60">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="h-10 pl-4 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Employee</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Check In</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Check Out</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Worked</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Overtime</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</TableHead>
+                      <TableHead className="h-10 pr-4 text-right text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
 
@@ -2030,71 +2261,97 @@ export const Attendance: React.FC = () => {
                       const statusCfg = STATUS_CONFIG[finalRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"];
 
                       return (
-                        <TableRow key={emp.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
-                          {/* Employee info */}
-                          <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                        <TableRow key={emp.id} className="group hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
+                          {/* Employee */}
+                          <TableCell className="py-3 pl-4">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(`${emp.firstName} ${emp.lastName || ""}`)}`}>
                                 {emp.firstName?.charAt(0)}{(emp.lastName || "").charAt(0)}
                               </div>
-                              <div className="flex flex-col">
-                                <span>{emp.firstName} {emp.lastName || ""}</span>
-                                {emp.department && (
-                                  <span className="text-[11px] text-gray-400 font-normal">
-                                    {emp.department.title || emp.department}
-                                  </span>
-                                )}
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
+                                  {emp.firstName} {emp.lastName || ""}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                                  {[emp.employeeId, emp.department?.title || (typeof emp.department === "string" ? emp.department : "")].filter(Boolean).join(" · ") || "—"}
+                                </span>
                               </div>
                             </div>
                           </TableCell>
 
-                          <TableCell className="text-gray-600 dark:text-gray-400 text-xs font-medium">
-                            {format(selectedDate, "PPP")}
-                          </TableCell>
-
-                          <TableCell className="font-medium text-gray-800 dark:text-gray-200 text-xs">
+                          {/* Check In */}
+                          <TableCell className="py-3">
                             {finalRecord.checkInTime ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                                <Clock className="w-3 h-3" />
-                                {format(new Date(finalRecord.checkInTime), "hh:mm a")}
-                              </span>
+                              <div className="flex flex-col">
+                                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 tabular-nums">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  {format(new Date(finalRecord.checkInTime), "hh:mm a")}
+                                </span>
+                                {finalRecord.status === "TARDY" && Number(finalRecord.lateMinutes) > 0 && (
+                                  <span className="text-[11px] text-amber-600 dark:text-amber-400 pl-3">
+                                    {formatMinutes(Number(finalRecord.lateMinutes))} late
+                                  </span>
+                                )}
+                              </div>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell className="font-medium text-gray-800 dark:text-gray-200 text-xs">
+                          {/* Check Out */}
+                          <TableCell className="py-3">
                             {finalRecord.checkOutTime ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800">
-                                <Clock className="w-3 h-3" />
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 tabular-nums">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                                 {format(new Date(finalRecord.checkOutTime), "hh:mm a")}
                               </span>
+                            ) : finalRecord.checkInTime && isSameDay(selectedDate, new Date()) ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                <span className="relative flex w-1.5 h-1.5">
+                                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                                  <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                </span>
+                                On shift
+                              </span>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
-                            {formatMinutes(finalRecord.totalWorkedMinutes)}
+                          {/* Worked */}
+                          <TableCell className="py-3">
+                            <div className="flex flex-col">
+                              <span className={`text-sm font-semibold tabular-nums ${finalRecord.totalWorkedMinutes > 0 ? "text-gray-900 dark:text-gray-100" : "text-gray-300 dark:text-gray-600"}`}>
+                                {finalRecord.totalWorkedMinutes > 0 ? formatMinutes(finalRecord.totalWorkedMinutes) : "—"}
+                              </span>
+                              {finalRecord.shiftStartTime && finalRecord.shiftEndTime && (
+                                <span className="text-[11px] text-gray-400 tabular-nums">
+                                  Shift {timeRange12h(finalRecord.shiftStartTime, finalRecord.shiftEndTime)}
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
 
-                          <TableCell className="font-mono text-xs">
+                          {/* Overtime */}
+                          <TableCell className="py-3">
                             {finalRecord.overtimeMinutes > 0 ? (
-                              <span className="inline-block px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
                                 +{formatMinutes(finalRecord.overtimeMinutes)}
                               </span>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell>
+                          {/* Status */}
+                          <TableCell className="py-3">
                             <div className="flex flex-col gap-1 items-start">
-                              <Badge className={`px-2.5 py-0.5 border font-semibold tracking-wide ${statusCfg.badge}`}>
-                                {finalRecord.status}
-                              </Badge>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusCfg.badge}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot || "bg-gray-400"}`} />
+                                {STATUS_LABELS[finalRecord.status?.toUpperCase()] || finalRecord.status}
+                              </span>
                               {finalRecord.overrideType && (
-                                <span 
+                                <span
                                   className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
                                     finalRecord.overrideType === "WORK_DAY"
                                       ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
@@ -2109,22 +2366,23 @@ export const Attendance: React.FC = () => {
                             </div>
                           </TableCell>
 
-                          {/* Action Buttons */}
-                          <TableCell className="text-right pr-6">
-                            <div className="flex items-center justify-end gap-2">
+                          {/* Actions */}
+                          <TableCell className="py-3 pr-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-8 px-2.5 text-xs gap-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
                                 onClick={() => openViewPanel(finalRecord, emp)}
                               >
-                                <Eye className="w-3.5 h-3.5 text-gray-500" />
+                                <Eye className="w-3.5 h-3.5" />
                                 View
                               </Button>
                               {user?.role !== 'USER' && (
                                 <Button
                                   size="sm"
-                                  className="h-8 px-2.5 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                                  variant="outline"
+                                  className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                                   onClick={() => {
                                   const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
                                   if (isFutureDate || finalRecord.status === "UPCOMING_DAY" || finalRecord.status === "UPCOMING") {
@@ -2151,8 +2409,12 @@ export const Attendance: React.FC = () => {
 
                     {filteredReport.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} className="py-12 text-center text-gray-500">
-                          No attendance data found for the selected filter and date.
+                        <TableCell colSpan={7} className="py-16 text-center">
+                          <div className="flex flex-col items-center gap-2 text-gray-500 dark:text-gray-400">
+                            <CalendarX className="w-8 h-8 text-gray-300 dark:text-gray-600" />
+                            <span className="text-sm font-medium">No attendance found</span>
+                            <span className="text-xs text-gray-400">Try another date or clear the filters.</span>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
@@ -2275,16 +2537,42 @@ export const Attendance: React.FC = () => {
 
       {/* Edit Modal Dialog */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="max-w-md rounded-2xl shadow-2xl p-6">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-0 gap-0">
           {selectedRecord && (
             <>
-              <DialogHeader className="border-b pb-3">
-                <DialogTitle className="text-xl font-bold flex items-center justify-between">
-                  <span>Edit Attendance Record</span>
-                  <Badge variant="outline" className="text-xs font-semibold">
-                    {format(new Date(selectedRecord.date), "MMM d, yyyy")}
-                  </Badge>
-                </DialogTitle>
+              <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 text-left">
+                {(() => {
+                  const emp = selectedRecord.employee || report.find((e: any) => e.id === selectedRecord.employeeId);
+                  const name = emp ? `${emp.firstName || ""} ${emp.lastName || ""}`.trim() : "";
+                  const cfg = STATUS_CONFIG[selectedRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"];
+                  return (
+                    <div className="flex items-start gap-3 pr-6">
+                      {emp && (
+                        <div className={`w-11 h-11 rounded-full flex items-center justify-center font-semibold text-sm shrink-0 ${avatarColor(name)}`}>
+                          {emp.firstName?.charAt(0)}{(emp.lastName || "").charAt(0)}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Edit attendance
+                        </DialogTitle>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                          {name || "Employee"}{emp?.employeeId ? ` · ${emp.employeeId}` : ""}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-md">
+                            <CalendarIcon className="w-3 h-3" />
+                            {format(new Date(selectedRecord.date), "EEE, d MMM yyyy")}
+                          </span>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs font-semibold ${cfg.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot || "bg-gray-400"}`} />
+                            {STATUS_LABELS[selectedRecord.status?.toUpperCase()] || selectedRecord.status}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {user?.role === 'USER' && (
                   <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 mt-3">
                     <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -2293,15 +2581,16 @@ export const Attendance: React.FC = () => {
                 )}
               </DialogHeader>
 
-              <div className="space-y-4 mt-4">
+              <div className="space-y-5 px-6 pt-5">
+                <div className="grid grid-cols-2 gap-3">
                 {/* Check In */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                    Check In Time
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Check in
                   </label>
                   <Input
                     type="time"
-                    className="rounded-lg shadow-sm"
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                     value={
                       selectedRecord.checkInTime
                         ? format(new Date(selectedRecord.checkInTime), "HH:mm")
@@ -2340,12 +2629,12 @@ export const Attendance: React.FC = () => {
 
                 {/* Check Out */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                    Check Out Time
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Check out
                   </label>
                   <Input
                     type="time"
-                    className="rounded-lg shadow-sm"
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                     value={
                       selectedRecord.checkOutTime
                         ? format(new Date(selectedRecord.checkOutTime), "HH:mm")
@@ -2382,28 +2671,30 @@ export const Attendance: React.FC = () => {
                   />
                 </div>
 
+                </div>
+
                 {/* Hours Breakdown */}
                 {(() => {
                   const otHours = Number(selectedRecord.overtimeHours) || 0;
                   const otMins = selectedRecord.overtimeMinutes ? Number(selectedRecord.overtimeMinutes) : Math.round(otHours * 60);
                   return (
-                    <div className={`grid ${otMins > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-3 bg-gray-50 dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200/80 dark:border-gray-800`}>
-                      <div>
-                        <span className="text-xs text-gray-500 font-medium block">Total Worked</span>
-                        <span className="text-base font-extrabold text-gray-900 dark:text-gray-100">
+                    <div className={`grid ${otMins > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Total Worked</span>
+                        <span className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                           {formatMinutes(selectedRecord.totalWorkedMinutes)}
                         </span>
                       </div>
-                      <div>
-                        <span className="text-xs text-gray-500 font-medium block">Break Time</span>
-                        <span className="text-base font-extrabold text-gray-900 dark:text-gray-100">
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Break Time</span>
+                        <span className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                           {formatMinutes(selectedRecord.totalBreakMinutes)}
                         </span>
                       </div>
                       {otMins > 0 && (
-                        <div>
-                          <span className="text-xs text-purple-600 dark:text-purple-400 font-semibold block">Overtime</span>
-                          <span className="text-base font-extrabold text-purple-700 dark:text-purple-300">
+                        <div className="rounded-xl border border-violet-200 bg-violet-50/60 dark:border-violet-900 dark:bg-violet-950/40 px-3 py-2.5">
+                          <span className="text-[11px] text-violet-600 dark:text-violet-400 font-medium block">Overtime</span>
+                          <span className="text-base font-semibold tabular-nums text-violet-700 dark:text-violet-300">
                             {formatMinutes(otMins)}
                           </span>
                         </div>
@@ -2414,7 +2705,7 @@ export const Attendance: React.FC = () => {
 
                 {/* Status Selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                     Attendance Status
                   </label>
                   <Select 
@@ -2441,7 +2732,7 @@ export const Attendance: React.FC = () => {
                       });
                     }}
                   >
-                    <SelectTrigger className="rounded-lg shadow-sm">
+                    <SelectTrigger className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -2454,12 +2745,27 @@ export const Attendance: React.FC = () => {
                   </Select>
                 </div>
 
-                <Button 
-                  disabled={user?.role === 'USER'} 
-                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-md transition-all mt-2" 
+                {/* Read-only device punches for this day */}
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-5">
+                  <PunchLogs punches={selectedRecord.punches} />
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 mt-5 flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-lg"
+                  onClick={() => setEditModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  disabled={user?.role === 'USER'}
+                  className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg" 
                   onClick={handleSaveAttendance}
                 >
-                  Save Changes
+                  Save changes
                 </Button>
               </div>
             </>
@@ -2469,7 +2775,7 @@ export const Attendance: React.FC = () => {
 
       {/* View Detail Modal Dialog */}
       <Dialog open={viewPanelOpen} onOpenChange={setViewPanelOpen}>
-        <DialogContent className="max-w-lg rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl p-0 gap-0 shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
           {viewRecord && (() => {
             const targetEmp = viewRecord.employee || report.find((e) => e.id === viewRecord.employeeId) || employees.find((e) => e.id === viewRecord.employeeId);
             const empSched = viewRecord.schedule || targetEmp?.Schedule;
@@ -2500,44 +2806,50 @@ export const Attendance: React.FC = () => {
             } : null));
 
             return (
-              <div className="space-y-5">
-                {/* Clean, Single-color Header */}
-                <DialogHeader className="border-b border-gray-100 dark:border-gray-800 pb-3.5 pr-8">
-                  <div className="flex items-center justify-between gap-3">
-                    <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                      <CalendarDays className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                      <span>Attendance Details</span>
-                    </DialogTitle>
-                    <Badge className={`px-2.5 py-0.5 text-xs font-semibold ${STATUS_CONFIG[viewRecord.status]?.badge}`}>
-                      {viewRecord.status}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <p className="text-xs text-gray-500 font-medium text-left">
-                      {format(new Date(viewRecord.date), "EEEE, MMMM d, yyyy")}
-                    </p>
-                    {empFullName && (
-                      <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                        {empFullName} {empIdCode ? `(#${empIdCode})` : ""}
-                      </span>
+              <div>
+                {/* Header */}
+                <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 text-left">
+                  <div className="flex items-start gap-3 pr-6">
+                    {targetEmp && (
+                      <div className={`w-11 h-11 rounded-full flex items-center justify-center font-semibold text-sm shrink-0 ${avatarColor(empFullName)}`}>
+                        {targetEmp.firstName?.charAt(0)}{(targetEmp.lastName || "").charAt(0)}
+                      </div>
                     )}
+                    <div className="min-w-0 flex-1">
+                      <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                        Attendance details
+                      </DialogTitle>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {empFullName || "Employee"}{empIdCode ? ` · ${empIdCode}` : ""}{locName ? ` · ${locName}` : ""}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-md">
+                          <CalendarIcon className="w-3 h-3" />
+                          {format(new Date(viewRecord.date), "EEE, d MMM yyyy")}
+                        </span>
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs font-semibold ${(STATUS_CONFIG[viewRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"]).badge}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${(STATUS_CONFIG[viewRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"]).dot || "bg-gray-400"}`} />
+                          {STATUS_LABELS[viewRecord.status?.toUpperCase()] || viewRecord.status}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </DialogHeader>
 
                 {/* Body */}
-                <div className="max-h-[70vh] overflow-y-auto space-y-4 pr-1">
+                <div className="px-6 py-5 space-y-5">
                   {/* ── Today's Scheduled Shift Card ────────────────────────── */}
-                  <div className="bg-blue-50/70 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded-2xl p-4 space-y-3">
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="size-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                        <div className="size-8 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-300 flex items-center justify-center">
                           <Clock className="w-4 h-4" />
                         </div>
                         <div>
-                          <h4 className="text-xs font-bold text-blue-950 dark:text-blue-200 uppercase tracking-wider">
-                            Today's Shift Schedule
+                          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            Shift schedule
                           </h4>
-                          <p className="text-[11px] text-blue-600/90 dark:text-blue-400 font-medium">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
                             {daySchedule?.dayName || format(new Date(viewRecord.date), "EEEE")}
                           </p>
                         </div>
@@ -2570,7 +2882,7 @@ export const Attendance: React.FC = () => {
                     </div>
 
                     {viewRecord.overrideReason && (
-                      <div className="mt-2.5 p-2 rounded-lg bg-white/80 dark:bg-gray-900/60 border border-blue-200 dark:border-blue-900 text-xs">
+                      <div className="p-2.5 rounded-lg bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-xs">
                         <span className="font-bold text-gray-700 dark:text-gray-300">Admin Override Reason: </span>
                         <span className="italic text-gray-600 dark:text-gray-400">"{viewRecord.overrideReason}"</span>
                       </div>
@@ -2578,7 +2890,7 @@ export const Attendance: React.FC = () => {
 
                     {daySchedule?.isWorkingDay ? (
                       <div className="space-y-2.5 pt-1">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-white/80 dark:bg-gray-900/80 border border-blue-100/80 dark:border-blue-900/50 rounded-xl p-3 text-xs">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 text-xs">
                           <div>
                             <span className="text-gray-400 font-medium block text-[11px]">Shift Timing</span>
                             <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">
@@ -2587,7 +2899,7 @@ export const Attendance: React.FC = () => {
                           </div>
                           <div>
                             <span className="text-gray-400 font-medium block text-[11px]">Shift Duration</span>
-                            <span className="font-bold text-blue-600 dark:text-blue-400 text-sm">
+                            <span className="font-semibold tabular-nums text-blue-600 dark:text-blue-400 text-sm">
                               {calculateShiftDuration(daySchedule.startTime, daySchedule.endTime)}
                             </span>
                           </div>
@@ -2638,7 +2950,7 @@ export const Attendance: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-white/80 dark:bg-gray-900/80 border border-blue-100/80 dark:border-blue-900/50 rounded-xl p-3 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 text-xs text-gray-500 dark:text-gray-400">
                         {daySchedule
                           ? `This day (${daySchedule.dayName}) is a scheduled Off Day / Rest Day for this employee.`
                           : "No active schedule assigned to this employee."}
@@ -2647,46 +2959,46 @@ export const Attendance: React.FC = () => {
                   </div>
 
                   {/* Summary Grid Box */}
-                <div className="bg-gray-50/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-800 rounded-2xl p-4.5">
+                <div className="border border-gray-200 dark:border-gray-800 rounded-xl p-4">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                     <div className="space-y-1">
-                      <span className="text-gray-400 font-medium block">Check In</span>
-                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Check In</span>
+                      <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100 text-sm">
                         {viewRecord.checkInTime ? format(new Date(viewRecord.checkInTime), "hh:mm a") : "—"}
                       </span>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-gray-400 font-medium block">Check Out</span>
-                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Check Out</span>
+                      <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100 text-sm">
                         {viewRecord.checkOutTime ? format(new Date(viewRecord.checkOutTime), "hh:mm a") : "—"}
                       </span>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-gray-400 font-medium block">Total Worked</span>
-                      <span className="font-bold text-blue-600 dark:text-blue-400 text-sm">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Total Worked</span>
+                      <span className="font-semibold tabular-nums text-blue-600 dark:text-blue-400 text-sm">
                         {formatMinutes(viewRecord.totalWorkedMinutes)}
                       </span>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-gray-400 font-medium block">Break Duration</span>
-                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Break Duration</span>
+                      <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100 text-sm">
                         {formatMinutes(viewRecord.totalBreakMinutes)}
                       </span>
                     </div>
 
-                    <div className="col-span-2 sm:col-span-4 pt-3 mt-1 border-t border-gray-200 dark:border-gray-800 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="col-span-2 sm:col-span-4 pt-3 mt-1 border-t border-gray-100 dark:border-gray-800 grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="space-y-1">
-                        <span className="text-gray-400 font-medium block">Overtime</span>
-                        <span className="font-bold text-purple-600 dark:text-purple-400 text-sm">
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Overtime</span>
+                        <span className="font-semibold tabular-nums text-violet-600 dark:text-violet-400 text-sm">
                           {formatMinutes(Math.round(((Number(viewRecord.overtimeHours) || 0) * 60) || Number(viewRecord.overtimeMinutes) || 0))}
                         </span>
                       </div>
 
                       <div className="space-y-1 col-span-1 sm:col-span-3">
-                        <span className="text-gray-400 font-medium block">Recent Action</span>
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Recent Action</span>
                         {recentAction ? (
                           <div className="flex items-center gap-2 flex-wrap">
                             <Badge 
@@ -2730,15 +3042,15 @@ export const Attendance: React.FC = () => {
 
                 {/* Summary Section */}
                 <div>
-                  <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-2">Summary Note</h4>
-                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 bg-white dark:bg-gray-950 text-sm leading-relaxed text-gray-700 dark:text-gray-300 shadow-2xs">
+                  <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Summary note</h4>
+                  <div className="rounded-xl px-4 py-3 bg-gray-50 dark:bg-gray-900 text-sm leading-relaxed text-gray-700 dark:text-gray-300">
                     {viewRecord.summary || "No summary provided for this shift."}
                   </div>
                 </div>
 
                 {/* Activity Timeline */}
                 <div>
-                  <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider mb-3">Activity Timeline</h4>
+                  <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Activity timeline</h4>
 
                   {viewRecord.activities?.length ? (
                     <div className="space-y-3.5 border-l-2 border-indigo-200 dark:border-indigo-900 pl-4 ml-2">
@@ -2775,91 +3087,28 @@ export const Attendance: React.FC = () => {
                 </div>
 
                 {/* 🧾 Daily Attendance Punches (Invoice / Receipt Style) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Punch Logs ({viewRecord.punches?.length || 0})</span>
-                    </h4>
-                    <span className="text-[11px] text-gray-400 font-mono">
-                      Real-time Device Logs
-                    </span>
-                  </div>
+                <PunchLogs punches={viewRecord.punches} />
+              </div>
 
-                  {viewRecord.punches?.length ? (
-                    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
-                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {viewRecord.punches.map((punch: any, idx: number) => {
-                          const isCheckIn = punch.type === "CHECK_IN";
-                          const isCheckOut = punch.type === "CHECK_OUT";
-
-                          return (
-                            <div 
-                              key={punch.id || idx} 
-                              className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
-                            >
-                              {/* Punch # and Direction */}
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                                  #{idx + 1}
-                                </span>
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <Badge 
-                                      variant="outline"
-                                      className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
-                                        isCheckIn 
-                                          ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
-                                          : isCheckOut 
-                                          ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300" 
-                                          : "bg-gray-50 text-gray-700 border-gray-300"
-                                      }`}
-                                    >
-                                      {isCheckIn ? (
-                                        <span className="inline-flex items-center gap-0.5">
-                                          <ArrowDownRight className="w-3 h-3 text-emerald-600" />
-                                          IN
-                                        </span>
-                                      ) : isCheckOut ? (
-                                        <span className="inline-flex items-center gap-0.5">
-                                          <ArrowUpRight className="w-3 h-3 text-blue-600" />
-                                          OUT
-                                        </span>
-                                      ) : (
-                                        punch.type
-                                      )}
-                                    </Badge>
-                                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                      {punch.device || "Biometric Terminal"}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
-                                    <span className="capitalize">{punch.method || "Biometric"}</span>
-                                    {punch.ip && <span>• IP: {punch.ip}</span>}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Timestamp */}
-                              <div className="text-right shrink-0">
-                                <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
-                                  {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
-                                </div>
-                                <div className="text-[10px] text-gray-400 font-mono">
-                                  {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                      No raw biometric punches recorded for this date.
-                    </div>
-                  )}
-                </div>
+              <div className="sticky bottom-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+                <Button variant="outline" className="h-10 rounded-lg" onClick={() => setViewPanelOpen(false)}>
+                  Close
+                </Button>
+                {user?.role !== 'USER' &&
+                  !["OFF_DAY", "OFF", "UPCOMING_DAY", "UPCOMING"].includes(String(viewRecord.status || "").toUpperCase()) &&
+                  !isAfter(startOfDay(new Date(viewRecord.date)), startOfDay(new Date())) && (
+                  <Button
+                    className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg gap-1.5"
+                    onClick={() => {
+                      setSelectedRecord(viewRecord);
+                      setViewPanelOpen(false);
+                      setEditModalOpen(true);
+                    }}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit
+                  </Button>
+                )}
               </div>
             </div>
           );
@@ -3008,7 +3257,7 @@ export const Attendance: React.FC = () => {
                     type="date"
                     value={overrideDate}
                     onChange={(e) => setOverrideDate(e.target.value)}
-                    className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+                    className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                   />
                 </div>
 
@@ -3027,7 +3276,7 @@ export const Attendance: React.FC = () => {
                       setOverrideEmpId("");
                     }}
                   >
-                    <SelectTrigger className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+                    <SelectTrigger className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20">
                       <SelectValue placeholder="Select target scope" />
                     </SelectTrigger>
                     <SelectContent className="z-[70]">
@@ -3116,7 +3365,7 @@ export const Attendance: React.FC = () => {
                       placeholder="e.g., Sunday Sprint for product launch / Heavy rain emergency holiday"
                       value={overrideReason}
                       onChange={(e) => setOverrideReason(e.target.value)}
-                      className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+                      className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                     />
                   </div>
                   <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">

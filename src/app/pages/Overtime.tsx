@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { overtimeAPI, employeeAPI, locationAPI } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
-import { Plus, Calendar, Clock, Check, X, Pencil, Trash2, GripHorizontal, RotateCcw, Move } from "lucide-react";
+import { Plus, Calendar, Clock, Check, X, Pencil, Trash2, GripHorizontal, RotateCcw, Move, MapPin, Filter } from "lucide-react";
+import { avatarColor } from "../utils/avatar";
 
 import {
   Card, CardContent, CardHeader, CardTitle
@@ -396,42 +397,56 @@ export const Overtime: React.FC = () => {
     );
   };
 
+  const badgeClass = (status: string) => ({
+    PENDING: "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
+    APPROVED: "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800",
+    REJECTED: "bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800",
+  } as Record<string, string>)[status] || "bg-gray-100 text-gray-800 border-gray-200";
+  const statusLabel: Record<string, string> = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" };
+  const statusDot: Record<string, string> = { PENDING: "bg-amber-500", APPROVED: "bg-emerald-500", REJECTED: "bg-rose-500" };
+  const th = "h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400";
+  const fieldLabel = "text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1.5";
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Overtime Management</h2>
-          <p className="text-gray-500 text-sm">Track, review, approve, and audit employee overtime records</p>
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Overtime Management</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Track, review, approve, and audit employee overtime records</p>
         </div>
 
-        <Button onClick={handleOpenAdd} className="shadow-sm gap-2">
-          <Plus className="size-4" />
+        <Button
+          onClick={handleOpenAdd}
+          className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl"
+        >
+          <Plus className="size-3.5" />
           {user?.role === "ADMIN" ? "Add Overtime" : "Request Overtime"}
         </Button>
       </div>
 
-      {/* Redesigned Overtime Records Card & Table */}
-      <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden">
-        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 pb-4 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      {/* Overtime Records Card & Table */}
+      <Card className="gap-0 shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle className="text-lg font-bold">Overtime Records</CardTitle>
-                <Badge variant="secondary" className="font-semibold text-xs rounded-full px-2.5">
-                  {filtered?.length || 0} Total
-                </Badge>
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Overtime Records</CardTitle>
+                <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">
+                  {filtered?.length || 0}
+                </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 Overview of employee overtime hours, multipliers, rate calculations, and approval status
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {locations.length > 0 && (user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
                 <SearchableSelect
-                  className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950"
+                  className="w-[170px] h-9 rounded-xl"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={selectedLocation}
@@ -453,7 +468,8 @@ export const Overtime: React.FC = () => {
               )}
 
               <SearchableSelect
-                className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950"
+                className="w-[160px] h-9 rounded-xl"
+                icon={<Filter className="w-3.5 h-3.5 text-gray-400" />}
                 placeholder="Filter by Status"
                 searchPlaceholder="Search status..."
                 value={filterStatus}
@@ -469,28 +485,29 @@ export const Overtime: React.FC = () => {
           </div>
         </CardHeader>
 
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
+            <Table className="min-w-[920px]">
               <TableHeader>
-                <TableRow className="bg-gray-50/70 dark:bg-gray-900/70 hover:bg-gray-50/70">
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Employee</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Hours</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Rate</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Amount</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Reason</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
+                <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                  <TableHead className={`${th} pl-4`}>Employee</TableHead>
+                  <TableHead className={th}>Date</TableHead>
+                  <TableHead className={th}>Hours</TableHead>
+                  <TableHead className={th}>Rate</TableHead>
+                  <TableHead className={th}>Amount</TableHead>
+                  <TableHead className={th}>Reason</TableHead>
+                  <TableHead className={th}>Status</TableHead>
+                  <TableHead className={`${th} text-right pr-4`}>Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-32 text-center text-gray-500">
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No overtime records found</p>
+                    <TableCell colSpan={8} className="py-16 text-center">
+                      <div className="flex flex-col items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+                        <Clock className="w-8 h-8 text-gray-300 dark:text-gray-600" />
+                        <p className="text-sm font-medium">No overtime records found</p>
                         <p className="text-xs text-gray-400">Click {user?.role === "ADMIN" ? "'Add Overtime'" : "'Request Overtime'"} to create a new overtime entry.</p>
                       </div>
                     </TableCell>
@@ -509,41 +526,43 @@ export const Overtime: React.FC = () => {
                         })();
 
                     return (
-                      <TableRow key={ot.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
-                        <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      <TableRow key={ot.id} className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
+                        <TableCell className="py-3 pl-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(empName)}`}>
                               {ot.employee?.firstName?.charAt(0)}{(ot.employee?.lastName || "").charAt(0)}
                             </div>
-                            <span>{empName}</span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{empName}</span>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{ot.employee?.employeeId || "—"}</span>
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200/80 dark:bg-gray-900 dark:border-gray-800">
-                            <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                            {ot.date ? ot.date.slice(0, 10) : "-"}
-                          </span>
+                        <TableCell className="py-3 text-sm text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap">
+                          {ot.date ? ot.date.slice(0, 10) : "-"}
                         </TableCell>
-                        <TableCell className="text-xs font-semibold font-mono">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800">
-                            <Clock className="w-3.5 h-3.5 text-purple-500" />
+                        <TableCell className="py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
                             {ot.hours} hrs
                           </span>
                         </TableCell>
-                        <TableCell className="text-xs font-semibold">
-                          <Badge variant="outline" className="bg-indigo-50/80 text-indigo-700 border-indigo-200 font-mono">
-                            {ot.rate}x
-                          </Badge>
+                        <TableCell className="py-3 text-sm font-medium text-gray-700 dark:text-gray-300 tabular-nums">
+                          {ot.rate}×
                         </TableCell>
-                        <TableCell className="font-mono text-xs font-bold text-gray-900 dark:text-gray-100">
+                        <TableCell className="py-3 text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap">
                           Rs. {displayAmount.toFixed(2)}
                         </TableCell>
-                        <TableCell className="max-w-[180px] truncate text-xs text-gray-600 dark:text-gray-400" title={ot.reason || ""}>
+                        <TableCell className="py-3 max-w-[200px] truncate text-sm text-gray-600 dark:text-gray-400" title={ot.reason || ""}>
                           {ot.reason || "-"}
                         </TableCell>
-                        <TableCell>{badgeColor(ot.status)}</TableCell>
+                        <TableCell className="py-3">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${badgeClass(ot.status)}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusDot[ot.status] || "bg-gray-400"}`} />
+                            {statusLabel[ot.status] || ot.status}
+                          </span>
+                        </TableCell>
 
-                        <TableCell className="text-right pr-6">
+                        <TableCell className="py-3 pr-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             {user?.role === "ADMIN" ? (
                               <>
@@ -551,41 +570,44 @@ export const Overtime: React.FC = () => {
                                   <>
                                     <Button
                                       size="sm"
-                                      variant="ghost"
-                                      className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                                      variant="outline"
+                                      className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
                                       onClick={() => handleStatus(ot.id, "APPROVED")}
                                       title="Approve Overtime"
                                     >
-                                      <Check className="w-4 h-4" />
+                                      <Check className="w-3.5 h-3.5" />
+                                      Approve
                                     </Button>
                                     <Button
                                       size="sm"
-                                      variant="ghost"
-                                      className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                      variant="outline"
+                                      className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950"
                                       onClick={() => handleStatus(ot.id, "REJECTED")}
                                       title="Reject Overtime"
                                     >
-                                      <X className="w-4 h-4" />
+                                      <X className="w-3.5 h-3.5" />
+                                      Reject
                                     </Button>
                                   </>
                                 )}
                                 <Button
                                   size="sm"
-                                  variant="ghost"
-                                  className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                                  variant="outline"
+                                  className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                                   onClick={() => handleEdit(ot)}
                                   title="Edit Overtime"
                                 >
-                                  <Pencil className="w-4 h-4" />
+                                  <Pencil className="w-3.5 h-3.5" />
+                                  Edit
                                 </Button>
                                 <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                  size="icon"
+                                  variant="outline"
+                                  className="size-8 rounded-lg border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                                   onClick={() => setDeleteConfirm(ot)}
                                   title="Delete Overtime"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                               </>
                             ) : (
@@ -593,25 +615,26 @@ export const Overtime: React.FC = () => {
                                 <>
                                   <Button
                                     size="sm"
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                                     onClick={() => handleEdit(ot)}
                                     title="Edit Request"
                                   >
-                                    <Pencil className="w-4 h-4" />
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    Edit
                                   </Button>
                                   <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                                    size="icon"
+                                    variant="outline"
+                                    className="size-8 rounded-lg border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                                     onClick={() => setDeleteConfirm(ot)}
                                     title="Cancel Request"
                                   >
-                                    <Trash2 className="w-4 h-4" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </Button>
                                 </>
                               ) : (
-                                <span className="text-xs text-gray-400 font-medium mr-2">-</span>
+                                <span className="text-xs text-gray-300 dark:text-gray-600 mr-2">—</span>
                               )
                             )}
                           </div>
@@ -640,53 +663,51 @@ export const Overtime: React.FC = () => {
             top: `calc(50% + ${dragOffset.y}px)`,
             userSelect: isDragging ? "none" : undefined,
           }}
-          className="w-[95vw] sm:max-w-[490px] max-h-[92vh] sm:max-h-[88vh] p-0 flex flex-col gap-0 rounded-2xl shadow-2xl border border-gray-200/90 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden"
+          className="w-[95vw] sm:max-w-lg max-h-[92vh] sm:max-h-[90vh] p-0 flex flex-col gap-0 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden"
         >
-          {/* Draggable Sticky Header */}
+          {/* Draggable Header */}
           <div
             onPointerDown={handleHeaderPointerDown}
             onDoubleClick={resetDragPosition}
-            className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/60 flex items-center justify-between cursor-grab active:cursor-grabbing select-none shrink-0 pr-12 transition-colors hover:bg-gray-100/60 dark:hover:bg-gray-800/40"
+            className="px-6 pt-5 pb-4 border-b border-gray-100 dark:border-gray-800 flex items-start gap-3 cursor-grab active:cursor-grabbing select-none shrink-0 pr-12"
             title="Click and drag to move dialog. Double-click to center."
           >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-xs">
-                <Clock className="w-4 h-4" />
-              </div>
-              <div>
-                <DialogTitle className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight">
-                  {user?.role === "ADMIN"
-                    ? (editing ? "Edit Overtime Record" : "Add Overtime Record")
-                    : (editing ? "Edit Overtime Request" : "Request Overtime")}
-                </DialogTitle>
-                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-normal mt-0.5">
-                  <GripHorizontal className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                  <span>Movable window • Drag header</span>
-                  {(dragOffset.x !== 0 || dragOffset.y !== 0) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        resetDragPosition();
-                      }}
-                      className="ml-1 text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
-                      title="Reset dialog to center"
-                    >
-                      <RotateCcw className="w-2.5 h-2.5" /> reset
-                    </button>
-                  )}
-                </div>
+            <div className="w-10 h-10 rounded-full bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+              <Clock className="w-4.5 h-4.5" />
+            </div>
+            <div className="min-w-0">
+              <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                {user?.role === "ADMIN"
+                  ? (editing ? "Edit Overtime Record" : "Add Overtime Record")
+                  : (editing ? "Edit Overtime Request" : "Request Overtime")}
+              </DialogTitle>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <GripHorizontal className="w-3.5 h-3.5 shrink-0" />
+                <span>Drag the header to move</span>
+                {(dragOffset.x !== 0 || dragOffset.y !== 0) && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resetDragPosition();
+                    }}
+                    className="ml-1 text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                    title="Reset dialog to center"
+                  >
+                    <RotateCcw className="w-3 h-3" /> reset
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Scrollable Body for Small Screens */}
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5 sm:space-y-4 min-h-0">
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 min-h-0">
             {user?.role === "ADMIN" && (
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Employee</label>
+                <label className={fieldLabel}>Employee</label>
                 <SearchableSelect
-                  className="w-full"
+                  className="w-full h-10"
                   placeholder="Select Employee"
                   searchPlaceholder="Search employee..."
                   value={formData.employeeId}
@@ -710,9 +731,10 @@ export const Overtime: React.FC = () => {
             )}
 
             <div>
-              <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Date</label>
+              <label className={fieldLabel}>Date</label>
               <Input
                 type="date"
+                className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                 value={formData.date}
                 onChange={(e) =>
                   setFormData({ ...formData, date: e.target.value })
@@ -720,21 +742,21 @@ export const Overtime: React.FC = () => {
               />
             </div>
 
-            {/* Punch Verification Alert Card */}
+            {/* Punch Verification */}
             {punchVerification.loading ? (
-              <div className="rounded-xl p-3 bg-gray-50 border border-gray-200 text-gray-500 text-xs flex items-center gap-2">
+              <div className="rounded-xl p-3 bg-gray-50 dark:bg-gray-900 text-gray-500 text-xs flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 animate-spin text-blue-600" />
                 <span>Checking biometric punch & attendance records for this date...</span>
               </div>
             ) : punchVerification.checked && (
               <div className={`rounded-xl p-3 border text-xs space-y-1.5 transition-all ${
                 punchVerification.isVerified
-                  ? "bg-emerald-50/80 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800/60"
+                  ? "bg-emerald-50/70 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800/60"
                   : punchVerification.hasAttendance
-                    ? "bg-amber-50/80 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800/60"
-                    : "bg-rose-50/80 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-800/60"
+                    ? "bg-amber-50/70 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800/60"
+                    : "bg-rose-50/70 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-800/60"
               }`}>
-                <div className="flex items-center justify-between font-semibold">
+                <div className="flex items-center justify-between gap-2 font-semibold">
                   <span className="flex items-center gap-1.5">
                     {punchVerification.isVerified ? (
                       <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -748,9 +770,9 @@ export const Overtime: React.FC = () => {
                         : "No Biometric Check-Out Punch Found"}
                   </span>
                   {punchVerification.isVerified && (
-                    <Badge variant="outline" className="bg-emerald-100/80 text-emerald-800 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-300 font-mono text-[10px]">
+                    <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300 text-[10px] font-semibold tabular-nums">
                       {punchVerification.overtimeHours} hrs logged
-                    </Badge>
+                    </span>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] opacity-90">
@@ -770,11 +792,12 @@ export const Overtime: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Hours</label>
+                <label className={fieldLabel}>Hours</label>
                 <Input
                   type="number"
+                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                   placeholder="Hours (e.g. 2)"
                   value={formData.hours}
                   onChange={(e) =>
@@ -783,10 +806,11 @@ export const Overtime: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Rate Multiplier</label>
+                <label className={fieldLabel}>Rate multiplier</label>
                 <Input
                   type="number"
                   step="0.1"
+                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                   placeholder="Rate (e.g. 1.5)"
                   disabled={user?.role !== "ADMIN"}
                   value={formData.rate}
@@ -798,37 +822,29 @@ export const Overtime: React.FC = () => {
             </div>
 
             {selectedEmp && (
-              <div className="rounded-xl p-3 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200/90 dark:border-blue-800/60 space-y-1.5 transition-all">
-                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                  <span className="flex items-center gap-1 font-medium">
-                    <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    Hourly Rate (9hr Shift):
-                  </span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100 font-mono">
-                    Rs. {currentHourlyRate.toFixed(2)} / hr
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Hourly rate</span>
+                  <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">Rs. {currentHourlyRate.toFixed(2)}</span>
+                </div>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Calculation</span>
+                  <span className="text-xs font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                    {currentHours > 0 ? currentHours : 0}h × {currentMultiplier}×
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                  <span className="font-medium">Calculation:</span>
-                  <span className="font-mono text-gray-700 dark:text-gray-300 text-[11px]">
-                    {currentHours > 0 ? currentHours : 0} hrs × Rs. {currentHourlyRate.toFixed(2)} × {currentMultiplier}x
-                  </span>
-                </div>
-                <div className="pt-2 border-t border-blue-200/80 dark:border-blue-800/60 flex items-center justify-between">
-                  <span className="text-xs font-bold text-blue-950 dark:text-blue-100">
-                    Calculated Overtime Pay:
-                  </span>
-                  <span className="text-base font-extrabold text-blue-700 dark:text-blue-300 font-mono">
-                    Rs. {calculatedEstimatedAmount.toFixed(2)}
-                  </span>
+                <div className="rounded-xl border border-violet-200 bg-violet-50/60 dark:border-violet-900 dark:bg-violet-950/40 px-3 py-2.5">
+                  <span className="text-[11px] text-violet-600 dark:text-violet-400 font-medium block">Overtime pay</span>
+                  <span className="text-sm font-semibold tabular-nums text-violet-700 dark:text-violet-300">Rs. {calculatedEstimatedAmount.toFixed(2)}</span>
                 </div>
               </div>
             )}
 
             <div>
-              <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">Reason</label>
+              <label className={fieldLabel}>Reason</label>
               <Textarea
-                rows={2}
+                rows={3}
+                className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                 placeholder="Reason for overtime..."
                 value={formData.reason}
                 onChange={(e) =>
@@ -838,16 +854,15 @@ export const Overtime: React.FC = () => {
             </div>
           </div>
 
-          {/* Sticky Pinned Footer */}
-          <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/60 flex items-center justify-end gap-2.5 shrink-0">
-            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-2 shrink-0">
+            <Button variant="outline" className="h-10 rounded-lg" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              size="sm"
+            <Button
               onClick={handleSubmit}
               disabled={user?.role === "USER" && punchVerification.checked && !punchVerification.canRequest}
-              className="shadow-sm font-medium"
+              className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
             >
               {user?.role === "ADMIN"
                 ? (editing ? "Update Overtime" : "Save Overtime")
@@ -859,22 +874,30 @@ export const Overtime: React.FC = () => {
 
       {/* Confirm Delete */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent className="w-[92vw] sm:max-w-[400px] rounded-2xl p-6 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle>{user?.role === "ADMIN" ? "Confirm Delete" : "Cancel Overtime Request"}</DialogTitle>
+        <DialogContent className="w-[92vw] sm:max-w-[420px] rounded-2xl p-6 shadow-2xl">
+          <DialogHeader className="text-left">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  {user?.role === "ADMIN" ? "Confirm Delete" : "Cancel Overtime Request"}
+                </DialogTitle>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {user?.role === "ADMIN"
+                    ? "Are you sure you want to delete this overtime record? This action cannot be undone."
+                    : "Are you sure you want to cancel this overtime request?"}
+                </p>
+              </div>
+            </div>
           </DialogHeader>
 
-          <p className="text-gray-600 dark:text-gray-300 text-sm">
-            {user?.role === "ADMIN"
-              ? "Are you sure you want to delete this overtime record? This action cannot be undone."
-              : "Are you sure you want to cancel this overtime request?"}
-          </p>
-
-          <div className="flex justify-end gap-2 mt-4">
-            <Button onClick={() => setDeleteConfirm(null)} variant="outline">
+          <div className="flex justify-end gap-2 mt-2">
+            <Button onClick={() => setDeleteConfirm(null)} variant="outline" className="h-10 rounded-lg">
               Close
             </Button>
-            <Button onClick={handleDelete} variant="destructive">
+            <Button onClick={handleDelete} variant="destructive" className="h-10 rounded-lg">
               {user?.role === "ADMIN" ? "Delete" : "Cancel Request"}
             </Button>
           </div>

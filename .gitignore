@@ -55,3 +55,8 @@ Thumbs.db
 .eslintcache
 *.tmp
 *.temp
+_backups/
+
+# Database dumps & user uploads (personal data)
+/*.sql
+backend/uploads/

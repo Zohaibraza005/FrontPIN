@@ -1,8 +1,8 @@
 {
-  "name": "frontpin",
+  "name": "hr-pro",
   "private": true,
   "author": "Unisoftwares Inc",
-  "description": "Frontpin HR Management Desktop App",
+  "description": "HR Pro - HR Management Desktop App",
   "version": "1.0.0",
   "type": "module",
   "main": "electron-dist/main.cjs",
@@ -16,8 +16,8 @@
     "preview": "vite preview"
   },
   "build": {
-    "appId": "com.unisoftwares.frontpin",
-    "productName": "Frontpin",
+    "appId": "com.unisoftwares.hrpro",
+    "productName": "HR Pro",
     "directories": {
       "output": "release"
     },

@@ -350,7 +350,7 @@ export const Entities: React.FC = () => {
               </Label>
               <Input
                 id="entityName"
-                placeholder="e.g. Frontpin Global Inc."
+                placeholder="e.g. HR Pro Global Inc."
                 value={entityName}
                 onChange={(e) => setEntityName(e.target.value)}
               />

@@ -76,6 +76,7 @@ import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import { cn } from './ui/utils';
 
+import { to12h } from "../utils/time";
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
   { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
@@ -865,10 +866,10 @@ export const Layout: React.FC = () => {
           <div className="flex h-16 items-center justify-between border-b border-gray-200 px-6 shrink-0">
             {sidebarOpen ? (
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                FRONTPIN
+                HR PRO
               </h1>
             ) : (
-              <span className="text-2xl font-bold text-blue-600">FP</span>
+              <span className="text-2xl font-bold text-blue-600">HP</span>
             )}
             <Button
               variant="ghost"
@@ -954,7 +955,7 @@ export const Layout: React.FC = () => {
       {/* Main Content */}
       <div
         className={cn(
-          "flex-1 flex flex-col transition-all duration-300",
+          "flex-1 min-w-0 flex flex-col transition-all duration-300",
           sidebarOpen ? "lg:ml-64" : "lg:ml-20"
         )}
       >
@@ -1142,14 +1143,14 @@ export const Layout: React.FC = () => {
                     <span className="font-medium text-green-600">
                       In:{" "}
                     </span>
-                    {new Date(clockedOutInfo.checkInTime).toLocaleTimeString()}
+                    {to12h(clockedOutInfo.checkInTime)}
                   </div>
 
                   <div className="text-sm text-gray-600">
                     <span className="font-medium text-red-600">
                       Out:{" "}
                     </span>
-                    {new Date(clockedOutInfo.checkOutTime).toLocaleTimeString()}
+                    {to12h(clockedOutInfo.checkOutTime)}
                   </div>
 
                 </div>

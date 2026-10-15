@@ -922,7 +922,7 @@ exports.clockIn = async (req, res) => {
     const nowLocal = moment().tz(timezone);
     if (nowLocal.isBefore(earliestCheckInLocal)) {
       return res.status(400).json({
-        message: `Clock-in is only allowed within 2 hours before your shift start (${schedule.startTime}). Early check-in opens at ${earliestCheckInLocal.format("hh:mm A")}.`,
+        message: `Clock-in is only allowed within 2 hours before your shift start (${moment(schedule.startTime, "HH:mm").format("hh:mm A")}). Early check-in opens at ${earliestCheckInLocal.format("hh:mm A")}.`,
       });
     }
 
@@ -1257,9 +1257,16 @@ exports.changeActivity = async (req, res) => {
 
   
   
+// The cron already runs auto-checkout every 2 minutes; from the report it is only
+// triggered in the background, at most once a minute, so it never blocks the response.
+let lastReportAutoCheckoutAt = 0;
+
 exports.getAttendanceReport = async (req, res) => {
   try {
-    await autoCheckoutOverdueAttendances();
+    if (Date.now() - lastReportAutoCheckoutAt > 60000) {
+      lastReportAutoCheckoutAt = Date.now();
+      autoCheckoutOverdueAttendances().catch((err) => console.error("[Report Auto-Checkout Error]", err.message));
+    }
     const user = req.user;
     const {
       view = "daily",
@@ -1267,6 +1274,7 @@ exports.getAttendanceReport = async (req, res) => {
       departmentId,
       companyId,
       locationId,
+      entityId,
       employeeId
     } = req.query;
 
@@ -1319,6 +1327,9 @@ exports.getAttendanceReport = async (req, res) => {
       if (targetLoc && String(targetLoc).toLowerCase() !== "all") {
         employeeWhere.companyId = Number(targetLoc);
       }
+      if (entityId && String(entityId).toLowerCase() !== "all") {
+        employeeWhere.entityId = Number(entityId);
+      }
     }
 
     const queryStartDate = moment(startDate).subtract(1, "day").startOf("day").toDate();
@@ -1347,7 +1358,8 @@ exports.getAttendanceReport = async (req, res) => {
           include: {
             activities: true,
             punches: {
-              orderBy: { punchTime: "asc" }
+              orderBy: { punchTime: "asc" },
+              select: { id: true, attendanceId: true, employeeId: true, type: true, punchTime: true, device: true, method: true, ip: true }
             }
           }
         }
@@ -1848,9 +1860,10 @@ exports.getAttendanceReport = async (req, res) => {
         };
       });
 
+      // Never expose credentials; send the day list once (it used to be duplicated as `Attendance`)
+      const { password, pin, Attendance, ...safeEmp } = emp;
       return {
-        ...emp,
-        Attendance: fullAttendance,
+        ...safeEmp,
         attendance: fullAttendance
       };
     });
@@ -2405,6 +2418,7 @@ exports.exportAttendanceExcel = async (req, res) => {
       departmentId,
       companyId,
       locationId,
+      entityId,
       employeeId,
       filter,
       view,
@@ -2465,6 +2479,9 @@ exports.exportAttendanceExcel = async (req, res) => {
       const targetLoc = companyId || locationId;
       if (targetLoc && String(targetLoc).toLowerCase() !== "all") {
         employeeWhere.companyId = Number(targetLoc);
+      }
+      if (entityId && String(entityId).toLowerCase() !== "all") {
+        employeeWhere.entityId = Number(entityId);
       }
     }
 

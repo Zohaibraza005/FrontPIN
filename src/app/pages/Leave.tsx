@@ -24,7 +24,8 @@ import {
 import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Plus, Check, X, Eye, Trash2, Pencil, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Check, X, Eye, Trash2, Pencil, Calendar, ChevronLeft, ChevronRight, MapPin, Plane } from "lucide-react";
+import { avatarColor } from "../utils/avatar";
 import { DatePickerWithRange } from "../components/ui/date-range-picker";
 import type { DateRange } from "react-day-picker";
 
@@ -324,50 +325,81 @@ const calculateDays = (start: string, end: string) => {
   const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
   const paginatedLeaves = filteredLeaves.slice(startIndex, endIndex);
 
+  const statusLabel: Record<string, string> = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" };
+  const statusDot: Record<string, string> = { PENDING: "bg-amber-500", APPROVED: "bg-emerald-500", REJECTED: "bg-rose-500" };
+  const statusClass: Record<string, string> = {
+    PENDING: "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
+    APPROVED: "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800",
+    REJECTED: "bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800",
+  };
+  const StatusPill = ({ status }: { status: string }) => (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusClass[status] || "bg-gray-100 text-gray-800 border-gray-200"}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${statusDot[status] || "bg-gray-400"}`} />
+      {statusLabel[status] || status}
+    </span>
+  );
+  const th = "h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400";
+  const fieldLabel = "text-xs font-medium text-gray-600 dark:text-gray-400";
+  const isManager = user?.role === "ADMIN" || user?.role === "SUPERVISOR";
+  const requestDays =
+    formData.startDate && formData.endDate && formData.endDate >= formData.startDate
+      ? calculateDays(formData.startDate, formData.endDate)
+      : 0;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
       {/* Header + Request Button */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Leave Management</h2>
-          <p className="text-gray-500 text-sm">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Leave Management</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">
             Track, review, approve, and manage employee leave requests
           </p>
         </div>
 
         <Dialog open={newLeaveOpen} onOpenChange={setNewLeaveOpen}>
           <DialogTrigger asChild>
-            <Button className="shadow-sm gap-2">
-              <Plus className="size-4" />
+            <Button className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl">
+              <Plus className="size-3.5" />
               Request Leave
             </Button>
           </DialogTrigger>
 
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>New Leave Request</DialogTitle>
-            </DialogHeader>
-            {employeeSummary && (
-              <div className="grid grid-cols-3 gap-4 text-center mt-3">
-                <div className="p-3 bg-gray-100 rounded">
-                  <p className="font-bold">{employeeSummary.total}</p>
-                  <p>Total</p>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-0 gap-0">
+            <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 text-left">
+              <div className="flex items-start gap-3 pr-6">
+                <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Plane className="w-4 h-4" />
                 </div>
-                <div className="p-3 bg-green-100 rounded">
-                  <p className="font-bold">{employeeSummary.approved}</p>
-                  <p>Approved</p>
-                </div>
-                <div className="p-3 bg-red-100 rounded">
-                  <p className="font-bold">{employeeSummary.rejected}</p>
-                  <p>Rejected</p>
+                <div>
+                  <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">New leave request</DialogTitle>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Choose the employee, leave type and dates</p>
                 </div>
               </div>
-            )}
-            <div className="space-y-4">
-              <div>
-                <Label>Employee</Label>
+            </DialogHeader>
+
+            <div className="px-6 py-5 space-y-4">
+              {employeeSummary && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Total</span>
+                    <span className="text-base font-semibold tabular-nums text-gray-900 dark:text-gray-100">{employeeSummary.total}</span>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/40 px-3 py-2.5">
+                    <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium block">Approved</span>
+                    <span className="text-base font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{employeeSummary.approved}</span>
+                  </div>
+                  <div className="rounded-xl border border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/40 px-3 py-2.5">
+                    <span className="text-[11px] text-rose-700 dark:text-rose-400 font-medium block">Rejected</span>
+                    <span className="text-base font-semibold tabular-nums text-rose-700 dark:text-rose-300">{employeeSummary.rejected}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>Employee</Label>
                 <SearchableSelect
-                  className="w-full"
+                  className="w-full h-10"
                   placeholder="Select Employee"
                   searchPlaceholder="Search employee..."
                   value={selectedEmployee}
@@ -379,10 +411,10 @@ const calculateDays = (start: string, end: string) => {
                 />
               </div>
 
-              <div>
-                <Label>Leave Type</Label>
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>Leave type</Label>
                 <SearchableSelect
-                  className="w-full"
+                  className="w-full h-10"
                   placeholder="Select Type"
                   searchPlaceholder="Search leave type..."
                   value={formData.leaveTypeId}
@@ -396,56 +428,74 @@ const calculateDays = (start: string, end: string) => {
                 />
               </div>
 
-              <div>
-                <Label>Start Date</Label>
-                <Input
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
-                  }
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className={fieldLabel}>Start date</Label>
+                  <Input
+                    type="date"
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
+                    value={formData.startDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, startDate: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className={fieldLabel}>End date</Label>
+                  <Input
+                    type="date"
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
+                    value={formData.endDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, endDate: e.target.value })
+                    }
+                  />
+                </div>
               </div>
+              {requestDays > 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">{requestDays} {requestDays === 1 ? "day" : "days"}</span> of leave
+                </p>
+              )}
 
-              <div>
-                <Label>End Date</Label>
-                <Input
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
-                  }
-                />
-              </div>
-
-              <div>
-                <Label>Reason</Label>
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>Reason</Label>
                 <Textarea
+                  rows={3}
+                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
+                  placeholder="Reason for leave..."
                   value={formData.reason}
                   onChange={(e) =>
                     setFormData({ ...formData, reason: e.target.value })
                   }
                 />
               </div>
+            </div>
 
-              <Button onClick={handleSubmit}>Submit</Button>
+            <div className="sticky bottom-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+              <Button variant="outline" className="h-10 rounded-lg" onClick={() => setNewLeaveOpen(false)}>
+                Cancel
+              </Button>
+              <Button className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg" onClick={handleSubmit}>
+                Submit request
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Redesigned Leave Requests Card & Table */}
-      <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden">
-        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 pb-4 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      {/* Leave Requests Card & Table */}
+      <Card className="gap-0 shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle className="text-lg font-bold">Leave Requests</CardTitle>
-                <Badge variant="secondary" className="font-semibold text-xs rounded-full px-2.5">
-                  {filteredLeaves?.length || 0} Total
-                </Badge>
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Leave Requests</CardTitle>
+                <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">
+                  {filteredLeaves?.length || 0}
+                </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 Overview of active employee leave applications, date ranges, and approval status
               </p>
             </div>
@@ -478,9 +528,9 @@ const calculateDays = (start: string, end: string) => {
                   }
                 }}
               >
-                <SelectTrigger className="w-[155px] min-w-[155px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0">
+                <SelectTrigger className="w-[160px] min-w-[160px] h-9 text-sm rounded-xl bg-white dark:bg-gray-950 shrink-0 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20">
                   <div className="flex items-center gap-2 truncate">
-                    <Calendar className="w-4 h-4 text-gray-500 shrink-0" />
+                    <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                     <SelectValue placeholder="Filter Date" />
                   </div>
                 </SelectTrigger>
@@ -513,7 +563,8 @@ const calculateDays = (start: string, end: string) => {
 
               {locations.length > 0 && (
                 <SearchableSelect
-                  className="w-[160px] h-9 text-sm bg-white dark:bg-gray-950 shrink-0"
+                  className="w-[170px] h-9 rounded-xl shrink-0"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={selectedLocation}
@@ -536,18 +587,18 @@ const calculateDays = (start: string, end: string) => {
           </div>
         </CardHeader>
 
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
+            <Table className="min-w-[860px]">
               <TableHeader>
-                <TableRow className="bg-gray-50/70 dark:bg-gray-900/70 hover:bg-gray-50/70">
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Employee</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Leave Type</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Start Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">End Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700 dark:text-gray-300">Status</TableHead>
-                  {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
-                    <TableHead className="font-semibold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
+                <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                  <TableHead className={`${th} pl-4`}>Employee</TableHead>
+                  <TableHead className={th}>Leave Type</TableHead>
+                  <TableHead className={th}>Dates</TableHead>
+                  <TableHead className={th}>Days</TableHead>
+                  <TableHead className={th}>Status</TableHead>
+                  {isManager && (
+                    <TableHead className={`${th} text-right pr-4`}>Actions</TableHead>
                   )}
                 </TableRow>
               </TableHeader>
@@ -555,100 +606,105 @@ const calculateDays = (start: string, end: string) => {
               <TableBody>
                 {filteredLeaves?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-32 text-center text-gray-500">
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No leave requests found</p>
+                    <TableCell colSpan={6} className="py-16 text-center">
+                      <div className="flex flex-col items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+                        <Plane className="w-8 h-8 text-gray-300 dark:text-gray-600" />
+                        <p className="text-sm font-medium">No leave requests found</p>
                         <p className="text-xs text-gray-400">Click 'Request Leave' to create a new leave application.</p>
                       </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedLeaves?.map((leave) => (
-                    <TableRow key={leave.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
-                      <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                  paginatedLeaves?.map((leave) => {
+                    const empName = `${leave.employee?.firstName || ""} ${leave.employee?.lastName || ""}`.trim();
+                    const days = leave.startDate && leave.endDate ? calculateDays(leave.startDate, leave.endDate) : 0;
+                    return (
+                    <TableRow key={leave.id} className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
+                      <TableCell className="py-3 pl-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(empName)}`}>
                             {leave.employee?.firstName?.charAt(0)}{(leave.employee?.lastName || "").charAt(0)}
                           </div>
-                          <span>{leave.employee?.firstName} {leave.employee?.lastName || ""}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{empName || "—"}</span>
+                            <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{leave.employee?.employeeId || "—"}</span>
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">
-                        <Badge variant="outline" className="bg-blue-50/80 text-blue-700 border-blue-200/80 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 font-medium text-xs">
+                      <TableCell className="py-3">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">
                           {leave.leaveType?.name || "General Leave"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200/80 dark:bg-gray-900 dark:border-gray-800">
-                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                          {leave.startDate?.slice(0, 10)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200/80 dark:bg-gray-900 dark:border-gray-800">
-                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                          {leave.endDate?.slice(0, 10)}
-                        </span>
+                      <TableCell className="py-3 text-sm text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap">
+                        {leave.startDate?.slice(0, 10)}
+                        <span className="text-gray-300 dark:text-gray-600 mx-1.5">→</span>
+                        {leave.endDate?.slice(0, 10)}
                       </TableCell>
-                      <TableCell>{getStatusBadge(leave.status)}</TableCell>
+                      <TableCell className="py-3 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                        {days > 0 ? `${days}d` : "—"}
+                      </TableCell>
+                      <TableCell className="py-3"><StatusPill status={leave.status} /></TableCell>
 
-                      {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && (
-                        <TableCell className="text-right pr-6">
+                      {isManager && (
+                        <TableCell className="py-3 pr-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
+                              size="icon"
+                              variant="outline"
+                              className="size-8 rounded-lg border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
                               onClick={() => openApproveModal(leave.id)}
                               title="Approve Leave"
                             >
-                              <Check className="w-4 h-4" />
+                              <Check className="w-3.5 h-3.5" />
                             </Button>
                             <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                              size="icon"
+                              variant="outline"
+                              className="size-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950"
                               onClick={() => openRejectModal(leave.id)}
                               title="Reject Leave"
                             >
-                              <X className="w-4 h-4" />
+                              <X className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
                               onClick={() => openViewModal(leave)}
                               title="View Details"
                             >
-                              <Eye className="w-4 h-4" />
+                              <Eye className="w-3.5 h-3.5" />
+                              View
                             </Button>
                             <Button
                               size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                               onClick={() => openEditModal(leave)}
                               title="Edit Leave Request"
                             >
-                              <Pencil className="w-4 h-4" />
+                              <Pencil className="w-3.5 h-3.5" />
+                              Edit
                             </Button>
                             <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
+                              size="icon"
+                              variant="outline"
+                              className="size-8 rounded-lg border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                               onClick={() => setDeleteConfirm(leave)}
                               title="Delete Leave Request"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </TableCell>
                       )}
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
-          </div>
 
           {/* Pagination Footer */}
           {totalItems > 0 && (
@@ -742,230 +798,257 @@ const calculateDays = (start: string, end: string) => {
               </div>
             </div>
           )}
+          </div>
         </CardContent>
       </Card>
 
       {/* Delete Confirmation Modal */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent className="max-w-sm rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle>Delete Leave Request</DialogTitle>
+        <DialogContent className="w-[92vw] sm:max-w-[420px] rounded-2xl p-6 shadow-2xl">
+          <DialogHeader className="text-left">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Delete leave request</DialogTitle>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Are you sure you want to delete this leave request? This action cannot be undone.
+                </p>
+              </div>
+            </div>
           </DialogHeader>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Are you sure you want to delete this leave request? This action cannot be undone.
-          </p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" className="h-10 rounded-lg" onClick={() => setDeleteConfirm(null)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDelete}>
+            <Button variant="destructive" className="h-10 rounded-lg" onClick={handleDelete}>
               Delete
             </Button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Approve / Reject Modal */}
       <Dialog open={actionModalOpen} onOpenChange={setActionModalOpen}>
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>
-        {actionType === "APPROVED"
-          ? "Approve Leave"
-          : "Reject Leave"}
-      </DialogTitle>
-    </DialogHeader>
-
-    <div className="space-y-4">
-
-      {/* APPROVE SECTION */}
-      {actionType === "APPROVED" && (
-        <div>
-          <Label>Mark as Paid Leave?</Label>
-
-          <Select
-            value={payType}
-            onValueChange={(val: any) => setPayType(val)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="PAID">Paid</SelectItem>
-              <SelectItem value="UNPAID">Unpaid</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {/* REJECT CONFIRMATION */}
-      {actionType === "REJECTED" && (
-        <p className="text-sm text-gray-600">
-          Are you sure you want to reject this leave request?
-        </p>
-      )}
-
-      <div className="flex justify-end gap-2">
-        <Button
-          variant="outline"
-          onClick={() => setActionModalOpen(false)}
-        >
-          Cancel
-        </Button>
-
-        <Button
-          onClick={async () => {
-            try {
-              if (!selectedLeaveId) return;
-
-              await leaveAPI.updateLeaveStatus(
-                selectedLeaveId,
-                actionType!,
-                actionType === "APPROVED" ? payType : undefined
-              );
-
-              toast.success(
+        <DialogContent className="w-[92vw] sm:max-w-[440px] rounded-2xl p-6 shadow-2xl">
+          <DialogHeader className="text-left">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
                 actionType === "APPROVED"
-                  ? "Leave Approved Successfully"
-                  : "Leave Rejected Successfully"
-              );
+                  ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
+                  : "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+              }`}>
+                {actionType === "APPROVED" ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  {actionType === "APPROVED" ? "Approve Leave" : "Reject Leave"}
+                </DialogTitle>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {actionType === "APPROVED"
+                    ? "Choose whether this leave is paid or unpaid."
+                    : "Are you sure you want to reject this leave request?"}
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
 
-              setActionModalOpen(false);
-              loadLeaves();
+          {/* APPROVE SECTION */}
+          {actionType === "APPROVED" && (
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {(["PAID", "UNPAID"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setPayType(opt)}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    payType === opt
+                      ? "border-blue-500 bg-blue-50/60 ring-1 ring-blue-500 dark:bg-blue-950/40"
+                      : "border-gray-200 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{opt === "PAID" ? "Paid" : "Unpaid"}</span>
+                  <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                    {opt === "PAID" ? "Counts as paid leave" : "Deducted from salary"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
-            } catch (error: any) {
-              toast.error(error?.response?.data?.message || error?.data?.message || error?.message || "Failed to update leave");
-            }
-          }}
-        >
-          Confirm
-        </Button>
-      </div>
-
-    </div>
-  </DialogContent>
-</Dialog>
-<Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
-  <DialogContent className="max-w-lg">
-    <DialogHeader>
-      <DialogTitle>Leave Details</DialogTitle>
-    </DialogHeader>
-
-    {selectedLeave && (
-      <div className="space-y-4">
-
-        <div>
-          <Label>Employee</Label>
-          <p className="font-medium">
-            {selectedLeave.employee?.firstName}{" "}
-            {selectedLeave.employee?.lastName}
-          </p>
-        </div>
-
-        <div>
-          <Label>Leave Type</Label>
-          <p>{selectedLeave.leaveType?.name}</p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Start Date</Label>
-            <p>{selectedLeave.startDate.slice(0, 10)}</p>
-          </div>
-          <div>
-            <Label>End Date</Label>
-            <p>{selectedLeave.endDate.slice(0, 10)}</p>
-          </div>
-        </div>
-
-        <div>
-          <Label>Total Days</Label>
-          <p className="font-semibold text-blue-600">
-            {calculateDays(
-              selectedLeave.startDate,
-              selectedLeave.endDate
-            )} days
-          </p>
-        </div>
-
-        <div>
-          <Label>Status</Label>
-          {getStatusBadge(selectedLeave.status)}
-        </div>
-
-        {selectedLeave.status === "APPROVED" && (
-          <div>
-            <Label>Pay Type</Label>
-            <p>{selectedLeave.payType || "—"}</p>
-          </div>
-        )}
-
-        <div>
-          <Label>Reason</Label>
-          <p className="text-gray-600">
-            {selectedLeave.reason || "No reason provided"}
-          </p>
-        </div>
-
-        {/* 🔴 Delete Button */}
-        {(user?.role === "ADMIN" ||
-          user?.role === "SUPERVISOR" ||
-          (user?.id === selectedLeave.employeeId &&
-            selectedLeave.status === "PENDING")) && (
-          <div className="flex justify-end gap-3">
-            {
-              user?.role === 'ADMIN' &&
-              <>
-               <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => openApproveModal(selectedLeave.id)}
-                      >
-                        Approved
-                      </Button>
-
-                      <Button
-                        // size="sm"
-                        variant="secondary"
-                        onClick={() => openRejectModal(selectedLeave.id)}
-                      >
-                        Rejected
-                      </Button>
-                      </>
-            }
+          <div className="flex justify-end gap-2 mt-2">
             <Button
-              variant="destructive"
+              variant="outline"
+              className="h-10 rounded-lg"
+              onClick={() => setActionModalOpen(false)}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              className={`h-10 px-5 font-semibold rounded-lg text-white ${
+                actionType === "APPROVED" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"
+              }`}
               onClick={async () => {
                 try {
-                  await leaveAPI.deleteLeave(selectedLeave.id);
-                  toast.success("Leave Deleted");
-                  setViewModalOpen(false);
+                  if (!selectedLeaveId) return;
+
+                  await leaveAPI.updateLeaveStatus(
+                    selectedLeaveId,
+                    actionType!,
+                    actionType === "APPROVED" ? payType : undefined
+                  );
+
+                  toast.success(
+                    actionType === "APPROVED"
+                      ? "Leave Approved Successfully"
+                      : "Leave Rejected Successfully"
+                  );
+
+                  setActionModalOpen(false);
                   loadLeaves();
-                } catch {
-                  toast.error("Failed to delete leave");
+
+                } catch (error: any) {
+                  toast.error(error?.response?.data?.message || error?.data?.message || error?.message || "Failed to update leave");
                 }
               }}
             >
-              Delete Leave
+              {actionType === "APPROVED" ? "Approve" : "Reject"}
             </Button>
           </div>
-        )}
+        </DialogContent>
+      </Dialog>
 
-      </div>
-    )}
-  </DialogContent>
-</Dialog>
+      {/* View Details Modal */}
+      <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-0 gap-0">
+          {selectedLeave && (() => {
+            const empName = `${selectedLeave.employee?.firstName || ""} ${selectedLeave.employee?.lastName || ""}`.trim();
+            return (
+              <>
+                <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 text-left">
+                  <div className="flex items-start gap-3 pr-6">
+                    <div className={`w-11 h-11 rounded-full flex items-center justify-center font-semibold text-sm shrink-0 ${avatarColor(empName)}`}>
+                      {selectedLeave.employee?.firstName?.charAt(0)}{(selectedLeave.employee?.lastName || "").charAt(0)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Leave details</DialogTitle>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {empName || "Employee"}{selectedLeave.employee?.employeeId ? ` · ${selectedLeave.employee.employeeId}` : ""}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <StatusPill status={selectedLeave.status} />
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">
+                          {selectedLeave.leaveType?.name || "General Leave"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </DialogHeader>
+
+                <div className="px-6 py-5 space-y-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">Start</span>
+                      <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{selectedLeave.startDate.slice(0, 10)}</span>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2.5">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block">End</span>
+                      <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">{selectedLeave.endDate.slice(0, 10)}</span>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/40 px-3 py-2.5">
+                      <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium block">Total</span>
+                      <span className="text-sm font-semibold tabular-nums text-blue-700 dark:text-blue-300">
+                        {calculateDays(selectedLeave.startDate, selectedLeave.endDate)} days
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedLeave.status === "APPROVED" && (
+                    <div className="flex items-center justify-between rounded-xl bg-gray-50 dark:bg-gray-900 px-4 py-2.5 text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Pay type</span>
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedLeave.payType || "—"}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Reason</h4>
+                    <div className="rounded-xl px-4 py-3 bg-gray-50 dark:bg-gray-900 text-sm leading-relaxed text-gray-700 dark:text-gray-300">
+                      {selectedLeave.reason || "No reason provided"}
+                    </div>
+                  </div>
+                </div>
+
+                {(user?.role === "ADMIN" ||
+                  user?.role === "SUPERVISOR" ||
+                  (user?.id === selectedLeave.employeeId &&
+                    selectedLeave.status === "PENDING")) && (
+                  <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-lg border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950 gap-1.5"
+                      onClick={async () => {
+                        try {
+                          await leaveAPI.deleteLeave(selectedLeave.id);
+                          toast.success("Leave Deleted");
+                          setViewModalOpen(false);
+                          loadLeaves();
+                        } catch {
+                          toast.error("Failed to delete leave");
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </Button>
+                    {user?.role === "ADMIN" && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-10 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950 gap-1.5"
+                          onClick={() => openRejectModal(selectedLeave.id)}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Reject
+                        </Button>
+                        <Button
+                          className="h-10 px-5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5"
+                          onClick={() => openApproveModal(selectedLeave.id)}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          Approve
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Leave Request Modal */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Leave Request</DialogTitle>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 text-left">
+            <div className="flex items-start gap-3 pr-6">
+              <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Pencil className="w-4 h-4" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Edit leave request</DialogTitle>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Update the leave type, dates or reason</p>
+              </div>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div>
-              <Label>Leave Type</Label>
+          <div className="px-6 py-5 space-y-4">
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Leave type</Label>
               <SearchableSelect
-                className="w-full"
+                className="w-full h-10"
                 placeholder="Select Type"
                 searchPlaceholder="Search leave type..."
                 value={formData.leaveTypeId}
@@ -979,44 +1062,56 @@ const calculateDays = (start: string, end: string) => {
               />
             </div>
 
-            <div>
-              <Label>Start Date</Label>
-              <Input
-                type="date"
-                value={formData.startDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, startDate: e.target.value })
-                }
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>Start date</Label>
+                <Input
+                  type="date"
+                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
+                  value={formData.startDate}
+                  onChange={(e) =>
+                    setFormData({ ...formData, startDate: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>End date</Label>
+                <Input
+                  type="date"
+                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
+                  value={formData.endDate}
+                  onChange={(e) =>
+                    setFormData({ ...formData, endDate: e.target.value })
+                  }
+                />
+              </div>
             </div>
+            {requestDays > 0 && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
+                <span className="font-semibold text-blue-600 dark:text-blue-400">{requestDays} {requestDays === 1 ? "day" : "days"}</span> of leave
+              </p>
+            )}
 
-            <div>
-              <Label>End Date</Label>
-              <Input
-                type="date"
-                value={formData.endDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, endDate: e.target.value })
-                }
-              />
-            </div>
-
-            <div>
-              <Label>Reason</Label>
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Reason</Label>
               <Textarea
+                rows={3}
+                className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                 value={formData.reason}
                 onChange={(e) =>
                   setFormData({ ...formData, reason: e.target.value })
                 }
               />
             </div>
+          </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setEditModalOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleEditSubmit}>Save Changes</Button>
-            </div>
+          <div className="sticky bottom-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+            <Button variant="outline" className="h-10 rounded-lg" onClick={() => setEditModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg" onClick={handleEditSubmit}>
+              Save changes
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

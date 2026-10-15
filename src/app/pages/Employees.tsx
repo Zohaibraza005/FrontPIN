@@ -14,6 +14,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
+import { avatarColor } from '../utils/avatar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import {
@@ -463,27 +464,27 @@ export const Employees: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
       {/* ── Top Header ────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs">
-        <div>
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
           <div className="flex items-center gap-2.5">
-            <h2 className="text-2xl font-bold tracking-tight text-gray-900">Employee Management</h2>
-            <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 font-semibold px-2.5 py-0.5 text-xs">
+            <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Employee Management</h2>
+            <Badge variant="secondary" className="bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 font-semibold px-2 py-0.5 text-xs rounded-md tabular-nums">
               {filteredEmployees.length} {filteredEmployees.length === employees.length ? 'Staff' : `of ${employees.length} Staff`}
             </Badge>
           </div>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Manage employee profiles, role permissions, access credentials, and payroll configurations
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <Button
             variant="outline"
             size="icon"
             onClick={fetchEmployees}
-            className="h-10 w-10 text-gray-600 hover:text-gray-900 border-gray-200 rounded-xl"
+            className="h-9 w-9 text-gray-600 hover:text-gray-900 border-gray-200 dark:border-gray-800 rounded-xl"
             title="Refresh employees"
           >
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
@@ -493,27 +494,26 @@ export const Employees: React.FC = () => {
             variant="outline"
             onClick={() => handlePushToMachine()}
             disabled={isPushingMachine}
-            className="w-full sm:w-auto border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl flex items-center"
             title="Push all active employees to biometric machines"
           >
-            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : 'text-sky-600'}`} />
+            <Cpu className={`size-3.5 ${isPushingMachine ? 'animate-spin text-blue-600' : 'text-gray-500'}`} />
             <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
           </Button>
 
           <Button
             variant="outline"
             onClick={() => setImportModalOpen(true)}
-            className="w-full sm:w-auto border-indigo-200 text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 hover:text-indigo-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 hover:bg-indigo-100/80 text-indigo-700 dark:text-indigo-300 dark:bg-indigo-950/40 shadow-2xs rounded-xl flex items-center"
             title="Import Employees / Supervisors from Excel / CSV file"
           >
-            <FileSpreadsheet className="size-4 text-indigo-600" />
-            <span>Import Employees</span>
+            <FileSpreadsheet className="size-3.5 text-indigo-600" />
+            <span>Import</span>
           </Button>
 
-          <Link to={'/employees/add'} className="flex-1 sm:flex-initial">
-
-            <Button className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white font-medium shadow-xs rounded-xl h-10 px-4">
-              <Plus className="mr-2 size-4" />
+          <Link to={'/employees/add'}>
+            <Button className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl">
+              <Plus className="size-3.5" />
               Add Employee
             </Button>
           </Link>
@@ -522,14 +522,15 @@ export const Employees: React.FC = () => {
       </div>
 
       {/* ── Single Line Unified Toolbar & Content Container ────────────────────────────── */}
-      <Card className="shadow-sm border-gray-200">
-        <CardHeader className="border-b border-gray-100 bg-gray-50/50 p-4">
+      <Card className="gap-0 shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
           <div className="flex flex-wrap items-center justify-between gap-3 w-full">
             {/* Filters + Search Bar on the Left/Center */}
             <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
               {/* Department Filter */}
               <SearchableSelect
-                className="w-[155px] h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                className="w-[165px] h-9 rounded-xl"
+                icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
                 placeholder="Department"
                 searchPlaceholder="Search dept..."
                 value={filterDepartment}
@@ -539,7 +540,8 @@ export const Employees: React.FC = () => {
 
               {/* Role Filter */}
               <SearchableSelect
-                className="w-[135px] h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                className="w-[145px] h-9 rounded-xl"
+                icon={<ShieldCheck className="w-3.5 h-3.5 text-gray-400" />}
                 placeholder="Role"
                 searchPlaceholder="Search role..."
                 value={filterRole}
@@ -550,7 +552,8 @@ export const Employees: React.FC = () => {
               {/* Location Filter */}
               {locationOptions.length > 1 && (
                 <SearchableSelect
-                  className="w-[145px] h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                  className="w-[165px] h-9 rounded-xl"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="Location"
                   searchPlaceholder="Search location..."
                   value={filterLocation}
@@ -566,7 +569,8 @@ export const Employees: React.FC = () => {
 
               {/* Login Access Filter */}
               <SearchableSelect
-                className="w-[135px] h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                className="w-[145px] h-9 rounded-xl"
+                icon={<Key className="w-3.5 h-3.5 text-gray-400" />}
                 placeholder="Access"
                 searchPlaceholder="Search access..."
                 value={filterLogin}
@@ -581,7 +585,7 @@ export const Employees: React.FC = () => {
                   placeholder="Search name, email, ID..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-8 h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                  className="pl-9 pr-8 h-9 text-sm bg-white dark:bg-gray-950 rounded-xl"
                 />
                 {searchQuery && (
                   <button
@@ -600,7 +604,7 @@ export const Employees: React.FC = () => {
                   variant="ghost"
                   size="sm"
                   onClick={resetFilters}
-                  className="h-9 px-2.5 text-xs text-sky-600 hover:text-sky-800 hover:bg-sky-50 font-medium"
+                  className="h-9 px-2.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 font-semibold rounded-xl"
                   title="Clear all filters"
                 >
                   <RotateCcw className="mr-1 size-3.5" />
@@ -610,13 +614,13 @@ export const Employees: React.FC = () => {
             </div>
 
             {/* View Switcher (Table vs Grid Toggle) Aligned Right */}
-            <div className="flex items-center bg-gray-200/60 p-1 rounded-xl border border-gray-200/80 shrink-0">
+            <div className="flex items-center bg-gray-100 dark:bg-gray-900 p-1 rounded-xl shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
                 className={`p-1.5 rounded-lg transition-all ${
                   viewMode === 'table'
-                    ? 'bg-white text-sky-600 shadow-2xs font-semibold'
+                    ? 'bg-white dark:bg-gray-950 text-blue-600 shadow-2xs font-semibold'
                     : 'text-gray-500 hover:text-gray-900'
                 }`}
                 title="Table View"
@@ -628,7 +632,7 @@ export const Employees: React.FC = () => {
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-lg transition-all ${
                   viewMode === 'grid'
-                    ? 'bg-white text-sky-600 shadow-2xs font-semibold'
+                    ? 'bg-white dark:bg-gray-950 text-blue-600 shadow-2xs font-semibold'
                     : 'text-gray-500 hover:text-gray-900'
                 }`}
                 title="Grid View"
@@ -639,19 +643,20 @@ export const Employees: React.FC = () => {
           </div>
         </CardHeader>
 
-        <CardContent className="p-0">
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
           {/* ── Table View ────────────────────────────────────────── */}
           {viewMode === 'table' ? (
-            <div className="overflow-x-auto">
-              <Table>
+            <div>
+              <Table className="min-w-[900px]">
                 <TableHeader>
-                  <TableRow className="bg-gray-50/70 hover:bg-gray-50/70 border-b border-gray-200/80">
-                    <TableHead className="font-semibold text-gray-700 py-3.5 pl-6">Employee</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5">Department & Location</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5">Position</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5">Join Date</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5">Login Access</TableHead>
-                    <TableHead className="font-semibold text-gray-700 py-3.5 text-right pr-6">Actions</TableHead>
+                  <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 pl-4">Employee</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Department & Location</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Position</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Join Date</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Login Access</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right pr-4">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -695,9 +700,9 @@ export const Employees: React.FC = () => {
                       const empCode = emp.employeeId || `#${emp.id}`;
 
                       return (
-                        <TableRow key={emp.id} className="hover:bg-gray-50/80 transition-colors">
+                        <TableRow key={emp.id} className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
                           {/* Employee Name & Profile */}
-                          <TableCell className="pl-6 py-3">
+                          <TableCell className="pl-4 py-3">
                             <div className="flex items-center gap-3">
                               {emp.profileImage ? (
                                 <img
@@ -707,7 +712,7 @@ export const Employees: React.FC = () => {
                                       : `${API_URL}${emp.profileImage}`
                                   }
                                   alt={empName}
-                                  className="size-10 rounded-full border border-gray-200 object-cover shrink-0 shadow-2xs"
+                                  className="size-9 rounded-full border border-gray-200 object-cover shrink-0"
                                   onError={(e) => {
                                     (e.target as HTMLElement).style.display = 'none';
                                     if ((e.target as HTMLElement).nextElementSibling) {
@@ -717,7 +722,7 @@ export const Employees: React.FC = () => {
                                 />
                               ) : null}
                               <div
-                                className={`size-10 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 text-white font-bold text-xs items-center justify-center shrink-0 shadow-2xs ${
+                                className={`size-9 rounded-full font-semibold text-xs items-center justify-center shrink-0 ${avatarColor(empName)} ${
                                   emp.profileImage ? 'hidden' : 'flex'
                                 }`}
                               >
@@ -727,12 +732,12 @@ export const Employees: React.FC = () => {
                               <div>
                                 <Link
                                   to={`/employees/${emp.id}`}
-                                  className="text-sm font-bold text-gray-900 hover:text-sky-600 transition-colors leading-snug block"
+                                  className="text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 transition-colors leading-snug block"
                                 >
                                   {empName}
                                 </Link>
-                                <span className="text-xs text-gray-400 font-mono">
-                                  ID: {empCode}
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {empCode}
                                 </span>
                               </div>
                             </div>
@@ -741,8 +746,8 @@ export const Employees: React.FC = () => {
                           {/* Department & Location */}
                           <TableCell className="py-3">
                             <div className="space-y-1">
-                              <div className="flex items-center gap-1.5 text-xs text-gray-800 font-medium">
-                                <Building2 className="size-3.5 text-sky-500 shrink-0" />
+                              <div className="flex items-center gap-1.5 text-sm text-gray-800 dark:text-gray-200 font-medium">
+                                <Building2 className="size-3.5 text-gray-400 shrink-0" />
                                 <span>{deptName}</span>
                               </div>
                               <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -754,15 +759,14 @@ export const Employees: React.FC = () => {
 
                           {/* Position */}
                           <TableCell className="py-3">
-                            <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2.5 py-1 rounded-md">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
                               {position}
                             </span>
                           </TableCell>
 
                           {/* Join Date */}
                           <TableCell className="py-3">
-                            <div className="flex items-center gap-1.5 text-xs text-gray-600 font-medium">
-                              <Calendar className="size-3.5 text-gray-400" />
+                            <div className="text-sm text-gray-700 dark:text-gray-300 tabular-nums">
                               <span>{joinDate}</span>
                             </div>
                           </TableCell>
@@ -770,31 +774,32 @@ export const Employees: React.FC = () => {
                           {/* Login Access */}
                           <TableCell className="py-3">
                             {emp.canLogin ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                                <CheckCircle2 className="size-3 text-emerald-600" />
-                                Can Login
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                Can login
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
-                                <XCircle className="size-3 text-gray-400" />
-                                No Access
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-50 text-gray-500 border border-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:border-gray-800">
+                                <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                                No access
                               </span>
                             )}
                           </TableCell>
 
                           {/* Actions */}
-                          <TableCell className="pr-6 py-3 text-right">
+                          <TableCell className="pr-4 py-3 text-right">
                             <TooltipProvider>
-                              <div className="flex items-center justify-end gap-1">
+                              <div className="flex items-center justify-end gap-1.5">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Link to={`/employees/${emp.id}`}>
                                       <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-gray-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
                                       >
-                                        <Eye className="size-4" />
+                                        <Eye className="size-3.5" />
+                                        View
                                       </Button>
                                     </Link>
                                   </TooltipTrigger>
@@ -810,9 +815,9 @@ export const Employees: React.FC = () => {
                                       size="icon"
                                       onClick={() => handlePushToMachine(emp.id)}
                                       disabled={isPushingMachine}
-                                      className="h-8 w-8 text-gray-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
+                                      className="size-8 rounded-lg border border-gray-200 text-gray-600 hover:text-blue-600 hover:bg-blue-50 dark:border-gray-800"
                                     >
-                                      <Cpu className="size-4" />
+                                      <Cpu className="size-3.5" />
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipContent side="top">
@@ -827,9 +832,9 @@ export const Employees: React.FC = () => {
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => handleOpenPinModal(emp)}
-                                        className="h-8 w-8 text-gray-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                                        className="size-8 rounded-lg border border-amber-200 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:border-amber-900"
                                       >
-                                        <Key className="size-4" />
+                                        <Key className="size-3.5" />
                                       </Button>
                                     </TooltipTrigger>
                                     <TooltipContent side="top">
@@ -845,9 +850,9 @@ export const Employees: React.FC = () => {
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => handleDeleteClick(emp)}
-                                      className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                      className="size-8 rounded-lg border border-red-200 text-red-600 hover:text-red-700 hover:bg-red-50 dark:border-red-900"
                                     >
-                                      <Trash2 className="size-4" />
+                                      <Trash2 className="size-3.5" />
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipContent side="top">
@@ -893,7 +898,7 @@ export const Employees: React.FC = () => {
                     return (
                       <div
                         key={emp.id}
-                        className="bg-white rounded-2xl border border-gray-200/90 shadow-2xs hover:shadow-md hover:border-gray-300 transition-all p-4 flex flex-col justify-between"
+                        className="bg-white dark:bg-gray-950 rounded-2xl border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-gray-300 transition-all p-4 flex flex-col justify-between"
                       >
                         <div>
                           {/* Card Top Row: Role & Access Badge */}
@@ -921,7 +926,7 @@ export const Employees: React.FC = () => {
                                     : `${API_URL}${emp.profileImage}`
                                 }
                                 alt={empName}
-                                className="size-16 rounded-full border-2 border-sky-100 object-cover shadow-sm mb-2"
+                                className="size-16 rounded-full border-2 border-white ring-1 ring-gray-200 object-cover mb-2"
                                 onError={(e) => {
                                   (e.target as HTMLElement).style.display = 'none';
                                   if ((e.target as HTMLElement).nextElementSibling) {
@@ -931,7 +936,7 @@ export const Employees: React.FC = () => {
                               />
                             ) : null}
                             <div
-                              className={`size-16 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 text-white font-bold text-lg items-center justify-center shadow-sm mb-2 ${
+                              className={`size-16 rounded-full font-semibold text-lg items-center justify-center mb-2 ${avatarColor(empName)} ${
                                 emp.profileImage ? 'hidden' : 'flex'
                               }`}
                             >
@@ -940,14 +945,14 @@ export const Employees: React.FC = () => {
 
                             <Link
                               to={`/employees/${emp.id}`}
-                              className="text-base font-bold text-gray-900 hover:text-sky-600 transition-colors"
+                              className="text-base font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 transition-colors"
                             >
                               {empName}
                             </Link>
-                            <p className="text-xs font-semibold text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-100 mt-1">
+                            <p className="text-xs font-semibold text-blue-700 bg-blue-50 dark:bg-blue-950/50 dark:text-blue-300 px-2 py-0.5 rounded-md mt-1">
                               {position}
                             </p>
-                            <span className="text-[11px] text-gray-400 font-mono mt-1">ID: {empCode}</span>
+                            <span className="text-[11px] text-gray-500 mt-1">{empCode}</span>
                           </div>
 
                           {/* Details Summary */}
@@ -973,7 +978,7 @@ export const Employees: React.FC = () => {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="w-full text-xs font-semibold border-gray-200 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-200 h-8 rounded-xl"
+                              className="w-full text-xs font-semibold border-gray-200 hover:bg-gray-50 h-8 rounded-lg"
                             >
                               <Eye className="mr-1.5 size-3.5" /> View
                             </Button>
@@ -984,7 +989,7 @@ export const Employees: React.FC = () => {
                             size="sm"
                             onClick={() => handlePushToMachine(emp.id)}
                             disabled={isPushingMachine}
-                            className="text-xs text-sky-700 bg-sky-50/60 border-sky-200 hover:bg-sky-100 h-8 rounded-xl"
+                            className="text-xs text-gray-600 border-gray-200 hover:text-blue-600 hover:bg-blue-50 h-8 rounded-lg"
                             title={`Push ${emp.firstName} to Machine`}
                           >
                             <Cpu className="size-3.5" />
@@ -995,7 +1000,7 @@ export const Employees: React.FC = () => {
                               variant="outline"
                               size="sm"
                               onClick={() => handleOpenPinModal(emp)}
-                              className="text-xs text-amber-700 bg-amber-50/60 border-amber-200 hover:bg-amber-100 h-8 rounded-xl"
+                              className="text-xs text-amber-600 border-amber-200 hover:bg-amber-50 h-8 rounded-lg"
                               title="Update PIN"
                             >
                               <Key className="size-3.5" />
@@ -1003,10 +1008,10 @@ export const Employees: React.FC = () => {
                           )}
 
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={() => handleDeleteClick(emp)}
-                            className="text-xs text-gray-400 hover:text-red-600 hover:bg-red-50 h-8 rounded-xl"
+                            className="text-xs text-red-600 border-red-200 hover:text-red-700 hover:bg-red-50 h-8 rounded-lg"
                             title="Delete"
                           >
                             <Trash2 className="size-3.5" />
@@ -1112,6 +1117,7 @@ export const Employees: React.FC = () => {
               </div>
             </div>
           )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1119,8 +1125,8 @@ export const Employees: React.FC = () => {
       <Dialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl p-6 border-gray-200 shadow-xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-gray-900">
-              <div className="size-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+            <DialogTitle className="text-base font-semibold flex items-center gap-3 text-gray-900 dark:text-gray-100">
+              <div className="size-10 rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/60 flex items-center justify-center">
                 <Key className="size-4" />
               </div>
               Update Access PIN
@@ -1136,7 +1142,7 @@ export const Employees: React.FC = () => {
               .
             </p>
 
-            <div className="space-y-2 bg-gray-50/80 p-4 rounded-2xl border border-gray-100 text-center">
+            <div className="space-y-2 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl text-center">
               <Label className="text-xs font-semibold text-gray-700">New 4-Digit PIN</Label>
               <Input
                 type="password"
@@ -1144,7 +1150,7 @@ export const Employees: React.FC = () => {
                 placeholder="••••"
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                className="text-2xl tracking-widest text-center font-mono h-12 bg-white rounded-xl border-gray-300 focus:border-sky-500 focus:ring-sky-500/20"
+                className="text-2xl tracking-widest text-center font-mono h-12 bg-white dark:bg-gray-950 rounded-xl"
               />
               <p className="text-[11px] text-gray-400">Only numeric digits are allowed.</p>
             </div>
@@ -1153,14 +1159,14 @@ export const Employees: React.FC = () => {
               <Button
                 variant="outline"
                 onClick={() => setPinDialogOpen(false)}
-                className="rounded-xl border-gray-200 text-xs font-medium"
+                className="h-10 rounded-lg"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSetPin}
                 disabled={isUpdatingPin || newPin.length !== 4}
-                className="bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-semibold px-4"
+                className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold"
               >
                 {isUpdatingPin ? 'Updating...' : 'Update PIN'}
               </Button>
@@ -1173,8 +1179,8 @@ export const Employees: React.FC = () => {
       <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl p-6 border-gray-200 shadow-xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-red-600">
-              <div className="size-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center border border-red-100">
+            <DialogTitle className="text-base font-semibold flex items-center gap-3 text-gray-900 dark:text-gray-100">
+              <div className="size-10 rounded-full bg-red-50 text-red-600 dark:bg-red-950/60 flex items-center justify-center">
                 <Trash2 className="size-4" />
               </div>
               Delete Employee Record
@@ -1194,7 +1200,7 @@ export const Employees: React.FC = () => {
               <Button
                 variant="outline"
                 onClick={() => setDeleteModalOpen(false)}
-                className="rounded-xl border-gray-200 text-xs font-medium"
+                className="h-10 rounded-lg"
               >
                 Cancel
               </Button>
@@ -1202,7 +1208,7 @@ export const Employees: React.FC = () => {
                 variant="destructive"
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold px-4"
+                className="h-10 px-5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold"
               >
                 {isDeleting ? 'Deleting...' : 'Confirm Delete'}
               </Button>
@@ -1215,8 +1221,8 @@ export const Employees: React.FC = () => {
       <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
         <DialogContent className="sm:max-w-lg rounded-2xl p-6 border-gray-200 shadow-xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-indigo-900">
-              <div className="size-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+            <DialogTitle className="text-base font-semibold flex items-center gap-3 text-gray-900 dark:text-gray-100">
+              <div className="size-10 rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 flex items-center justify-center">
                 <FileSpreadsheet className="size-4" />
               </div>
               Import Employees via Excel / CSV
@@ -1235,7 +1241,7 @@ export const Employees: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setImportRole('USER')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${importRole === 'USER' ? 'bg-sky-600 text-white shadow-2xs' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
+                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${importRole === 'USER' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'}`}
                 >
                   Employee (User)
                 </button>
@@ -1308,14 +1314,14 @@ export const Employees: React.FC = () => {
                     setSelectedFile(null);
                     setPastedNames('');
                   }}
-                  className="rounded-xl border-gray-200 text-xs font-medium"
+                  className="h-10 rounded-lg"
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleImportEmployees}
                   disabled={isImportingEmployees || (!selectedFile && !pastedNames.trim())}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold px-4 flex items-center gap-1.5"
+                  className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold flex items-center gap-1.5"
                 >
                   <FileSpreadsheet className="size-3.5" />
                   {isImportingEmployees ? 'Importing...' : 'Import Employees'}

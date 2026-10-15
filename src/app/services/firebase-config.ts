@@ -1,5 +1,5 @@
 /**
- * Firebase Cloud Messaging (FCM) Setup Guide for FRONTPIN
+ * Firebase Cloud Messaging (FCM) Setup Guide for HR PRO
  * 
  * Follow these steps to integrate push notifications:
  * 
@@ -106,7 +106,7 @@
  *   }
  * }
  * 
- * Use cases for notifications in FRONTPIN:
+ * Use cases for notifications in HR PRO:
  * - Leave request submitted/approved/rejected
  * - New task assigned
  * - Project deadline approaching

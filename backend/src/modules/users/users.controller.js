@@ -1278,7 +1278,7 @@ exports.importEmployees = async (req, res) => {
 
       const cleanFirst = firstName.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-      // 🔴 Strict Deduplication: Check if employee exact full name already exists in Frontpin DB
+      // 🔴 Strict Deduplication: Check if employee exact full name already exists in HR Pro DB
       const isDuplicate = existingEmployees.some((e) => {
         const existingFull = `${e.firstName || ''} ${e.lastName || ''}`.trim().toLowerCase();
         return existingFull === cleanFull.toLowerCase();

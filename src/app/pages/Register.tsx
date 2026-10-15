@@ -114,7 +114,7 @@ export const Register: React.FC = () => {
         <div className="max-w-md space-y-6">
           <div className="flex items-center gap-3">
             <ShieldCheck size={32} />
-            <h1 className="text-3xl font-bold">FrontPin HRM</h1>
+            <h1 className="text-3xl font-bold">HR Pro</h1>
           </div>
 
           <p className="text-lg text-blue-100 leading-relaxed">
@@ -331,7 +331,7 @@ export const Register: React.FC = () => {
           </div>
 
           <div className="text-center text-xs text-gray-400 pt-4">
-            © 2025 FrontPin HRM
+            © 2025 HR Pro
           </div>
 
         </Card>

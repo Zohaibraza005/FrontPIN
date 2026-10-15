@@ -1,0 +1,7 @@
+node_modules/
+dist/
+config.json
+queue.json
+sent.json
+bridge.log*
+launchd.*.log

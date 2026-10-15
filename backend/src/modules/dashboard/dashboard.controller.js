@@ -444,6 +444,7 @@ const getWeeklyTimesheet = async (req, res) => {
       where: {
         organizationId,
         deletedAt: null,
+        NOT: { role: "ADMIN" },
         ...companyWhere,
         ...supervisorFilter,
       },
@@ -463,83 +464,53 @@ const getWeeklyTimesheet = async (req, res) => {
       });
     }
 
-    // ── A. Activity-based breakdown (most accurate) ──
-    const activities = await prisma.activityLog.groupBy({
-      by: ['type'],
+    // ── A. Attendance records of the week (same source as the Attendance page) ──
+    const attendances = await prisma.attendance.findMany({
       where: {
         employeeId: { in: employeeIds },
-        startTime: { gte: weekStartUTC, lte: weekEndUTC },
+        deletedAt: null,
+        date: { gte: weekStartUTC, lte: weekEndUTC },
       },
-      _sum: { durationMinutes: true },
+      select: { employeeId: true, date: true, totalWorkedMinutes: true, overtimeMinutes: true },
     });
 
-    // ── B. Approved overtime ──
-    const ot = await prisma.overtime.groupBy({
-      by: ['date'],
+    // ── B. Approved overtime requests override the recorded overtime for that employee/day ──
+    const approvedOt = await prisma.overtime.findMany({
       where: {
         employeeId: { in: employeeIds },
         status: "APPROVED",
         date: { gte: weekStartUTC, lte: weekEndUTC },
       },
-      _sum: { hours: true },
+      select: { employeeId: true, date: true, hours: true },
     });
+    const approvedOtMap = new Map();
+    for (const o of approvedOt) {
+      const key = `${o.employeeId}_${DateTime.fromJSDate(o.date).setZone(tz).toISODate()}`;
+      approvedOtMap.set(key, Math.round((Number(o.hours) || 0) * 60));
+    }
 
-    // ── C. Attendance fallback (if needed) ──
-    const attendanceSummary = await prisma.attendance.groupBy({
-      by: ['date'],
-      where: {
-        employeeId: { in: employeeIds },
-        date: { gte: weekStartUTC, lte: weekEndUTC },
-      },
-      _sum: {
-        totalWorkedMinutes: true,
-        totalBreakMinutes: true,
-      },
-    });
+    // ── C. Sum per day (org timezone). Ongoing shifts count only after check-out. ──
+    const perDay = new Map();
+    for (const att of attendances) {
+      const dayKey = DateTime.fromJSDate(att.date).setZone(tz).toISODate();
+      const otKey = `${att.employeeId}_${dayKey}`;
+      const otMinutes = approvedOtMap.has(otKey) ? approvedOtMap.get(otKey) : Number(att.overtimeMinutes) || 0;
+      const bucket = perDay.get(dayKey) || { worked: 0, overtime: 0 };
+      bucket.worked += Number(att.totalWorkedMinutes) || 0;
+      bucket.overtime += otMinutes;
+      perDay.set(dayKey, bucket);
+    }
 
     // ── Build 7-day array ──
     const data = [];
     for (let i = 0; i < 7; i++) {
       const day = weekStart.plus({ days: i });
-      const dayUTC = day.toJSDate();
-      const dayName = day.toFormat('EEE'); // Mon, Tue, ...
-
-      // Find matching records
-      const dayActivities = activities.filter(a => {
-        // You may need to group activities by date first if you want per-day precision
-        // For simplicity we sum whole week here → adjust if needed
-        return true; // ← improve later
-      });
-
-      // Better: query per day if volume is high
-      const dayWorkingMin = await prisma.activityLog.aggregate({
-        where: {
-          employeeId: { in: employeeIds },
-          type: { not: "BREAK" },
-          startTime: { gte: dayUTC, lt: day.plus({ days: 1 }).toJSDate() },
-        },
-        _sum: { durationMinutes: true },
-      });
-
-      const dayBreakMin = await prisma.activityLog.aggregate({
-        where: {
-          employeeId: { in: employeeIds },
-          type: "BREAK",
-          startTime: { gte: dayUTC, lt: day.plus({ days: 1 }).toJSDate() },
-        },
-        _sum: { durationMinutes: true },
-      });
-
-      const dayOvertime = ot.find(o => 
-        DateTime.fromJSDate(o.date).toISODate() === day.toISODate()
-      )?._sum?.hours || 0;
-
+      const bucket = perDay.get(day.toISODate()) || { worked: 0, overtime: 0 };
       data.push({
-        day: dayName,
+        day: day.toFormat("EEE"), // Mon, Tue, ...
         date: day.toISODate(),
-        workingHours:  Number((dayWorkingMin._sum.durationMinutes || 0) / 60).toFixed(2),
-        breakHours:    Number((dayBreakMin._sum.durationMinutes   || 0) / 60).toFixed(2),
-        overtimeHours: Number(dayOvertime).toFixed(2),
+        workingHours: Number((bucket.worked / 60).toFixed(2)),
+        overtimeHours: Number((bucket.overtime / 60).toFixed(2)),
       });
     }
 
@@ -868,7 +839,7 @@ const getUserDashboard = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    const companyName = employee?.company?.name || employee?.organization?.name || "Frontpin";
+    const companyName = employee?.company?.name || employee?.organization?.name || "HR Pro";
     const timezone = employee?.company?.timezone || "UTC";
 
     let start, end;

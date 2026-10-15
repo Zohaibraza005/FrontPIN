@@ -419,14 +419,44 @@ const [loadingSuggestions, setLoadingSuggestions] = useState(false);
                   {location.address}
                 </p>
               </div>
+              {(() => {
+                const activeCount = (location as any)._count?.employees ?? 0;
+                const capacity = Number(location.capacity) || 0;
+                const pct = capacity > 0 ? Math.min(100, Math.round((activeCount / capacity) * 100)) : 0;
+                const over = capacity > 0 && activeCount > capacity;
+                return (
+                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900 px-3.5 py-3 space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                        <Users className="size-4" />
+                        Active / Capacity
+                      </span>
+                      <span className={`font-semibold tabular-nums ${over ? "text-rose-600" : "text-gray-900 dark:text-gray-100"}`}>
+                        {activeCount} / {capacity > 0 ? capacity : "—"}
+                      </span>
+                    </div>
+                    {capacity > 0 && (
+                      <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${over ? "bg-rose-500" : pct >= 90 ? "bg-amber-500" : "bg-emerald-500"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    )}
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      {capacity > 0
+                        ? over
+                          ? `${activeCount - capacity} over capacity`
+                          : `${capacity - activeCount} seat${capacity - activeCount === 1 ? "" : "s"} available · ${pct}% filled`
+                        : "No capacity set for this location"}
+                    </p>
+                  </div>
+                );
+              })()}
               <div className="flex items-center justify-between pt-3 border-t">
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                   <Clock className="size-4" />
                   <span>Timezone: {location?.timezone}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <Users className="size-4" />
-                  <span>Capacity: {location.capacity}</span>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => openEdit(location)}>
                   <Edit className="size-4" />

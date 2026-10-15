@@ -1,8 +1,8 @@
 /**
- * FRONTPIN - Enterprise Company Management System
+ * HR PRO - Enterprise Company Management System
  * 
  * OVERVIEW:
- * FRONTPIN is a comprehensive company management software built with React, TypeScript, and Tailwind CSS.
+ * HR PRO is a comprehensive company management software built with React, TypeScript, and Tailwind CSS.
  * It includes role-based access control (Admin, Supervisor, Employee) and integrates with MySQL backend.
  * 
  * KEY FEATURES:

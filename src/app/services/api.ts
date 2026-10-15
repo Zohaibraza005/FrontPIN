@@ -74,11 +74,12 @@
  * - fcm_tokens (id, user_id, token, device_info, created_at)
  */
 
-// export const API_BASE_URL = 'http://localhost:4000/api'; // Change to your backend URL
-// export const API_URL = 'http://localhost:4000'; // Change to your backend URL
+// export const API_BASE_URL = 'http://localhost:5001/api'; // Change to your backend URL
+// export const API_URL = 'http://localhost:5001'; // Change to your backend URL
 
-export const API_BASE_URL = "http://localhost:4000/api"
-export const API_URL = "http://localhost:4000"
+// Set VITE_API_URL (e.g. in .env.production) to point the build at another backend
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001"
+export const API_BASE_URL = `${API_URL}/api`
 // export const API_URL = "https://api.frontpin.unisoftdemo.com"
 let isRefreshing = false; // optional: prevent multiple simultaneous logouts
 // Mock authentication token storage
@@ -1537,7 +1538,7 @@ function getMockData(endpoint: string, method: string): any {
       user: {
         id: '1',
         name: 'John Admin',
-        email: 'admin@frontpin.com',
+        email: 'admin@hrpro.com',
         role: 'admin',
         avatar: null,
       },

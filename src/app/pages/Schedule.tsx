@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { SearchableSelect } from "../components/ui/SearchableSelect";
+import { avatarColor } from "../utils/avatar";
 import {
   Table,
   TableBody,
@@ -48,6 +49,7 @@ import {
   Trash2,
   Search,
   Building2,
+  MapPin,
   User,
   RefreshCw,
   AlertTriangle,
@@ -71,6 +73,7 @@ import { toast } from "sonner";
 import { employeeAPI, departmentAPI, locationAPI, scheduleAPI } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 
+import { timeRange12h } from "../utils/time";
 type ShiftType = "day" | "evening" | "night";
 
 const SHIFT_TYPES: {
@@ -481,7 +484,7 @@ export const Schedule: React.FC = () => {
       updated[d] = { ...targetTiming };
     });
     setDaySchedules((prev) => ({ ...prev, ...updated }));
-    toast.success(`Applied ${targetTiming.startTime} - ${targetTiming.endTime} to all working days`);
+    toast.success(`Applied ${timeRange12h(targetTiming.startTime, targetTiming.endTime)} to all working days`);
   };
 
   // Handle Per-Day Time Editing (Edit Modal)
@@ -526,7 +529,7 @@ export const Schedule: React.FC = () => {
       updated[d] = { ...targetTiming };
     });
     setEditDaySchedules((prev) => ({ ...prev, ...updated }));
-    toast.success(`Applied ${targetTiming.startTime} - ${targetTiming.endTime} to all working days`);
+    toast.success(`Applied ${timeRange12h(targetTiming.startTime, targetTiming.endTime)} to all working days`);
   };
 
   // Filter schedules based on search and location, strictly 1 schedule per employee
@@ -817,19 +820,19 @@ export const Schedule: React.FC = () => {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
       {/* Header + Create Button */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Schedule Management</h2>
-          <p className="text-gray-500 text-sm">Manage employee work schedules and shift options</p>
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Schedule Management</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Manage employee work schedules and shift options</p>
         </div>
 
         <Dialog open={newScheduleOpen} onOpenChange={setNewScheduleOpen}>
           {canCreate && (
             <DialogTrigger asChild>
-              <Button className="shadow-sm">
-                <Plus className="mr-2 size-4" />
+              <Button className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl">
+                <Plus className="size-3.5" />
                 Create Schedule
               </Button>
             </DialogTrigger>
@@ -1584,36 +1587,37 @@ export const Schedule: React.FC = () => {
       </Dialog>
 
       {/* ── Redesigned Work Schedules Card & Table ───────────────────── */}
-      <Card className="shadow-sm border-gray-200">
-        <CardHeader className="border-b border-gray-100 bg-gray-50/50 pb-4">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full gap-0">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle className="text-lg font-bold">Work Schedules</CardTitle>
-                <Badge variant="secondary" className="font-semibold text-xs">
-                  {filteredSchedules?.length || 0} Total
-                </Badge>
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Work Schedules</CardTitle>
+                <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">
+                  {filteredSchedules?.length || 0}
+                </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 Overview of active employee shift schedules and configurations
               </p>
             </div>
 
             {/* Controls: Search & Location Filter */}
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              <div className="relative flex-1 sm:w-64">
+              <div className="relative flex-1 min-w-[200px] sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
                 <Input
                   placeholder="Search employee, location..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-9 text-sm"
+                  className="pl-9 h-9 text-sm rounded-xl bg-white dark:bg-gray-950"
                 />
               </div>
 
               {!isAgent && locations?.length > 0 && (
                 <SearchableSelect
-                  className="w-[160px] h-9 text-sm"
+                  className="w-[170px] h-9 rounded-xl"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="All Locations"
                   searchPlaceholder="Search location..."
                   value={filterLocation}
@@ -1636,7 +1640,7 @@ export const Schedule: React.FC = () => {
               <Button
                 variant="outline"
                 size="icon"
-                className="h-9 w-9 text-gray-500 hover:text-gray-900"
+                className="h-9 w-9 rounded-xl text-gray-500 hover:text-gray-900 bg-white dark:bg-gray-950"
                 onClick={fetchSchedules}
                 title="Refresh Table"
               >
@@ -1646,17 +1650,17 @@ export const Schedule: React.FC = () => {
           </div>
         </CardHeader>
 
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
+            <Table className="min-w-[860px]">
               <TableHeader>
-                <TableRow className="bg-gray-50/70 hover:bg-gray-50/70">
-                  <TableHead className="font-semibold text-gray-700">Employee</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Working Days</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Shift Hours</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Location</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Shift Features</TableHead>
-                  <TableHead className="font-semibold text-gray-700 text-right pr-6">Actions</TableHead>
+                <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 pl-4">Employee</TableHead>
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Working Days</TableHead>
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Shift Hours</TableHead>
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Location</TableHead>
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Shift Features</TableHead>
+                  <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right pr-4">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -1743,21 +1747,21 @@ export const Schedule: React.FC = () => {
                     const breakList = schedule.breakDurations ?? schedule.break_durations;
 
                     return (
-                      <TableRow key={schedule.id} className="hover:bg-gray-50/80 transition-colors">
+                      <TableRow key={schedule.id} className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
                         {/* Employee */}
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-3">
-                            <div className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                        <TableCell className="py-3 pl-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`size-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(empName)}`}>
                               {schedule.employee?.firstName?.[0]?.toUpperCase() || "E"}
                               {schedule.employee?.lastName?.[0]?.toUpperCase() || ""}
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900 leading-none mb-1">
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
                                 {empName}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {schedule.employee?.biometricId ? `ID: #${schedule.employee.biometricId}` : ""}
-                              </p>
+                              </span>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                                {schedule.employee?.employeeId || (schedule.employee?.biometricId ? `Bio #${schedule.employee.biometricId}` : "—")}
+                              </span>
                             </div>
                           </div>
                         </TableCell>
@@ -1768,7 +1772,7 @@ export const Schedule: React.FC = () => {
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 cursor-default shadow-2xs hover:bg-blue-100 transition-colors">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 cursor-default">
                                     {daysCount} {daysCount === 1 ? "Day" : "Days"}
                                   </span>
                                 </TooltipTrigger>
@@ -1784,19 +1788,19 @@ export const Schedule: React.FC = () => {
 
                         {/* Shift Hours */}
                         <TableCell>
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-100/80 text-gray-800 text-xs font-semibold">
-                            <Clock className="size-3.5 text-gray-500" />
+                          <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 tabular-nums">
+                            <Clock className="size-3.5 text-gray-400" />
                             <span>
-                              {schedule.startTime || "--:--"} - {schedule.endTime || "--:--"}
+                              {timeRange12h(schedule.startTime, schedule.endTime, "--:--")}
                             </span>
                           </div>
                         </TableCell>
 
                         {/* Location */}
                         <TableCell>
-                          <div className="flex items-center gap-1.5 text-xs text-gray-700">
-                            <Building2 className="size-3.5 text-gray-400 shrink-0" />
-                            <span className="font-medium">{locationName}</span>
+                          <div className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                            <MapPin className="size-3.5 text-gray-400 shrink-0" />
+                            <span className="truncate">{locationName}</span>
                           </div>
                         </TableCell>
 
@@ -1804,27 +1808,27 @@ export const Schedule: React.FC = () => {
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             {hasEarlyIn && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                                 Early In ({earlyInMins}m)
                               </span>
                             )}
                             {hasEarlyOut && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
                                 Early Out ({earlyOutMins}m)
                               </span>
                             )}
                             {hasOvertime && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
                                 Overtime ({overtimeMins}m)
                               </span>
                             )}
                             {hasHalfDay && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
                                 Half Day{halfDayMins ? ` (${halfDayMins}m)` : ""}
                               </span>
                             )}
                             {hasBreaks && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
                                 Breaks ({Array.isArray(breakList) ? breakList.length : 1})
                               </span>
                             )}
@@ -1839,19 +1843,20 @@ export const Schedule: React.FC = () => {
                         </TableCell>
 
                         {/* Actions Column */}
-                        <TableCell className="text-right pr-6">
-                          <div className="flex items-center justify-end gap-1">
+                        <TableCell className="py-3 pr-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
                             {/* View Action */}
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors rounded-lg"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
                                     onClick={() => handleOpenView(schedule)}
                                   >
-                                    <Eye className="size-4" />
+                                    <Eye className="size-3.5" />
+                                    View
                                   </Button>
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
@@ -1866,12 +1871,13 @@ export const Schedule: React.FC = () => {
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-8 text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors rounded-lg"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                                     onClick={() => handleOpenEdit(schedule)}
                                   >
-                                    <Pencil className="size-4" />
+                                    <Pencil className="size-3.5" />
+                                    Edit
                                   </Button>
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
@@ -1887,12 +1893,12 @@ export const Schedule: React.FC = () => {
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
-                                    variant="ghost"
                                     size="icon"
-                                    className="size-8 text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors rounded-lg"
+                                    variant="outline"
+                                    className="size-8 rounded-lg border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                                     onClick={() => handleOpenDelete(schedule)}
                                   >
-                                    <Trash2 className="size-4" />
+                                    <Trash2 className="size-3.5" />
                                   </Button>
                                 </TooltipTrigger>
                                 <TooltipContent side="top">
@@ -1909,7 +1915,6 @@ export const Schedule: React.FC = () => {
                 )}
               </TableBody>
             </Table>
-          </div>
 
           {/* Pagination Footer */}
           {totalSchedules > 0 && (
@@ -2003,6 +2008,7 @@ export const Schedule: React.FC = () => {
               </div>
             </div>
           )}
+          </div>
         </CardContent>
       </Card>
 
@@ -2038,7 +2044,7 @@ export const Schedule: React.FC = () => {
                   <span className="text-gray-500 font-medium">Shift Hours:</span>
                   <span className="font-bold text-gray-900 flex items-center gap-1">
                     <Clock className="size-3.5 text-primary" />
-                    {viewingSchedule.startTime} - {viewingSchedule.endTime}
+                    {timeRange12h(viewingSchedule.startTime, viewingSchedule.endTime)}
                   </span>
                 </div>
 
@@ -2060,7 +2066,7 @@ export const Schedule: React.FC = () => {
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {Array.isArray(viewingSchedule.days) && viewingSchedule.days.map((dayItem: any, idx: number) => {
                       const dayName = typeof dayItem === "object" && dayItem !== null ? (dayItem.dayFull || dayItem.day || "") : String(dayItem || "");
-                      const timeInfo = typeof dayItem === "object" && dayItem !== null && dayItem.startTime && dayItem.endTime ? `${dayItem.startTime} - ${dayItem.endTime}` : "";
+                      const timeInfo = typeof dayItem === "object" && dayItem !== null && dayItem.startTime && dayItem.endTime ? timeRange12h(dayItem.startTime, dayItem.endTime) : "";
                       return (
                         <Badge key={idx} variant="secondary" className="font-medium bg-white border flex items-center gap-1.5 px-2.5 py-1">
                           <span>{dayName}</span>
@@ -2556,7 +2562,7 @@ export const Schedule: React.FC = () => {
               <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-xs text-red-800 space-y-1">
                 <p className="font-semibold">Schedule to be removed:</p>
                 <p>• Days: {Array.isArray(deletingSchedule.days) ? deletingSchedule.days.map((d: any) => typeof d === 'object' && d !== null ? (d.dayFull || d.day || '') : String(d || '')).filter(Boolean).join(", ") : "-"}</p>
-                <p>• Hours: {deletingSchedule.startTime} - {deletingSchedule.endTime}</p>
+                <p>• Hours: {timeRange12h(deletingSchedule.startTime, deletingSchedule.endTime)}</p>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

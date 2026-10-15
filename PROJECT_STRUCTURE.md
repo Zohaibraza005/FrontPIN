@@ -1,8 +1,8 @@
-# Frontpin Project Structure & Hierarchy Documentation
+# HR Pro Project Structure & Hierarchy Documentation
 
 ## 📌 Executive Summary
 
-**Frontpin (Frontforce SaaS)** is an Enterprise Human Resource Management System (HRMS) and Real-Time Biometric Attendance Platform. It provides end-to-end organizational management including biometric device streaming (Hikvision & ZKTeco), automated shift scheduling, leave and overtime processing, payroll calculation, project tracking, invoicing, and reporting.
+**HR Pro (Frontforce SaaS)** is an Enterprise Human Resource Management System (HRMS) and Real-Time Biometric Attendance Platform. It provides end-to-end organizational management including biometric device streaming (Hikvision & ZKTeco), automated shift scheduling, leave and overtime processing, payroll calculation, project tracking, invoicing, and reporting.
 
 ---
 
@@ -34,7 +34,7 @@
 ## 📁 Directory Hierarchy & Tree
 
 ```
-Frontpin/
+HR Pro/
 ├── PROJECT_STRUCTURE.md          # Project Structure & Architecture Guide (This File)
 ├── README.md                     # Base Project Documentation
 ├── package.json                  # Frontend & Root Dependencies

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { dashboardAPI, locationAPI, departmentAPI } from "../services/api";
 import { SearchableSelect } from "../components/ui/SearchableSelect";
+import { avatarColor } from "../utils/avatar";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   Card,
@@ -323,161 +324,154 @@ export const StatsDetails: React.FC = () => {
   const CategoryIcon = theme.icon;
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-      {/* ── Top Header & Action Controls (All in One Row) ── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-200/80 shadow-xs">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigate("/")}
-            className="size-10 rounded-xl hover:bg-gray-100 shrink-0 border-gray-200"
-          >
-            <ArrowLeft className="h-5 w-5 text-gray-700" />
-          </Button>
-
-          <div className="flex items-center gap-3">
-            <div className={`size-11 rounded-xl flex items-center justify-center border shrink-0 ${theme.bg}`}>
-              <CategoryIcon className="size-6" />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 whitespace-nowrap">{getTitle(category)}</h1>
-              <p className="text-xs text-gray-500 font-medium mt-0.5 line-clamp-1">{theme.sub}</p>
-            </div>
-          </div>
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
+      {/* ── Page header ── */}
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => navigate("/")}
+          className="size-9 rounded-xl shrink-0 border-gray-200 dark:border-gray-800"
+          title="Back to dashboard"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className={`size-10 rounded-full flex items-center justify-center shrink-0 ${theme.bg}`}>
+          <CategoryIcon className="size-4.5" />
         </div>
-
-        {/* Right Controls: Date Navigation, Date Picker, Department, Location, Refresh (Styled same as Attendance Management) */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Date Navigation */}
-          <div className="flex items-center gap-0.5 bg-white p-0.5 rounded-xl border border-gray-200 shadow-2xs shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-600 hover:text-gray-900 rounded-lg"
-              onClick={handlePrevDay}
-              title="Previous Day"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
-              onClick={handleNextDay}
-              disabled={isNextDisabled}
-              title="Next Day"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-
-          {/* Date Picker Box */}
-          <div className="inline-flex items-center gap-2 bg-white border border-gray-200 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
-            <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-            <input
-              type="date"
-              value={selectedDate}
-              max={todayStr}
-              onChange={(e) => handleDateChange(e.target.value)}
-              className="bg-transparent border-none outline-none font-semibold text-gray-900 cursor-pointer text-xs"
-            />
-            {selectedDate !== todayStr && (
-              <button
-                type="button"
-                onClick={() => handleDateChange(todayStr)}
-                className="text-[11px] font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
-              >
-                Today
-              </button>
-            )}
-          </div>
-
-          {/* Department SearchableSelect */}
-          <SearchableSelect
-            className="w-32 sm:w-36 shrink-0 h-9 rounded-xl border-gray-200 bg-white text-xs font-semibold shadow-2xs"
-            icon={<Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-            placeholder="Department"
-            searchPlaceholder="Search department..."
-            value={selectedDepartment}
-            onValueChange={handleDepartmentChange}
-            options={[
-              { value: "all", label: "All Departments" },
-              ...departments.map((d) => ({
-                value: String(d.id),
-                label: d.title || d.name,
-              })),
-            ]}
-          />
-
-          {/* Location SearchableSelect */}
-          <SearchableSelect
-            className="w-32 sm:w-36 shrink-0 h-9 rounded-xl border-gray-200 bg-white text-xs font-semibold shadow-2xs"
-            icon={<MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-            placeholder="Location"
-            searchPlaceholder="Search location..."
-            value={selectedLocation.toLowerCase() === "all" ? "all" : selectedLocation}
-            onValueChange={handleLocationChange}
-            options={[
-              { value: "all", label: "All Locations" },
-              ...locations.map((loc) => ({
-                value: String(loc.id),
-                label: loc.name || loc.companyName || `Location #${loc.id}`,
-              })),
-            ]}
-          />
-
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fetchData(false)}
-            disabled={refreshing}
-            className="h-9 px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border-gray-200 hover:bg-gray-50 bg-white text-gray-700 shadow-2xs"
-          >
-            <RefreshCw className={`size-3.5 text-gray-600 ${refreshing ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </Button>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">{getTitle(category)}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1">{theme.sub}</p>
         </div>
       </div>
 
-      {/* ── Main Data Card with Search & Table ── */}
-      <Card className="border border-gray-200/80 shadow-xs rounded-2xl overflow-hidden bg-white">
-        <CardHeader className="border-b border-gray-100 bg-gray-50/50 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <CardTitle className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <span>{getTitle(category)} List</span>
-              <Badge variant="outline" className="bg-white border-gray-200 text-gray-700 text-xs">
-                {filteredData.length} Records
-              </Badge>
-            </CardTitle>
-          </div>
-
-          {/* Real-Time Search Bar */}
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-2.5 size-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Search by name, email, dept..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 text-xs rounded-xl bg-white border-gray-200 focus:ring-1 focus:ring-indigo-500"
+      {/* ── Main Data Card with filters, search & table ── */}
+      <Card className="gap-0 shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800 space-y-3">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          {/* Filters: date, department, location, refresh */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            {/* Date Navigation */}
+            <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-gray-600 hover:text-gray-900 rounded-lg"
+                onClick={handlePrevDay}
+                title="Previous Day"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
+                onClick={handleNextDay}
+                disabled={isNextDisabled}
+                title="Next Day"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+  
+            {/* Date Picker Box */}
+            <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
+              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
+              <input
+                type="date"
+                value={selectedDate}
+                max={todayStr}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="bg-transparent border-none outline-none font-semibold text-gray-900 dark:text-gray-100 cursor-pointer text-sm"
+              />
+              {selectedDate !== todayStr && (
+                <button
+                  type="button"
+                  onClick={() => handleDateChange(todayStr)}
+                  className="text-[11px] font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
+                >
+                  Today
+                </button>
+              )}
+            </div>
+  
+            {/* Department SearchableSelect */}
+            <SearchableSelect
+              className="w-40 shrink-0 h-9 rounded-xl"
+              icon={<Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+              placeholder="Department"
+              searchPlaceholder="Search department..."
+              value={selectedDepartment}
+              onValueChange={handleDepartmentChange}
+              options={[
+                { value: "all", label: "All Departments" },
+                ...departments.map((d) => ({
+                  value: String(d.id),
+                  label: d.title || d.name,
+                })),
+              ]}
             />
+  
+            {/* Location SearchableSelect */}
+            <SearchableSelect
+              className="w-40 shrink-0 h-9 rounded-xl"
+              icon={<MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+              placeholder="Location"
+              searchPlaceholder="Search location..."
+              value={selectedLocation.toLowerCase() === "all" ? "all" : selectedLocation}
+              onValueChange={handleLocationChange}
+              options={[
+                { value: "all", label: "All Locations" },
+                ...locations.map((loc) => ({
+                  value: String(loc.id),
+                  label: loc.name || loc.companyName || `Location #${loc.id}`,
+                })),
+              ]}
+            />
+  
+            {/* Refresh Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchData(false)}
+              disabled={refreshing}
+              className="h-9 px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-700 dark:text-gray-300 shadow-2xs"
+            >
+              <RefreshCw className={`size-3.5 text-gray-600 ${refreshing ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+            {/* Real-Time Search Bar */}
+            <div className="relative w-full xl:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search by name, email, dept..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-sm rounded-xl bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">{getTitle(category)} List</CardTitle>
+            <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">
+              {filteredData.length}
+            </span>
           </div>
         </CardHeader>
 
-        <CardContent className="p-0">
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
           {loading ? (
             <div className="py-16 text-center">
-              <div className="size-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm font-semibold text-gray-600">Loading details...</p>
+              <RefreshCw className="size-6 animate-spin text-blue-600 mx-auto mb-3" />
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading details...</p>
             </div>
           ) : filteredData.length === 0 ? (
             <div className="py-16 text-center px-4">
-              <div className="size-12 rounded-2xl bg-gray-100 text-gray-400 flex items-center justify-center mx-auto mb-3">
-                <CategoryIcon className="size-6" />
-              </div>
-              <h3 className="text-base font-bold text-gray-800">No Records Found</h3>
+              <CategoryIcon className="size-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">No records found</h3>
               <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
                 No records matched your selected date ({selectedDate}), location filter, or search term.
               </p>
@@ -485,25 +479,25 @@ export const StatsDetails: React.FC = () => {
           ) : (
             <ScrollArea className="h-[520px]">
               <Table>
-                <TableHeader className="bg-gray-50/80 sticky top-0 z-10 shadow-2xs">
-                  <TableRow>
-                    <TableHead className="font-bold text-gray-700 text-xs pl-6">Employee / Name</TableHead>
-                    <TableHead className="font-bold text-gray-700 text-xs">Department</TableHead>
-                    <TableHead className="font-bold text-gray-700 text-xs">Status</TableHead>
+                <TableHeader className="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
+                  <TableRow className="hover:bg-gray-50">
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 pl-4">Employee</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Department</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</TableHead>
                     {isTaskCategory && (
                       <>
-                        <TableHead className="font-bold text-gray-700 text-xs">Priority</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-xs">Deadline</TableHead>
+                        <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Priority</TableHead>
+                        <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Deadline</TableHead>
                       </>
                     )}
                     {isProjectCategory && (
-                      <TableHead className="font-bold text-gray-700 text-xs">Progress</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Progress</TableHead>
                     )}
                     {isAttendanceCategory && (
                       <>
-                        <TableHead className="font-bold text-gray-700 text-xs">Clock In</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-xs">Clock Out</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-xs text-right pr-6">Action</TableHead>
+                        <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Clock In</TableHead>
+                        <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Clock Out</TableHead>
+                        <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right pr-4">Action</TableHead>
                       </>
                     )}
                   </TableRow>
@@ -517,38 +511,36 @@ export const StatsDetails: React.FC = () => {
                       <TableRow
                         key={item.id || idx}
                         onClick={() => isAttendanceCategory && handleViewClick(item)}
-                        className="hover:bg-gray-50/80 transition-colors cursor-pointer"
+                        className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors cursor-pointer"
                       >
                         {/* Employee / Name Cell */}
-                        <TableCell className="pl-6 py-3.5">
+                        <TableCell className="pl-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="size-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                            <div className={`size-9 rounded-full font-semibold text-xs flex items-center justify-center shrink-0 ${avatarColor(item.name || item.title || "")}`}>
                               {item.name
                                 ? item.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
                                 : "U"}
                             </div>
                             <div>
-                              <p className="font-bold text-sm text-gray-900 leading-snug">
+                              <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 leading-snug">
                                 {item.name || item.title || "N/A"}
                               </p>
-                              <p className="text-xs text-gray-500 font-medium">{item.email || "No email"}</p>
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400">{item.email || "No email"}</p>
                             </div>
                           </div>
                         </TableCell>
 
                         {/* Department Cell */}
-                        <TableCell className="py-3.5">
-                          <Badge variant="outline" className="bg-gray-50 border-gray-200 text-gray-700 text-[11px] font-semibold">
-                            {item.department || "N/A"}
-                          </Badge>
+                        <TableCell className="py-3">
+                          <span className="text-sm text-gray-700 dark:text-gray-300">{item.department || "—"}</span>
                         </TableCell>
 
                         {/* Status Cell */}
-                        <TableCell className="py-3.5">
+                        <TableCell className="py-3">
                           {(() => {
                             if (st === "present" || st === "working") {
                               return (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
                                   <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                                   Present
                                 </span>
@@ -556,28 +548,31 @@ export const StatsDetails: React.FC = () => {
                             }
                             if (st === "late" || isLateItem) {
                               return (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <AlertTriangle className="size-3 text-amber-600" />
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800">
+                                  <span className="size-1.5 rounded-full bg-amber-500" />
                                   {item.late || "Late"}
                                 </span>
                               );
                             }
                             if (st === "break") {
                               return (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-800">
+                                  <span className="size-1.5 rounded-full bg-orange-500" />
                                   Break
                                 </span>
                               );
                             }
                             if (st === "on_leave" || st === "on leave" || st === "leave") {
                               return (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800">
+                                  <span className="size-1.5 rounded-full bg-sky-500" />
                                   On Leave
                                 </span>
                               );
                             }
                             return (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800">
+                                <span className="size-1.5 rounded-full bg-rose-500" />
                                 Absent
                               </span>
                             );
@@ -602,27 +597,27 @@ export const StatsDetails: React.FC = () => {
                           <>
                             <TableCell className="py-3.5 font-mono text-xs font-semibold text-gray-800">
                               <div className="flex items-center gap-1.5">
-                                <LogIn className="size-3.5 text-emerald-600 shrink-0" />
+                                <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
                                 <span>{item.clockIn || "—"}</span>
                               </div>
                             </TableCell>
 
                             <TableCell className="py-3.5 font-mono text-xs font-semibold text-gray-800">
                               <div className="flex items-center gap-1.5">
-                                <LogOut className="size-3.5 text-rose-600 shrink-0" />
+                                <span className="size-1.5 rounded-full bg-blue-500 shrink-0" />
                                 <span>{item.clockOut || "—"}</span>
                               </div>
                             </TableCell>
 
-                            <TableCell className="py-3.5 pr-6 text-right">
+                            <TableCell className="py-3 pr-4 text-right">
                               <Button
-                                variant="ghost"
+                                variant="outline"
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleViewClick(item);
                                 }}
-                                className="h-8 px-2.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg flex items-center gap-1 ml-auto"
+                                className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center ml-auto"
                               >
                                 <Eye className="size-3.5" />
                                 <span>Timeline</span>
@@ -637,25 +632,26 @@ export const StatsDetails: React.FC = () => {
               </Table>
             </ScrollArea>
           )}
+          </div>
         </CardContent>
       </Card>
 
       {/* ── Employee Activity Timeline Dialog (Centered Modal) ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-xl md:max-w-2xl w-[95vw] max-h-[88vh] overflow-hidden p-0 rounded-2xl bg-white border border-gray-100 shadow-2xl flex flex-col">
+        <DialogContent className="sm:max-w-xl md:max-w-2xl w-[95vw] max-h-[88vh] overflow-hidden p-0 gap-0 rounded-2xl bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 shadow-2xl flex flex-col">
           {selectedEmployee && (
             <div className="flex flex-col h-full max-h-[88vh]">
               {/* Dialog Header Banner */}
-              <div className="bg-gradient-to-b from-gray-50/90 to-white border-b border-gray-100 p-5 sm:p-6 pr-12">
+              <div className="border-b border-gray-100 dark:border-gray-800 px-6 pt-6 pb-5 pr-12">
                 <div className="flex items-center gap-4">
-                  <div className="size-13 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-base sm:text-lg flex items-center justify-center shadow-md shadow-indigo-100 shrink-0">
+                  <div className={`size-12 rounded-full font-semibold text-base flex items-center justify-center shrink-0 ${avatarColor(selectedEmployee.name || "")}`}>
                     {selectedEmployee.name
                       ? selectedEmployee.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
                       : "U"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
-                      <DialogTitle className="text-lg sm:text-xl font-bold text-gray-900 truncate">
+                      <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
                         {selectedEmployee.name || "Employee Details"}
                       </DialogTitle>
                       {(() => {
@@ -721,40 +717,40 @@ export const StatsDetails: React.FC = () => {
                 {/* 3 Metric Cards */}
                 <div className="grid grid-cols-3 gap-3 mt-5">
                   {/* Clock In */}
-                  <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2.5 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">Clock In</span>
+                      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Clock in</span>
                       <div className="size-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
                         <LogIn className="size-3.5" />
                       </div>
                     </div>
-                    <p className="text-xs sm:text-sm font-bold font-mono text-gray-900 truncate">
+                    <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100 truncate">
                       {selectedEmployee.clockIn || "—"}
                     </p>
                   </div>
 
                   {/* Clock Out */}
-                  <div className="bg-rose-50/70 border border-rose-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2.5 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">Clock Out</span>
+                      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Clock out</span>
                       <div className="size-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
                         <LogOut className="size-3.5" />
                       </div>
                     </div>
-                    <p className="text-xs sm:text-sm font-bold font-mono text-gray-900 truncate">
+                    <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100 truncate">
                       {selectedEmployee.clockOut || "—"}
                     </p>
                   </div>
 
                   {/* Status */}
-                  <div className="bg-blue-50/70 border border-blue-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl px-3 py-2.5 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">Status</span>
+                      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Status</span>
                       <div className="size-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
                         <UserCheck className="size-3.5" />
                       </div>
                     </div>
-                    <p className="text-xs sm:text-sm font-bold text-gray-900 capitalize truncate">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize truncate">
                       {selectedEmployee.status || "—"}
                     </p>
                   </div>
@@ -762,13 +758,13 @@ export const StatsDetails: React.FC = () => {
               </div>
 
               {/* Activity Timeline Scrollable Section */}
-              <div className="p-5 sm:p-6 overflow-y-auto flex-1 bg-white">
+              <div className="px-6 py-5 overflow-y-auto flex-1 bg-white dark:bg-gray-950">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <div className="size-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                       <Clock className="size-4" />
                     </div>
-                    <h3 className="text-sm sm:text-base font-bold text-gray-900">Activity Timeline</h3>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Activity timeline</h3>
                   </div>
                   <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 text-xs font-semibold px-2.5 py-0.5">
                     {selectedEmployee.activities?.length || 0} Entries
@@ -776,7 +772,7 @@ export const StatsDetails: React.FC = () => {
                 </div>
 
                 {selectedEmployee.activities?.length > 0 ? (
-                  <div className="relative pl-6 border-l-2 border-indigo-100 space-y-4">
+                  <div className="relative pl-6 border-l-2 border-gray-200 dark:border-gray-800 space-y-3">
                     {selectedEmployee.activities.map((act: any, idx: number) => {
                       const isTask = act.type === "task";
                       const startTimeFormatted = formatTime(act.startTime);
@@ -792,7 +788,7 @@ export const StatsDetails: React.FC = () => {
                           />
 
                           {/* Card Content */}
-                          <div className="bg-gray-50/50 hover:bg-white border border-gray-200/80 hover:border-indigo-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs transition-all">
+                          <div className="bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 hover:border-blue-200 rounded-xl p-3.5 transition-colors">
                             <div className="flex items-center justify-between gap-2 mb-1.5">
                               <div className="flex items-center gap-2">
                                 <div
@@ -807,7 +803,7 @@ export const StatsDetails: React.FC = () => {
                                 </span>
                               </div>
 
-                              <span className="text-xs font-semibold font-mono text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
+                              <span className="text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 px-2 py-0.5 rounded-md">
                                 {startTimeFormatted} {endTimeFormatted && `→ ${endTimeFormatted}`}
                               </span>
                             </div>
@@ -839,7 +835,7 @@ export const StatsDetails: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-10 px-4 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200 my-2">
+                  <div className="text-center py-10 px-4 rounded-xl border border-dashed border-gray-200 dark:border-gray-800 my-2">
                     <div className="size-12 rounded-2xl bg-gray-100 text-gray-400 flex items-center justify-center mx-auto mb-2.5">
                       <Clock className="size-6" />
                     </div>

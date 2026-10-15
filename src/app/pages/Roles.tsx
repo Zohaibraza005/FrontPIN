@@ -13,6 +13,7 @@ import {
   Lock, Sparkles, AlertTriangle, Eye, Check, X, Clock, Calendar, 
   CalendarDays, Timer, DollarSign, Cog, BarChart3, MapPin 
 } from "lucide-react";
+import { avatarColor } from "../utils/avatar";
 import { toast } from "sonner";
 import { roleAPI } from "../services/api";
 
@@ -323,71 +324,63 @@ export const Roles: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
       {/* Header Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-gray-200/80 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Role Management</h1>
-            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold px-2.5 py-0.5">
-              {roles.length} Roles
-            </Badge>
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Role Management</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Define system roles and configure module-level CRUD permissions before assigning them to employees.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <Button
             variant="outline"
             size="sm"
             onClick={fetchRoles}
             disabled={loading}
-            className="rounded-xl h-10 border-gray-300 hover:bg-gray-50 text-gray-700"
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 rounded-xl border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-gray-500 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
           <Button
             onClick={openAddDialog}
-            className="rounded-xl h-10 bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-medium px-4"
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl"
           >
-            <Plus className="w-4 h-4 mr-2" />
+            <Plus className="w-3.5 h-3.5" />
             Create Role
           </Button>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <Card className="border-gray-200/80 shadow-xs rounded-2xl">
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:w-80">
+      {/* Roles Table */}
+      <Card className="gap-0 shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Configured System Roles</CardTitle>
+                <span className="px-1.5 py-0.5 rounded-md bg-gray-200/70 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-[10px] font-bold tabular-nums">
+                  {filteredRoles.length === roles.length ? roles.length : `${filteredRoles.length}/${roles.length}`}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Roles and the module permissions they grant</p>
+            </div>
+            <div className="relative w-full md:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
                 placeholder="Search roles by name or description..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-10 rounded-xl bg-gray-50/50 border-gray-200 text-sm focus:bg-white"
+                className="pl-9 h-9 rounded-xl bg-white dark:bg-gray-950 text-sm"
               />
             </div>
-            <div className="text-xs text-gray-500">
-              Showing {filteredRoles.length} of {roles.length} roles
-            </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Roles Table */}
-      <Card className="border-gray-200/80 shadow-xs rounded-2xl overflow-hidden">
-        <CardHeader className="py-4 px-6 border-b border-gray-100 bg-gray-50/30">
-          <CardTitle className="text-base font-semibold text-gray-800 flex items-center gap-2">
-            <Shield className="w-4.5 h-4.5 text-blue-600" />
-            Configured System Roles
-          </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
           {loading ? (
             <div className="p-12 text-center text-gray-500">
               <RefreshCw className="w-8 h-8 mx-auto animate-spin mb-3 text-blue-600" />
@@ -403,7 +396,7 @@ export const Roles: React.FC = () => {
                 {searchQuery ? "No roles matched your search criteria." : "Get started by creating your first system role with customizable permissions."}
               </p>
               {!searchQuery && (
-                <Button onClick={openAddDialog} className="mt-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white">
+                <Button onClick={openAddDialog} className="mt-4 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
                   <Plus className="w-4 h-4 mr-2" />
                   Create First Role
                 </Button>
@@ -411,40 +404,40 @@ export const Roles: React.FC = () => {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-gray-50/70 border-b border-gray-200">
-                  <TableRow>
-                    <TableHead className="w-64 font-semibold text-gray-700">Role Name</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Description</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Permissions Enabled</TableHead>
-                    <TableHead className="text-center font-semibold text-gray-700">Assigned Employees</TableHead>
-                    <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                    <TableHead className="w-64 h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 pl-4">Role Name</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Description</TableHead>
+                    <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Permissions Enabled</TableHead>
+                    <TableHead className="text-center h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Employees</TableHead>
+                    <TableHead className="text-right h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 pr-4">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody className="divide-y divide-gray-100">
+                <TableBody>
                   {filteredRoles.map((role) => {
                     const activeModules = getModuleSummary(role);
                     const employeeCount = role._count?.employees || 0;
 
                     return (
-                      <TableRow key={role.id} className="hover:bg-blue-50/20 transition-colors">
-                        <TableCell className="font-semibold text-gray-900 py-4">
+                      <TableRow key={role.id} className="hover:bg-blue-50/40 dark:hover:bg-gray-900/40 transition-colors">
+                        <TableCell className="py-3 pl-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-semibold text-xs shrink-0 ${avatarColor(role.name)}`}>
                               {role.name.slice(0, 2).toUpperCase()}
                             </div>
                             <div>
-                              <div className="text-sm font-bold text-gray-900">{role.name}</div>
-                              <span className="text-[11px] text-gray-400 font-normal">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{role.name}</div>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400">
                                 Created {new Date(role.createdAt).toLocaleDateString()}
                               </span>
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-gray-600 py-4 max-w-xs truncate">
+                        <TableCell className="text-sm text-gray-600 dark:text-gray-400 py-3 max-w-xs truncate">
                           {role.description || <span className="text-gray-400 italic">No description</span>}
                         </TableCell>
-                        <TableCell className="py-4">
+                        <TableCell className="py-3">
                           <div className="flex flex-wrap items-center gap-1.5 max-w-md">
                             {activeModules.length === 0 ? (
                               <span className="text-xs text-gray-400 italic">No permissions granted</span>
@@ -454,7 +447,7 @@ export const Roles: React.FC = () => {
                                   <Badge
                                     key={p.module}
                                     variant="secondary"
-                                    className="bg-blue-50 text-blue-700 border-blue-200 text-[11px] font-medium px-2 py-0.5 rounded-lg"
+                                    className="bg-blue-50 text-blue-700 border-0 dark:bg-blue-950/50 dark:text-blue-300 text-[11px] font-semibold px-2 py-0.5 rounded-md"
                                   >
                                     {p.module}
                                   </Badge>
@@ -462,7 +455,7 @@ export const Roles: React.FC = () => {
                                 {activeModules.length > 4 && (
                                   <Badge
                                     variant="outline"
-                                    className="bg-gray-50 text-gray-600 border-gray-200 text-[11px] px-1.5 py-0.5 rounded-lg"
+                                    className="bg-gray-100 text-gray-600 border-0 dark:bg-gray-800 dark:text-gray-300 text-[11px] font-semibold px-1.5 py-0.5 rounded-md"
                                   >
                                     +{activeModules.length - 4} more
                                   </Badge>
@@ -471,22 +464,23 @@ export const Roles: React.FC = () => {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-center py-4">
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-semibold">
+                        <TableCell className="text-center py-3">
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold tabular-nums">
                             <Users className="w-3.5 h-3.5 text-gray-500" />
                             <span>{employeeCount}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right py-4">
+                        <TableCell className="text-right py-3 pr-4">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
                               onClick={() => openEditDialog(role)}
-                              className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50 rounded-lg"
+                              className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
                               title="Edit Role"
                             >
-                              <Edit className="w-4 h-4" />
+                              <Edit className="w-3.5 h-3.5" />
+                              Edit
                             </Button>
                             <Button
                               variant="ghost"
@@ -495,10 +489,10 @@ export const Roles: React.FC = () => {
                                 setRoleToDelete(role);
                                 setDeleteDialogOpen(true);
                               }}
-                              className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
+                              className="size-8 p-0 rounded-lg border border-red-200 text-red-600 hover:text-red-700 hover:bg-red-50 dark:border-red-900"
                               title="Delete Role"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -509,22 +503,23 @@ export const Roles: React.FC = () => {
               </Table>
             </div>
           )}
+          </div>
         </CardContent>
       </Card>
 
       {/* Create / Edit Role Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-4xl lg:max-w-5xl w-full p-0 overflow-hidden rounded-2xl border border-gray-200 shadow-2xl bg-white flex flex-col max-h-[92vh]">
-          <DialogHeader className="p-6 pb-4 border-b border-gray-100 bg-gray-50/50 flex flex-row items-center justify-between shrink-0">
+        <DialogContent className="sm:max-w-4xl lg:max-w-5xl w-full p-0 gap-0 overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800 shadow-2xl bg-white dark:bg-gray-950 flex flex-col max-h-[92vh]">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 flex flex-row items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                <Shield className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 flex items-center justify-center">
+                <Shield className="w-4 h-4" />
               </div>
               <div className="text-left">
-                <DialogTitle className="text-lg font-bold text-gray-900">
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">
                   {editingRole ? `Edit Role: ${editingRole.name}` : "Create New Role"}
                 </DialogTitle>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   Define role identity and configure modular CRUD permissions for employees.
                 </p>
               </div>
@@ -534,10 +529,10 @@ export const Roles: React.FC = () => {
           <form onSubmit={handleSaveRole} className="flex flex-col flex-1 min-h-0">
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
               {/* Role Details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50/50 p-4 rounded-2xl border border-gray-200/80">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Role Name <span className="text-red-500">*</span>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Role name <span className="text-red-500">*</span>
                   </Label>
                   <div className="relative">
                     <Shield className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -545,35 +540,35 @@ export const Roles: React.FC = () => {
                       placeholder="e.g. Operations Manager, Accountant, Team Lead"
                       value={roleName}
                       onChange={(e) => setRoleName(e.target.value)}
-                      className="h-11 pl-10 bg-white rounded-xl border-gray-300 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 shadow-2xs"
+                      className="h-10 pl-10 bg-white dark:bg-gray-950 rounded-lg text-sm"
                       required
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Description (Optional)
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Description (optional)
                   </Label>
                   <Input
                     placeholder="e.g. Full attendance oversight and team management"
                     value={roleDescription}
                     onChange={(e) => setRoleDescription(e.target.value)}
-                    className="h-11 px-3.5 bg-white rounded-xl border-gray-300 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 shadow-2xs"
+                    className="h-10 px-3 bg-white dark:bg-gray-950 rounded-lg text-sm"
                   />
                 </div>
               </div>
 
               {/* Permissions Matrix */}
-              <div className="bg-white rounded-2xl border border-gray-200/90 shadow-2xs overflow-hidden">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gray-50/70 border-b border-gray-200">
+              <div className="bg-white dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-300 flex items-center justify-center">
                       <Lock className="w-4 h-4" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-gray-900">Module Permissions & CRUD Access</h4>
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Module permissions</h4>
                         <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-semibold px-2 py-0.5">
                           {countActivePrivileges()} active
                         </Badge>
@@ -621,7 +616,7 @@ export const Roles: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-gray-100/70 text-gray-700 text-xs font-bold uppercase tracking-wider border-b border-gray-200">
+                      <tr className="bg-gray-50/80 dark:bg-gray-900/60 text-gray-500 dark:text-gray-400 text-[11px] font-semibold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
                         <th className="py-3 px-4 min-w-[240px]">Module Name</th>
                         <th
                           onClick={() => toggleColumn("create")}
@@ -655,7 +650,7 @@ export const Roles: React.FC = () => {
                         <th className="py-3 px-3 text-center w-20">Row</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100 text-sm">
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
                       {privilegesList.map((mod, index) => {
                         const IconComponent = moduleConfig[mod.id]?.icon || Shield;
                         const isAllRowSelected =
@@ -668,7 +663,7 @@ export const Roles: React.FC = () => {
                           <tr
                             key={mod.id}
                             className={`hover:bg-blue-50/30 transition-colors ${
-                              index % 2 === 0 ? "bg-white" : "bg-gray-50/40"
+                              index % 2 === 0 ? "bg-white dark:bg-gray-950" : "bg-gray-50/40 dark:bg-gray-900/40"
                             }`}
                           >
                             <td className="py-3 px-4">
@@ -808,7 +803,7 @@ export const Roles: React.FC = () => {
               </div>
             </div>
 
-            <DialogFooter className="p-4 px-6 border-t border-gray-200 bg-gray-50/60 flex flex-row items-center justify-between gap-3 shrink-0">
+            <DialogFooter className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex flex-row items-center justify-between gap-3 shrink-0">
               <div className="text-xs text-gray-500 hidden sm:flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-blue-600" />
                 <span>Permissions apply immediately to all employees assigned to this role.</span>
@@ -818,14 +813,14 @@ export const Roles: React.FC = () => {
                   type="button"
                   variant="outline"
                   onClick={() => setDialogOpen(false)}
-                  className="rounded-xl h-11 px-5 border-gray-300 text-gray-700 hover:bg-gray-100 font-medium"
+                  className="rounded-lg h-10 px-4"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={saving}
-                  className="rounded-xl h-11 bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 shadow-xs"
+                  className="rounded-lg h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                 >
                   {saving ? (
                     <>
@@ -846,13 +841,13 @@ export const Roles: React.FC = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <div className="w-11 h-11 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mb-2">
-              <AlertTriangle className="w-6 h-6" />
+        <DialogContent className="w-[92vw] sm:max-w-[420px] rounded-2xl p-6 shadow-2xl">
+          <DialogHeader className="text-left">
+            <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-400 flex items-center justify-center mb-1">
+              <AlertTriangle className="w-4 h-4" />
             </div>
-            <DialogTitle className="text-base font-bold text-gray-900">Delete Role</DialogTitle>
-            <p className="text-xs text-gray-500 mt-1">
+            <DialogTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Delete role</DialogTitle>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Are you sure you want to delete <span className="font-semibold text-gray-800">"{roleToDelete?.name}"</span>?
             </p>
           </DialogHeader>
@@ -867,7 +862,7 @@ export const Roles: React.FC = () => {
             <Button
               variant="outline"
               onClick={() => setDeleteDialogOpen(false)}
-              className="rounded-xl h-10 border-gray-300"
+              className="rounded-lg h-10"
             >
               Cancel
             </Button>
@@ -875,7 +870,7 @@ export const Roles: React.FC = () => {
               variant="destructive"
               onClick={handleDeleteRole}
               disabled={saving}
-              className="rounded-xl h-10 bg-red-600 hover:bg-red-700 text-white font-medium"
+              className="rounded-lg h-10 px-5 bg-red-600 hover:bg-red-700 text-white font-semibold"
             >
               {saving ? "Deleting..." : "Confirm Delete"}
             </Button>
