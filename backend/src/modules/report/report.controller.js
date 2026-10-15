@@ -6,25 +6,31 @@ function parseOptionalInt(value) {
     if (!value || value === "all" || value === "undefined") return undefined;
     return Number(value);
   }
+// Ranges are built in Pakistan time (+05:00) so they match how attendance dates are stored,
+// regardless of the server's own timezone (the live server runs on UTC).
+const PK_OFFSET = "+05:00";
+const pkNow = () => moment().utcOffset(PK_OFFSET);
+const pkDay = (ymd) => moment.utc(ymd, "YYYY-MM-DD").utcOffset(PK_OFFSET, true);
+
 function getDateRange(filter, startDate, endDate) {
   let start, end;
 
   switch (filter) {
     case "thisWeek":
-      start = moment().startOf("isoWeek");
-      end = moment().endOf("isoWeek");
+      start = pkNow().startOf("isoWeek");
+      end = pkNow().endOf("isoWeek");
       break;
     case "thisMonth":
-      start = moment().startOf("month");
-      end = moment().endOf("month");
+      start = pkNow().startOf("month");
+      end = pkNow().endOf("month");
       break;
     case "thisYear":
-      start = moment().startOf("year");
-      end = moment().endOf("year");
+      start = pkNow().startOf("year");
+      end = pkNow().endOf("year");
       break;
     case "custom":
-      start = moment(startDate).startOf("day");
-      end = moment(endDate).endOf("day");
+      start = pkDay(startDate).startOf("day");
+      end = pkDay(endDate).endOf("day");
       break;
     default:
       start = moment("2000-01-01");
