@@ -42,6 +42,9 @@ import {
   Plus,
   ArrowLeft,
   Lock,
+  CreditCard,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_URL, payrollAPI } from '../services/api';
@@ -481,6 +484,19 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
             </View>
           </View>
 
+          {payroll?.status === "PAID" && (
+            <View style={{ marginTop: 6, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: '#F0FDF4', borderRadius: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 7, color: '#166534', fontFamily: 'Helvetica-Bold' }}>
+                PAYMENT STATUS: PAID
+              </Text>
+              <Text style={{ fontSize: 7, color: '#166534', fontFamily: 'Helvetica' }}>
+                Method: {payroll?.paymentMethod ? String(payroll.paymentMethod).replace(/_/g, " ") : "Direct"}
+                {payroll?.transactionRef ? ` | Ref: ${payroll.transactionRef}` : ""}
+                {payroll?.paidAt ? ` | Date: ${moment(payroll.paidAt).format("DD MMM YYYY")}` : ""}
+              </Text>
+            </View>
+          )}
+
           <View style={pdfStyles.websiteBanner}>
             <Text style={pdfStyles.websiteBannerText}>www.unisoftwares.com</Text>
           </View>
@@ -501,6 +517,33 @@ export const PayrollDetail = () => {
   const [title, setTitle] = useState(EARNINGS_TITLES[0]);
   const [customTitle, setCustomTitle] = useState('');
   const [amount, setAmount] = useState('');
+
+  // Payment Details Modal States
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payMethod, setPayMethod] = useState('BANK_TRANSFER');
+  const [txnRef, setTxnRef] = useState('');
+  const [payDate, setPayDate] = useState(moment().format('YYYY-MM-DD'));
+  const [paying, setPaying] = useState(false);
+
+  const handleConfirmPay = async () => {
+    if (!payroll) return;
+    try {
+      setPaying(true);
+      await payrollAPI.updateStatus(payroll.id, {
+        status: "PAID",
+        paymentMethod: payMethod,
+        transactionRef: txnRef.trim() || undefined,
+        paidAt: payDate || new Date(),
+      });
+      toast.success("Payroll marked as PAID with payment details");
+      setPayModalOpen(false);
+      loadPayroll();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update payment");
+    } finally {
+      setPaying(false);
+    }
+  };
 
   const handleTypeChange = (newType: 'INCREMENT' | 'DEDUCTION') => {
     setAdjustType(newType);
@@ -629,34 +672,41 @@ export const PayrollDetail = () => {
           </div>
           
           <div className="flex gap-3">
-            <Button
-              variant="outline"
-              disabled={loading || payroll.locked}
-              title={payroll.locked ? "Payroll is locked and status cannot be changed" : undefined}
-              className="disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={async () => {
-                try {
-                  const newStatus =
-                    payroll.status === "PAID" ? "GENERATED" : "PAID";
-
-                  await payrollAPI.updateStatus(payroll.id, {
-                    status: newStatus,
-                  });
-
-                  toast.success(
-                    newStatus === "PAID"
-                      ? "Payroll marked as Paid"
-                      : "Payroll reverted to Draft"
-                  );
-
-                  loadPayroll();
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.message || err?.message || "Failed to update status");
-                }
-              }}
-            >
-              {payroll.status === "PAID" ? "Mark as Draft" : "Mark as Paid"}
-            </Button>
+            {payroll.status === "PAID" ? (
+              <Button
+                variant="outline"
+                disabled={loading || payroll.locked}
+                className="text-amber-700 border-amber-300 hover:bg-amber-50 font-semibold"
+                onClick={async () => {
+                  if (!window.confirm("Are you sure you want to revert this paid payroll back to Generated?")) return;
+                  try {
+                    await payrollAPI.updateStatus(payroll.id, {
+                      status: "GENERATED",
+                    });
+                    toast.success("Payroll payment reverted to Generated");
+                    loadPayroll();
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.message || err?.message || "Failed to update status");
+                  }
+                }}
+              >
+                Revert Payment
+              </Button>
+            ) : (
+              <Button
+                disabled={loading || payroll.locked}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                onClick={() => {
+                  setPayMethod(payroll.paymentMethod || "BANK_TRANSFER");
+                  setTxnRef(payroll.transactionRef || "");
+                  setPayDate(moment().format("YYYY-MM-DD"));
+                  setPayModalOpen(true);
+                }}
+              >
+                <DollarSign className="h-4 w-4" />
+                <span>Mark as Paid</span>
+              </Button>
+            )}
             <PDFDownloadLink
               document={<PayrollSlipPDF payroll={payroll} />}
               fileName={`payslip_${payroll.employee.firstName}_${moment(payroll.periodStart).format('MMM-YYYY')}.pdf`}
@@ -748,6 +798,40 @@ export const PayrollDetail = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Payment Summary Banner if Paid */}
+        {payroll.status === "PAID" && (
+          <Card className="border-l-4 border-l-emerald-600 bg-emerald-50/40 border border-emerald-200/80 shadow-2xs">
+            <CardContent className="p-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="size-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-2">
+                    Payment Disbursed Successfully
+                    <Badge className="bg-emerald-600 text-white text-[10px] font-bold">PAID</Badge>
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 mt-1">
+                    <span>
+                      Method: <strong className="font-semibold text-gray-900">{payroll.paymentMethod ? payroll.paymentMethod.replace(/_/g, " ") : "Direct"}</strong>
+                    </span>
+                    {payroll.transactionRef && (
+                      <span>
+                        Reference: <strong className="font-mono font-semibold text-gray-900">{payroll.transactionRef}</strong>
+                      </span>
+                    )}
+                    {payroll.paidAt && (
+                      <span>
+                        Paid On: <strong className="font-medium text-gray-900">{moment(payroll.paidAt).format("DD MMM YYYY")}</strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Attendance Progress */}
         <Card>
@@ -1125,6 +1209,95 @@ export const PayrollDetail = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* MARK AS PAID DIALOG */}
+        <Dialog open={payModalOpen} onOpenChange={setPayModalOpen}>
+          <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold flex items-center gap-2 text-emerald-800">
+                <CreditCard className="size-5 text-emerald-600" />
+                Confirm Salary Payment
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center justify-between text-xs font-semibold">
+                <span className="text-emerald-900">Total Net Amount:</span>
+                <span className="font-mono text-sm font-bold text-emerald-700">
+                  PKR {Number(payroll?.netSalary || payroll?.rate || 0).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-700">Payment Method</Label>
+                  <Select value={payMethod} onValueChange={setPayMethod}>
+                    <SelectTrigger className="h-9 text-xs font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
+                      <SelectItem value="CASH">Cash</SelectItem>
+                      <SelectItem value="CHEQUE">Cheque</SelectItem>
+                      <SelectItem value="ONLINE">Online Transfer / Wallet</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-700">Transaction Reference / Slip #</Label>
+                  <Input
+                    type="text"
+                    placeholder="e.g. TXN-89210 or Cheque #1024"
+                    value={txnRef}
+                    onChange={(e) => setTxnRef(e.target.value)}
+                    className="h-9 text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-700">Disbursed Date</Label>
+                  <Input
+                    type="date"
+                    value={payDate}
+                    onChange={(e) => setPayDate(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="mt-3 flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={paying}
+                onClick={() => setPayModalOpen(false)}
+                className="rounded-xl border-gray-300 text-xs font-semibold"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={paying}
+                onClick={handleConfirmPay}
+                className="rounded-xl bg-emerald-600 hover:bg-emerald-700 font-bold text-xs px-4 text-white shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                {paying ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="size-3.5" />
+                    Confirm & Mark Paid
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -92,7 +92,10 @@ export const Login: React.FC = () => {
         <div className="max-w-md space-y-6">
           <div className="flex items-center gap-3">
             <ShieldCheck size={32} />
-            <h1 className="text-3xl font-bold">FrontPin HRM</h1>
+            <h1 className="text-3xl font-bold">HR Pro</h1>
+          </div>
+          <div className="text-sm uppercase tracking-wider text-blue-200 font-semibold -mt-4">
+            Management System
           </div>
 
           <p className="text-lg text-blue-100 leading-relaxed">
@@ -221,7 +224,7 @@ export const Login: React.FC = () => {
               </span>
             </div>
 
-            <div className="text-xs text-gray-400 pt-2">© 2025 FrontPin HRM</div>
+            <div className="text-xs text-gray-400 pt-2">© 2026 HR Pro Management System</div>
           </div>
         </Card>
       </div>

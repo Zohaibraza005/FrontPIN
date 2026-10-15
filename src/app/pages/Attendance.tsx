@@ -65,7 +65,7 @@ import {
   Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { attendanceAPI, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { attendanceAPI, departmentAPI, employeeAPI, locationAPI, entityAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import DatePicker from "react-datepicker";
@@ -128,65 +128,65 @@ function convertTo12Hour(timeStr) {
 const STATUS_CONFIG: Record<string, any> = {
   PRESENT: {
     label: "Present",
-    badge: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800",
-    cell: "bg-emerald-600 text-white font-medium shadow-sm hover:bg-emerald-700 transition-colors",
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80",
+    cell: "bg-emerald-50 text-emerald-700 border border-emerald-200/90 hover:bg-emerald-100/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800",
     dot: "bg-emerald-500",
     tooltip: "bg-emerald-900 text-white border-emerald-700",
   },
   LATE: {
     label: "Tardy",
-    badge: "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
-    cell: "bg-amber-400 text-amber-950 font-semibold shadow-sm hover:bg-amber-500 transition-colors",
+    badge: "bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80",
+    cell: "bg-amber-50 text-amber-700 border border-amber-200/90 hover:bg-amber-100/70 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800",
     dot: "bg-amber-500",
     tooltip: "bg-amber-900 text-white border-amber-700",
   },
   TARDY: {
     label: "Tardy",
-    badge: "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800",
-    cell: "bg-amber-400 text-amber-950 font-semibold shadow-sm hover:bg-amber-500 transition-colors",
+    badge: "bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80",
+    cell: "bg-amber-50 text-amber-700 border border-amber-200/90 hover:bg-amber-100/70 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800",
     dot: "bg-amber-500",
     tooltip: "bg-amber-900 text-white border-amber-700",
   },
   ABSENT: {
     label: "Absent",
-    badge: "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800",
-    cell: "bg-rose-600 text-white font-medium shadow-sm hover:bg-rose-700 transition-colors",
+    badge: "bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80",
+    cell: "bg-rose-50 text-rose-700 border border-rose-200/90 hover:bg-rose-100/70 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800",
     dot: "bg-rose-500",
     tooltip: "bg-rose-900 text-white border-rose-700",
   },
   LEAVE: {
     label: "Leave",
-    badge: "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800",
-    cell: "bg-sky-500 text-white font-medium shadow-sm hover:bg-sky-600 transition-colors",
+    badge: "bg-sky-50 text-sky-700 border-sky-200/80 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800/80",
+    cell: "bg-sky-50 text-sky-700 border border-sky-200/90 hover:bg-sky-100/70 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800",
     dot: "bg-sky-500",
     tooltip: "bg-sky-900 text-white border-sky-700",
   },
   OFF_DAY: {
     label: "Off Day",
-    badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800",
-    cell: "bg-slate-100 text-slate-600 font-medium shadow-xs hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-400 transition-colors",
+    badge: "bg-slate-50 text-slate-700 border-slate-200/80 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-800/80",
+    cell: "bg-gray-50/70 text-gray-400 border border-gray-100 hover:bg-gray-100/70 dark:bg-gray-900/40 dark:text-gray-500 dark:border-gray-800",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   OFF: {
     label: "Off Day",
-    badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-800",
-    cell: "bg-slate-100 text-slate-600 font-medium shadow-xs hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-400 transition-colors",
+    badge: "bg-slate-50 text-slate-700 border-slate-200/80 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-800/80",
+    cell: "bg-gray-50/70 text-gray-400 border border-gray-100 hover:bg-gray-100/70 dark:bg-gray-900/40 dark:text-gray-500 dark:border-gray-800",
     dot: "bg-slate-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   UPCOMING_DAY: {
     label: "Upcoming",
-    badge: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-800",
-    cell: "bg-slate-100/90 text-slate-500 font-medium shadow-2xs hover:bg-slate-200 dark:bg-slate-900/80 dark:text-slate-400 transition-colors border border-slate-200/50",
-    dot: "bg-slate-400",
+    badge: "bg-slate-50 text-slate-500 border-slate-200/80 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-800/80",
+    cell: "bg-gray-50/70 text-gray-400 border border-gray-100 hover:bg-gray-100/70 dark:bg-gray-900/40 dark:text-gray-500 dark:border-gray-800",
+    dot: "bg-gray-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   },
   UPCOMING: {
     label: "Upcoming",
-    badge: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-800",
-    cell: "bg-slate-100/90 text-slate-500 font-medium shadow-2xs hover:bg-slate-200 dark:bg-slate-900/80 dark:text-slate-400 transition-colors border border-slate-200/50",
-    dot: "bg-slate-400",
+    badge: "bg-slate-50 text-slate-500 border-slate-200/80 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-800/80",
+    cell: "bg-gray-50/70 text-gray-400 border border-gray-100 hover:bg-gray-100/70 dark:bg-gray-900/40 dark:text-gray-500 dark:border-gray-800",
+    dot: "bg-gray-400",
     tooltip: "bg-slate-900 text-white border-slate-700",
   }
 };
@@ -493,9 +493,11 @@ export const Attendance: React.FC = () => {
   const [report, setReport] = useState<any[]>([]);
   const [departmentId, setDepartmentId] = useState<string>();
   const [locationId, setLocationId] = useState<string>(() => localStorage.getItem("selectedLocation") || "all");
+  const [entityId, setEntityId] = useState<string>("all");
   const [companyId, setCompanyId] = useState<string>();
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [entities, setEntities] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -634,7 +636,7 @@ export const Attendance: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId, statusFilter]);
+  }, [activeTab, selectedDate, departmentId, locationId, entityId, selectedEmployeeId, statusFilter]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -849,10 +851,10 @@ export const Attendance: React.FC = () => {
           setSelectedRecord(finalRecord);
           setEditModalOpen(true);
         }}
-        className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.05] hover:shadow-md"} ${
-          isUserMonthly
-            ? "w-8 h-8 rounded-lg flex items-center justify-center mx-auto"
-            : "rounded-md p-1"
+        className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.03] hover:shadow-xs"} ${
+          activeTab === "monthly"
+            ? "w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center mx-auto"
+            : "w-full min-h-[34px] rounded-lg py-1.5 px-2 flex items-center justify-center text-center"
         } ${config.cell}`}
       >
         {/* Visual indicator dot for Day Override */}
@@ -864,8 +866,8 @@ export const Attendance: React.FC = () => {
             title={finalRecord.overrideType === 'WORK_DAY' ? 'Admin Override: Forced ON (Working Day)' : 'Admin Override: Forced OFF (Holiday / Off Day)'}
           />
         )}
-        {isUserMonthly ? (
-          <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
+        {activeTab === "monthly" ? (
+          <span className="text-xs uppercase font-bold tracking-tight">
             {status === "PRESENT"
               ? "P"
               : status === "ABSENT"
@@ -881,33 +883,17 @@ export const Attendance: React.FC = () => {
               : status ? status.charAt(0) : "A"}
           </span>
         ) : (
-          <div className="flex flex-col items-center justify-center min-h-[34px] px-1">
-            {activeTab !== "monthly" ? (
-              <span className="font-semibold tracking-tight">
-                {isUpcoming
-                  ? "Upcoming"
-                  : isOff
-                  ? "Off Day"
-                  : formatMinutes(finalRecord.totalWorkedMinutes)}
-              </span>
-            ) : (
-              <span className="text-xs uppercase font-extrabold tracking-wider opacity-95">
-                {status === "PRESENT"
-                  ? "P"
-                  : status === "ABSENT"
-                  ? "A"
-                  : (status === "LATE" || status === "TARDY")
-                  ? "T"
-                  : status === "LEAVE"
-                  ? "L"
-                  : isOff
-                  ? "O"
-                  : isUpcoming
-                  ? "U"
-                  : status ? status.charAt(0) : "A"}
-              </span>
-            )}
-          </div>
+          <span className="text-xs font-medium tracking-tight">
+            {isUpcoming
+              ? "Upcoming"
+              : isOff
+              ? "Off Day"
+              : isAbsent
+              ? "Absent"
+              : isLeave
+              ? "Leave"
+              : formatMinutes(finalRecord.totalWorkedMinutes)}
+          </span>
         )}
       </div>
     );
@@ -1073,6 +1059,12 @@ export const Attendance: React.FC = () => {
       const dept = await departmentAPI.getDepartments();
       const loc = await locationAPI.getLocations();
       const emp = await employeeAPI.getEmployees();
+      try {
+        const ent = await entityAPI.getEntities();
+        setEntities(ent.data || []);
+      } catch (err) {
+        console.error("Failed to load entities:", err);
+      }
   
       setDepartments(dept.data || []);
       setLocations(loc.data || []);
@@ -1098,7 +1090,7 @@ export const Attendance: React.FC = () => {
       clearInterval(interval);
       window.removeEventListener("attendance-updated", handleAttendanceUpdate);
     };
-  }, [activeTab, selectedDate, departmentId, locationId, selectedEmployeeId]);
+  }, [activeTab, selectedDate, departmentId, locationId, entityId, selectedEmployeeId]);
   
   const loadReport = async (showFeedback = false) => {
     try {
@@ -1108,6 +1100,7 @@ export const Attendance: React.FC = () => {
         date: selectedDate,
         departmentId,
         locationId,
+        entityId: entityId !== "all" ? entityId : undefined,
         employeeId:
           user?.role === "ADMIN" && selectedEmployeeId !== "all"
             ? selectedEmployeeId
@@ -1229,14 +1222,18 @@ export const Attendance: React.FC = () => {
     return { present, tardy, absent, leave, total: report.length };
   }, [report, selectedDate, activeTab]);
 
-  // Filtered report calculation based on statusFilter
+  // Filtered report calculation based on statusFilter and entityId
   const filteredReport = useMemo(() => {
+    let list = report;
+    if (entityId && entityId !== "all") {
+      list = list.filter((emp) => String(emp.entityId) === String(entityId));
+    }
     if (!statusFilter || statusFilter === "all") {
-      return report;
+      return list;
     }
     const filterUpper = statusFilter.toUpperCase();
 
-    return report.filter((emp) => {
+    return list.filter((emp) => {
       if (activeTab === "daily") {
         const empStatus = getEmployeeDailyStatus(emp, selectedDate);
         if (filterUpper === "TARDY") return empStatus === "TARDY" || empStatus === "LATE";
@@ -1259,7 +1256,7 @@ export const Attendance: React.FC = () => {
       if (filterUpper === "OFF_DAY") return dailyStatus === "OFF_DAY" || dailyStatus === "OFF";
       return dailyStatus === filterUpper;
     });
-  }, [report, statusFilter, activeTab, selectedDate]);
+  }, [report, statusFilter, entityId, activeTab, selectedDate]);
 
   // Pagination calculations (shared across Daily, Weekly, and Monthly views)
   const totalEmployees = filteredReport.length;
@@ -1367,51 +1364,57 @@ export const Attendance: React.FC = () => {
       );
     }
 
+    const PASTEL_AVATAR_PALETTE = [
+      { bg: "bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300" },
+      { bg: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" },
+      { bg: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950/60 dark:text-fuchsia-300" },
+      { bg: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" },
+      { bg: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
+      { bg: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300" },
+      { bg: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" },
+      { bg: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300" },
+    ];
+
     return (
-      <div className="w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950" style={{ width: "1000px" }}>
+      <div className="w-full max-w-full min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 shadow-xs overflow-hidden">
         {/* Scrollable container with sticky headers and sticky employee column */}
         <div className="overflow-x-auto w-full max-w-full">
           <table className="w-full border-collapse text-left text-sm">
-            <thead className="sticky top-0 z-30 bg-gray-50/95 backdrop-blur-md border-b border-gray-200 dark:bg-gray-900/95 dark:border-gray-800">
+            <thead className="sticky top-0 z-30 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
               <tr>
                 {/* Employee column – sticky left */}
                 <th
                   scope="col"
-                  className="sticky left-0 z-40 bg-gray-50 px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider border-r border-gray-200 min-w-[160px] md:min-w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800"
+                  className="sticky left-0 z-40 bg-white px-3.5 sm:px-4 py-3 text-left border-r border-gray-200 min-w-[175px] sm:min-w-[195px] dark:bg-gray-950 dark:border-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.04)]"
                 >
                   <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-gray-400" />
-                    <span>Employee ({filteredReport.length})</span>
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">EMPLOYEE</span>
+                    <span className="px-1.5 py-0.5 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-800 rounded">
+                      {totalEmployees}
+                    </span>
                   </div>
                 </th>
   
                 {/* Date columns */}
                 {days.map((day) => {
                   const isToday = isSameDay(day, new Date());
-                  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                   return (
                     <th
                       key={day.toISOString()}
                       scope="col"
-                      className={`px-1 py-2.5 text-center text-xs font-medium border-r border-gray-200 dark:border-gray-800 ${
-                        isMonthly 
-                          ? (user?.role === 'USER' ? 'min-w-[42px]' : 'min-w-[68px] sm:min-w-[72px]') 
-                          : 'min-w-[75px] md:min-w-[85px]'
-                      } transition-colors ${
-                        isToday 
-                          ? 'bg-blue-50/80 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' 
-                          : isWeekend 
-                          ? 'bg-gray-100/50 text-gray-500 dark:bg-gray-900/40 dark:text-gray-400' 
-                          : 'text-gray-700 dark:text-gray-300'
+                      className={`px-1 py-2.5 text-center border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 ${
+                        isMonthly ? 'min-w-[34px] sm:min-w-[36px]' : 'min-w-[76px] sm:min-w-[84px]'
                       }`}
                     >
-                      <div className="flex flex-col items-center justify-center">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
                           {format(day, "EEE")}
                         </span>
-                        <span className={`text-sm font-extrabold mt-0.5 rounded-full w-6 h-6 flex items-center justify-center ${
-                          isToday ? 'bg-blue-600 text-white shadow-sm' : ''
+                        <span className={`text-xs font-bold rounded-full flex items-center justify-center ${
+                          isToday 
+                            ? 'w-6 h-6 bg-blue-600 text-white shadow-xs' 
+                            : 'text-gray-700 dark:text-gray-300 h-6'
                         }`}>
                           {format(day, "d")}
                         </span>
@@ -1423,14 +1426,14 @@ export const Attendance: React.FC = () => {
                 {/* Total Hours Column */}
                 <th
                   scope="col"
-                  className="sticky right-0 z-40 bg-gray-50 px-4 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider border-l border-gray-200 min-w-[110px] shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800"
+                  className="sticky right-0 z-40 bg-white px-3 sm:px-4 py-3 text-center text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-l border-gray-200 min-w-[90px] sm:min-w-[100px] shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.04)] dark:bg-gray-950 dark:border-gray-800"
                 >
-                  Total Hours
+                  TOTAL HOURS
                 </th>
               </tr>
             </thead>
   
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-gray-950">
               {paginatedReport.map((emp) => {
                 const totalMinutes = days.reduce((sum: number, day: Date) => {
                   const dayStr = format(day, "yyyy-MM-dd");
@@ -1469,20 +1472,28 @@ export const Attendance: React.FC = () => {
 
                   return sum + workedMins + otMins;
                 }, 0);
+
+                const avatarSeed = Number(emp.id) || (emp.firstName || "").charCodeAt(0) || 0;
+                const avatarStyle = PASTEL_AVATAR_PALETTE[Math.abs(avatarSeed) % PASTEL_AVATAR_PALETTE.length];
+                const empCode = emp.employeeId || emp.empCode || emp.code || (emp.id ? `US-${emp.id}` : "");
+                const deptTitle = emp.department?.title || emp.department?.name || (typeof emp.department === "string" ? emp.department : "");
+                const subtitle = [empCode, deptTitle].filter(Boolean).join(" · ");
                 
                 return (
-                  <tr key={emp.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
+                  <tr key={emp.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-900/30 transition-colors">
                     {/* Employee cell – sticky left */}
-                    <td className="sticky left-0 z-20 bg-white px-4 py-3 text-sm font-semibold text-gray-900 border-r border-gray-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800">
+                    <td className="sticky left-0 z-20 bg-white px-3.5 sm:px-4 py-3 border-r border-gray-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.04)] dark:bg-gray-950 dark:border-gray-800 min-w-[175px] sm:min-w-[195px]">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                          {emp.firstName?.charAt(0)}{(emp.lastName || "").charAt(0)}
+                        <div className={`w-8 h-8 rounded-full ${avatarStyle.bg} flex items-center justify-center font-bold text-xs shrink-0 select-none`}>
+                          {emp.firstName?.charAt(0)?.toUpperCase()}{(emp.lastName || "").charAt(0)?.toUpperCase()}
                         </div>
-                        <div className="flex flex-col truncate">
-                          <span className="truncate">{emp.firstName} {emp.lastName || ""}</span>
-                          {emp.department && (
-                            <span className="text-[11px] text-gray-400 font-normal truncate">
-                              {emp.department.title || emp.department}
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-semibold text-gray-900 dark:text-gray-100 text-xs sm:text-sm leading-tight truncate">
+                            {emp.firstName} {emp.lastName || ""}
+                          </span>
+                          {subtitle && (
+                            <span className="text-[11px] text-gray-400 dark:text-gray-500 font-normal mt-0.5 truncate">
+                              {subtitle}
                             </span>
                           )}
                         </div>
@@ -1496,8 +1507,8 @@ export const Attendance: React.FC = () => {
                       return (
                         <td
                           key={day.toISOString()}
-                          className={`px-1 py-2 text-center border-r border-gray-100 dark:border-gray-900 ${
-                            isMonthly ? 'min-w-[68px] sm:min-w-[72px]' : 'min-w-[75px]'
+                          className={`p-1 text-center border-r border-gray-100 dark:border-gray-800 ${
+                            isMonthly ? 'min-w-[34px] sm:min-w-[36px]' : 'min-w-[76px] sm:min-w-[84px]'
                           }`}
                         >
                           {renderAttendanceCell(record, day, emp)}
@@ -1506,8 +1517,8 @@ export const Attendance: React.FC = () => {
                     })}
   
                     {/* Total cell – sticky right */}
-                    <td className="sticky right-0 z-20 bg-white px-4 py-3 text-center text-sm font-bold text-gray-900 border-l border-gray-200 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.06)] dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800">
-                      <span className="inline-block px-2.5 py-1 rounded-md bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 font-mono text-xs">
+                    <td className="sticky right-0 z-20 bg-white px-3 sm:px-4 py-3 text-center text-xs sm:text-sm font-semibold text-gray-900 border-l border-gray-200 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.04)] dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800 min-w-[90px] sm:min-w-[100px]">
+                      <span className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-100">
                         {formatMinutes(totalMinutes)}
                       </span>
                     </td>
@@ -1623,7 +1634,7 @@ export const Attendance: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2 overflow-x-hidden">
+    <div className="space-y-6 w-full max-w-[1600px] min-w-0 mx-auto p-1 sm:p-2">
       {/* Simple Header with Refresh & Export Excel */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -1676,9 +1687,9 @@ export const Attendance: React.FC = () => {
       </div>
 
       {/* Main Filter & Content Card */}
-      <Card className="shadow-lg border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden max-w-full">
-        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+      <Card className="w-full max-w-full min-w-0 shadow-sm border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+        <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-200/80 dark:border-gray-800 w-full min-w-0">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full min-w-0">
             {/* Date Navigation */}
             <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
               <Button 
@@ -1796,6 +1807,22 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
+                  className="w-32 sm:w-36 shrink-0"
+                  icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="All Entities"
+                  searchPlaceholder="Search entity..."
+                  value={entityId}
+                  onValueChange={setEntityId}
+                  options={[
+                    { value: "all", label: "All Entities" },
+                    ...entities.map((ent) => ({
+                      value: String(ent.id),
+                      label: ent.name || ent.title || `Entity #${ent.id}`,
+                    })),
+                  ]}
+                />
+
+                <SearchableSelect
                   className="w-36 sm:w-40 shrink-0"
                   icon={<User className="w-3.5 h-3.5 text-gray-400" />}
                   placeholder="All Employees"
@@ -1833,78 +1860,95 @@ export const Attendance: React.FC = () => {
           </div>
         </CardHeader>
 
-        <CardContent className="p-3 sm:p-4">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <CardContent className="p-3 sm:p-5 w-full max-w-full min-w-0">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 w-full max-w-full min-w-0">
             {user?.role !== 'USER' && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900 p-1 rounded-xl">
+                <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900/80 p-1 rounded-2xl h-auto">
                   <TabsTrigger 
                     value="daily" 
-                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                    className="rounded-xl py-2 text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:text-gray-900 dark:data-[state=active]:text-white data-[state=active]:shadow-sm transition-all text-gray-500"
                   >
-                    Daily View
+                    Daily
                   </TabsTrigger>
                   <TabsTrigger 
                     value="weekly" 
-                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                    className="rounded-xl py-2 text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:text-gray-900 dark:data-[state=active]:text-white data-[state=active]:shadow-sm transition-all text-gray-500"
                   >
-                    Weekly View
+                    Weekly
                   </TabsTrigger>
                   <TabsTrigger 
                     value="monthly" 
-                    className="rounded-lg text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:shadow-sm transition-all"
+                    className="rounded-xl py-2 text-xs sm:text-sm font-semibold data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:text-gray-900 dark:data-[state=active]:text-white data-[state=active]:shadow-sm transition-all text-gray-500"
                   >
-                    Monthly View
+                    Monthly
                   </TabsTrigger>
                 </TabsList>
               </div>
             )}
 
-            {/* Legend - Only show in Weekly and Monthly views, positioned in the next row */}
+            {/* Legend - Only show in Weekly and Monthly views */}
             {activeTab !== 'daily' && (
-              <div className="flex items-center gap-3 text-xs text-gray-600 bg-gray-50/80 dark:bg-gray-900/60 px-3.5 py-2 rounded-xl border border-gray-200/80 dark:border-gray-800 flex-wrap sm:flex-nowrap w-fit">
-                <span className="font-bold text-gray-700 dark:text-gray-300">Legend:</span>
+              <div className="flex items-center gap-4 sm:gap-6 text-xs text-gray-600 dark:text-gray-400 flex-wrap pt-0.5 px-0.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-emerald-100 border border-emerald-300 dark:bg-emerald-950/60 dark:border-emerald-700 inline-block shrink-0"></span>
                   <span className="font-medium">Present (P)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-amber-100 border border-amber-300 dark:bg-amber-950/60 dark:border-amber-700 inline-block shrink-0"></span>
                   <span className="font-medium">Tardy (T)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-600 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-rose-100 border border-rose-300 dark:bg-rose-950/60 dark:border-rose-700 inline-block shrink-0"></span>
                   <span className="font-medium">Absent (A)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-sky-100 border border-sky-300 dark:bg-sky-950/60 dark:border-sky-700 inline-block shrink-0"></span>
                   <span className="font-medium">Leave (L)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-700 inline-block shrink-0"></span>
                   <span className="font-medium">Off Day (O)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block"></span>
+                  <span className="w-3.5 h-3.5 rounded-sm bg-white border border-gray-300 dark:bg-gray-950 dark:border-gray-700 inline-block shrink-0"></span>
                   <span className="font-medium">Upcoming (U)</span>
                 </div>
               </div>
             )}
 
             {/* ── DAILY VIEW ────────────────────────────────────────────────── */}
-            <TabsContent value="daily" className="mt-0 space-y-4">
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm bg-white dark:bg-gray-950">
-                <Table>
-                  <TableHeader className="bg-gray-50/80 dark:bg-gray-900">
-                    <TableRow>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Employee</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Date</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Check In</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Check Out</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Total Hours</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Overtime</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300">Status</TableHead>
-                      <TableHead className="font-bold text-gray-700 dark:text-gray-300 text-right pr-6">Actions</TableHead>
+            <TabsContent value="daily" className="mt-0 space-y-4 w-full max-w-full min-w-0">
+              <div className="w-full max-w-full min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-xs bg-white dark:bg-gray-950">
+                {/* Header: Date + Employee Count */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800/80 bg-white dark:bg-gray-950">
+                  <div className="flex items-center gap-2.5">
+                    <CalendarDays className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="text-sm sm:text-base font-bold text-gray-900 dark:text-gray-100">
+                      {format(selectedDate, "EEEE, d MMMM yyyy")}
+                    </span>
+                    {isSameDay(selectedDate, new Date()) && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded uppercase tracking-wider">
+                        TODAY
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 font-normal">
+                    {totalEmployees} employees
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto w-full max-w-full">
+                  <Table>
+                  <TableHeader className="bg-transparent border-b border-gray-100 dark:border-gray-800">
+                    <TableRow className="hover:bg-transparent border-gray-100 dark:border-gray-800">
+                      <TableHead className="pl-6 font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">EMPLOYEE</TableHead>
+                      <TableHead className="font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">CHECK IN</TableHead>
+                      <TableHead className="font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">CHECK OUT</TableHead>
+                      <TableHead className="font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">WORKED</TableHead>
+                      <TableHead className="font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">OVERTIME</TableHead>
+                      <TableHead className="font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider">STATUS</TableHead>
+                      <TableHead className="pr-6 font-semibold text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider text-right">ACTIONS</TableHead>
                     </TableRow>
                   </TableHeader>
 
@@ -1966,16 +2010,19 @@ export const Attendance: React.FC = () => {
                       let rawStatus = record?.status;
                       if (rawStatus === "LATE") rawStatus = "TARDY";
 
+                      let lateText = "";
                       if (effCheckIn && !isEmpDayOff && rawStatus !== "LEAVE") {
-                        const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
                         const graceMinutes = daySchedule?.allowEarlyIn ? (Number(daySchedule.earlyInMinutes) || 0) : 0;
-                        const sTime = daySchedule?.startTime || "09:00";
-                        const [sh, sm] = sTime.split(":").map(Number);
                         const inDate = new Date(effCheckIn);
                         const inTotalMins = inDate.getHours() * 60 + inDate.getMinutes();
-                        const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
                         const adjustedInMins = checkInDateStr === nextDateStr ? inTotalMins + 1440 : inTotalMins;
                         const diffFromStart = adjustedInMins - shiftStartTotalMins;
+
+                        if (diffFromStart > 0) {
+                          const lHours = Math.floor(diffFromStart / 60);
+                          const lMins = diffFromStart % 60;
+                          lateText = `${lHours}h ${lMins}m late`;
+                        }
 
                         if (diffFromStart > graceMinutes) {
                           rawStatus = "TARDY";
@@ -2027,72 +2074,144 @@ export const Attendance: React.FC = () => {
                         overtimeMinutes: otMins,
                       };
 
-                      const statusCfg = STATUS_CONFIG[finalRecord.status?.toUpperCase()] || STATUS_CONFIG["ABSENT"];
+                      // Deterministic Pastel Avatar Palette
+                      const PASTEL_AVATAR_PALETTE = [
+                        { bg: "bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300" },
+                        { bg: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" },
+                        { bg: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950/60 dark:text-fuchsia-300" },
+                        { bg: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" },
+                        { bg: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
+                        { bg: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300" },
+                        { bg: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" },
+                        { bg: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300" },
+                      ];
+                      const avatarSeed = Number(emp.id) || (emp.firstName || "").charCodeAt(0) || 0;
+                      const avatarStyle = PASTEL_AVATAR_PALETTE[Math.abs(avatarSeed) % PASTEL_AVATAR_PALETTE.length];
+
+                      const empCode = emp.employeeId || emp.empCode || emp.code || (emp.id ? `US-${emp.id}` : "");
+                      const deptTitle = emp.department?.title || emp.department?.name || (typeof emp.department === "string" ? emp.department : "");
+                      const subtitle = [empCode, deptTitle].filter(Boolean).join(" · ");
 
                       return (
-                        <TableRow key={emp.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-900/40 transition-colors">
+                        <TableRow key={emp.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-900/30 transition-colors border-b border-gray-100 dark:border-gray-800/80">
                           {/* Employee info */}
-                          <TableCell className="font-semibold text-gray-900 dark:text-gray-100">
+                          <TableCell className="pl-6 py-3.5">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                                {emp.firstName?.charAt(0)}{(emp.lastName || "").charAt(0)}
+                              <div className={`w-9 h-9 rounded-full ${avatarStyle.bg} flex items-center justify-center font-bold text-xs shrink-0 select-none`}>
+                                {emp.firstName?.charAt(0)?.toUpperCase()}{(emp.lastName || "").charAt(0)?.toUpperCase()}
                               </div>
                               <div className="flex flex-col">
-                                <span>{emp.firstName} {emp.lastName || ""}</span>
-                                {emp.department && (
-                                  <span className="text-[11px] text-gray-400 font-normal">
-                                    {emp.department.title || emp.department}
+                                <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm leading-tight">
+                                  {emp.firstName} {emp.lastName || ""}
+                                </span>
+                                {subtitle && (
+                                  <span className="text-xs text-gray-400 dark:text-gray-500 font-normal mt-0.5">
+                                    {subtitle}
                                   </span>
                                 )}
                               </div>
                             </div>
                           </TableCell>
 
-                          <TableCell className="text-gray-600 dark:text-gray-400 text-xs font-medium">
-                            {format(selectedDate, "PPP")}
-                          </TableCell>
-
-                          <TableCell className="font-medium text-gray-800 dark:text-gray-200 text-xs">
+                          {/* Check In */}
+                          <TableCell className="py-3.5">
                             {finalRecord.checkInTime ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                                <Clock className="w-3 h-3" />
-                                {format(new Date(finalRecord.checkInTime), "hh:mm a")}
-                              </span>
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                  <span>{format(new Date(finalRecord.checkInTime), "hh:mm a")}</span>
+                                </div>
+                                {lateText ? (
+                                  <span className="text-xs text-amber-600 dark:text-amber-400 font-medium pl-4 mt-0.5">
+                                    {lateText}
+                                  </span>
+                                ) : null}
+                              </div>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-400 dark:text-gray-600 pl-2">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell className="font-medium text-gray-800 dark:text-gray-200 text-xs">
+                          {/* Check Out */}
+                          <TableCell className="py-3.5">
                             {finalRecord.checkOutTime ? (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800">
-                                <Clock className="w-3 h-3" />
-                                {format(new Date(finalRecord.checkOutTime), "hh:mm a")}
-                              </span>
+                              <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+                                <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                                <span>{format(new Date(finalRecord.checkOutTime), "hh:mm a")}</span>
+                              </div>
+                            ) : (finalRecord.checkInTime && !isOffDayRow) ? (
+                              <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                <span>On shift</span>
+                              </div>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-400 dark:text-gray-600 pl-2">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell className="font-semibold text-gray-900 dark:text-gray-100 font-mono text-xs">
-                            {formatMinutes(finalRecord.totalWorkedMinutes)}
+                          {/* Worked */}
+                          <TableCell className="py-3.5">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 font-mono">
+                                {finalRecord.totalWorkedMinutes > 0 ? formatMinutes(finalRecord.totalWorkedMinutes) : "0h 0m"}
+                              </span>
+                              {daySchedule && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500 font-normal mt-0.5">
+                                  Shift {convertTo12Hour(daySchedule?.startTime || "09:00")} – {convertTo12Hour(daySchedule?.endTime || "18:00")}
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
 
-                          <TableCell className="font-mono text-xs">
+                          {/* Overtime */}
+                          <TableCell className="py-3.5">
                             {finalRecord.overtimeMinutes > 0 ? (
-                              <span className="inline-block px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800">
                                 +{formatMinutes(finalRecord.overtimeMinutes)}
                               </span>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-gray-400 dark:text-gray-600 pl-1">—</span>
                             )}
                           </TableCell>
 
-                          <TableCell>
+                          {/* Status */}
+                          <TableCell className="py-3.5">
                             <div className="flex flex-col gap-1 items-start">
-                              <Badge className={`px-2.5 py-0.5 border font-semibold tracking-wide ${statusCfg.badge}`}>
-                                {finalRecord.status}
-                              </Badge>
+                              {(() => {
+                                const s = (finalRecord.status || "ABSENT").toUpperCase();
+                                let label = "Absent";
+                                let dotColor = "bg-rose-500";
+                                let badgeCls = "bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80";
+
+                                if (s === "PRESENT") {
+                                  label = "Present";
+                                  dotColor = "bg-emerald-500";
+                                  badgeCls = "bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80";
+                                } else if (s === "TARDY" || s === "LATE") {
+                                  label = "Tardy";
+                                  dotColor = "bg-amber-500";
+                                  badgeCls = "bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80";
+                                } else if (s === "LEAVE") {
+                                  label = "Leave";
+                                  dotColor = "bg-sky-500";
+                                  badgeCls = "bg-sky-50 text-sky-700 border-sky-200/80 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800/80";
+                                } else if (s === "OFF_DAY" || s === "OFF") {
+                                  label = "Off Day";
+                                  dotColor = "bg-slate-400";
+                                  badgeCls = "bg-slate-50 text-slate-700 border-slate-200/80 dark:bg-slate-900/40 dark:text-slate-300 dark:border-slate-800/80";
+                                } else if (s === "UPCOMING_DAY" || s === "UPCOMING") {
+                                  label = "Upcoming";
+                                  dotColor = "bg-gray-400";
+                                  badgeCls = "bg-gray-50 text-gray-600 border-gray-200/80 dark:bg-gray-900/40 dark:text-gray-400 dark:border-gray-800/80";
+                                }
+
+                                return (
+                                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${badgeCls}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${dotColor} shrink-0`} />
+                                    <span>{label}</span>
+                                  </span>
+                                );
+                              })()}
                               {finalRecord.overrideType && (
                                 <span 
                                   className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
@@ -2110,36 +2229,37 @@ export const Attendance: React.FC = () => {
                           </TableCell>
 
                           {/* Action Buttons */}
-                          <TableCell className="text-right pr-6">
+                          <TableCell className="py-3.5 text-right pr-6">
                             <div className="flex items-center justify-end gap-2">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-8 px-2.5 text-xs gap-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                className="h-8 px-3 text-xs font-medium text-gray-700 hover:text-gray-900 border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 rounded-lg gap-1.5 shadow-2xs transition-colors"
                                 onClick={() => openViewPanel(finalRecord, emp)}
                               >
-                                <Eye className="w-3.5 h-3.5 text-gray-500" />
+                                <Eye className="w-3.5 h-3.5 text-gray-400" />
                                 View
                               </Button>
                               {user?.role !== 'USER' && (
                                 <Button
                                   size="sm"
-                                  className="h-8 px-2.5 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                                  variant="outline"
+                                  className="h-8 px-3 text-xs font-medium text-blue-600 hover:text-blue-700 border-blue-200 hover:bg-blue-50/60 dark:border-blue-900/50 dark:text-blue-400 rounded-lg gap-1.5 shadow-2xs transition-colors"
                                   onClick={() => {
-                                  const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
-                                  if (isFutureDate || finalRecord.status === "UPCOMING_DAY" || finalRecord.status === "UPCOMING") {
-                                    toast.error("There is no schedule for this day yet.");
-                                    return;
-                                  }
-                                  if (finalRecord.status === "OFF_DAY" || finalRecord.status === "OFF") {
-                                    toast.error("This is an Off Day. Attendance cannot be marked for this day.");
-                                    return;
-                                  }
-                                  setSelectedRecord(finalRecord);
-                                  setEditModalOpen(true);
-                                }}
+                                    const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
+                                    if (isFutureDate || finalRecord.status === "UPCOMING_DAY" || finalRecord.status === "UPCOMING") {
+                                      toast.error("There is no schedule for this day yet.");
+                                      return;
+                                    }
+                                    if (finalRecord.status === "OFF_DAY" || finalRecord.status === "OFF") {
+                                      toast.error("This is an Off Day. Attendance cannot be marked for this day.");
+                                      return;
+                                    }
+                                    setSelectedRecord(finalRecord);
+                                    setEditModalOpen(true);
+                                  }}
                                 >
-                                  <Pencil className="w-3.5 h-3.5" />
+                                  <Pencil className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
                                   Edit
                                 </Button>
                               )}
@@ -2151,13 +2271,14 @@ export const Attendance: React.FC = () => {
 
                     {filteredReport.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} className="py-12 text-center text-gray-500">
+                        <TableCell colSpan={7} className="py-12 text-center text-gray-500">
                           No attendance data found for the selected filter and date.
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
+                </div>
 
                 {/* Pagination Footer */}
                 {totalEmployees > 0 && (
@@ -2255,7 +2376,7 @@ export const Attendance: React.FC = () => {
             </TabsContent>
 
             {/* ── WEEKLY VIEW ──────────────────────────────────────────────── */}
-            <TabsContent value="weekly" className="mt-0">
+            <TabsContent value="weekly" className="mt-0 w-full max-w-full min-w-0">
               {renderTimesheetView(
                 startOfWeek(selectedDate, { weekStartsOn: 1 }),
                 endOfWeek(selectedDate, { weekStartsOn: 1 })
@@ -2263,7 +2384,7 @@ export const Attendance: React.FC = () => {
             </TabsContent>
 
             {/* ── MONTHLY VIEW ─────────────────────────────────────────────── */}
-            <TabsContent value="monthly" className="mt-0">
+            <TabsContent value="monthly" className="mt-0 w-full max-w-full min-w-0">
               {renderTimesheetView(
                 startOfMonth(selectedDate),
                 endOfMonth(selectedDate)

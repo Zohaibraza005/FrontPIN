@@ -190,6 +190,13 @@ async function findEmployee(biometricId, employeeName) {
     console.error("[Biometric Punch] Error checking deleted employees:", err.message);
   }
 
+  // Permanently removed biometric IDs should never auto-provision
+  const BLOCKED_BIO_IDS = ["1919", "001"];
+  if (bioIdStr && BLOCKED_BIO_IDS.includes(bioIdStr)) {
+    console.log(`[Biometric Punch] Skipped blocked/removed biometric ID: ${bioIdStr}`);
+    return null;
+  }
+
   // 4. Auto-provision new employee if completely new user punches on machine
   if (bioIdStr) {
     try {

@@ -864,11 +864,16 @@ export const Layout: React.FC = () => {
           {/* Fixed top header */}
           <div className="flex h-16 items-center justify-between border-b border-gray-200 px-6 shrink-0">
             {sidebarOpen ? (
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                FRONTPIN
-              </h1>
+              <div className="flex flex-col">
+                <h1 className="text-xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent leading-tight">
+                  HR Pro
+                </h1>
+                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                  Management System
+                </span>
+              </div>
             ) : (
-              <span className="text-2xl font-bold text-blue-600">FP</span>
+              <span className="text-xl font-bold text-blue-600">HR</span>
             )}
             <Button
               variant="ghost"
@@ -954,7 +959,7 @@ export const Layout: React.FC = () => {
       {/* Main Content */}
       <div
         className={cn(
-          "flex-1 flex flex-col transition-all duration-300",
+          "flex-1 flex flex-col min-w-0 transition-all duration-300",
           sidebarOpen ? "lg:ml-64" : "lg:ml-20"
         )}
       >
@@ -1331,7 +1336,7 @@ export const Layout: React.FC = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
+        <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
           <Outlet />
         </main>
       </div>

@@ -18,6 +18,11 @@ router.patch("/run/:runId/pay", protect, controller.markRunPaid);
 router.get("/run", protect, controller.getRuns);
 router.get("/run/:id", protect, controller.getSingleRun);
 
+// Export & Bulk operations (Must be defined before parameterized :id routes)
+router.get("/export", protect, controller.exportPayrolls);
+router.patch("/bulk-status", protect, controller.bulkUpdateStatus);
+router.patch("/bulk-lock", protect, controller.bulkLock);
+
 router.get("/", protect, controller.getPayrolls);
 router.post("/generate", protect, controller.createPayroll);
 router.post("/generate-bulk", protect, controller.generateBulkPayroll);

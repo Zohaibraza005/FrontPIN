@@ -1,5 +1,6 @@
 // Mock API service for connecting to MySQL backend
 // Replace these endpoints with your actual backend API URLs
+import moment from 'moment';
 
 /**
  * INTEGRATION GUIDE FOR YOUR MYSQL BACKEND:
@@ -990,12 +991,75 @@ export const overtimeAPI = {
   export const payrollAPI = {
     updateStatus: (
       id: number | string,
-      data: { status: "PAID" | "GENERATED" | "DRAFT" }
+      data: {
+        status: "PAID" | "GENERATED" | "DRAFT";
+        paymentMethod?: string;
+        transactionRef?: string;
+        paidAt?: string | Date;
+      }
     ) =>
       apiCall(`/payroll/${id}/status`, {
         method: "PATCH",
         body: JSON.stringify(data)
       }),
+    bulkUpdateStatus: (data: {
+      ids: number[];
+      status: "PAID" | "GENERATED" | "DRAFT";
+      paymentMethod?: string;
+      transactionRef?: string;
+      paidAt?: string | Date;
+    }) =>
+      apiCall("/payroll/bulk-status", {
+        method: "PATCH",
+        body: JSON.stringify(data)
+      }),
+    bulkLock: (data: { ids: number[] }) =>
+      apiCall("/payroll/bulk-lock", {
+        method: "PATCH",
+        body: JSON.stringify(data)
+      }),
+    exportPayroll: async (params?: {
+      month?: number | string;
+      year?: number;
+      status?: string;
+      runId?: number;
+      ids?: number[];
+      format?: "xlsx" | "csv";
+    }) => {
+      const queryObj: Record<string, string> = {};
+      if (params?.month && params.month !== "all") queryObj.month = String(params.month);
+      if (params?.year) queryObj.year = String(params.year);
+      if (params?.status && params.status !== "all") queryObj.status = String(params.status);
+      if (params?.runId) queryObj.runId = String(params.runId);
+      if (params?.ids && params.ids.length > 0) queryObj.ids = params.ids.join(",");
+      if (params?.format) queryObj.format = params.format;
+
+      const query = new URLSearchParams(queryObj).toString();
+      const token = localStorage.getItem("authToken");
+
+      const response = await fetch(`${API_BASE_URL}/payroll/export?${query}`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to export payroll report");
+      }
+
+      const blob = await response.blob();
+      const ext = params?.format === "csv" ? "csv" : "xlsx";
+      const filename = `Payroll_Export_${moment().format("YYYYMMDD_HHmmss")}.${ext}`;
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    },
     LockPayroll: (
       id: number | string,
       data?: { status?: "PAID" | "GENERATED" | "DRAFT" }

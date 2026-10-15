@@ -910,7 +910,7 @@ export const Dashboard: React.FC = () => {
                   <div className="flex justify-between items-start">
                     <div>
                       <h2 className="text-xl font-bold text-gray-900">
-                        Welcome To {companyName || user?.company?.name || "Frontpin"}
+                        Welcome To {companyName || user?.company?.name || "HR Pro Management System"}
                       </h2>
                       <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                     </div>
@@ -1622,7 +1622,7 @@ export const Dashboard: React.FC = () => {
               <div className="flex justify-between items-start">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
-                    Welcome To {companyName || "Frontpin"}
+                    Welcome To {companyName || "HR Pro Management System"}
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                 </div>

@@ -1267,7 +1267,8 @@ exports.getAttendanceReport = async (req, res) => {
       departmentId,
       companyId,
       locationId,
-      employeeId
+      employeeId,
+      entityId
     } = req.query;
 
     const baseDate = moment(date || new Date());
@@ -1318,6 +1319,9 @@ exports.getAttendanceReport = async (req, res) => {
       const targetLoc = companyId || locationId;
       if (targetLoc && String(targetLoc).toLowerCase() !== "all") {
         employeeWhere.companyId = Number(targetLoc);
+      }
+      if (entityId && String(entityId).toLowerCase() !== "all") {
+        employeeWhere.entityId = Number(entityId);
       }
     }
 

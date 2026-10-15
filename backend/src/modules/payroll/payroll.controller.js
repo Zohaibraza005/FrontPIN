@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
+const ExcelJS = require("exceljs");
 const { calculateHourlyRate } = require("../overtime/overtime.controller");
 const { getDayOverrides, resolveOverrideForEmployee } = require("../attendance/dayOverride.service");
 
@@ -908,7 +909,7 @@ exports.getSinglePayroll = async (req, res) => {
 
 exports.updateStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, paymentMethod, transactionRef, paidAt } = req.body;
     const payrollId = Number(req.params.id);
     const user = req.user;
 
@@ -925,28 +926,406 @@ exports.updateStatus = async (req, res) => {
       });
     }
 
+    const data = {
+      status
+    };
+
+    if (status === "PAID") {
+      data.paidAt = paidAt ? new Date(paidAt) : new Date();
+      if (paymentMethod !== undefined) data.paymentMethod = paymentMethod;
+      if (transactionRef !== undefined) data.transactionRef = transactionRef;
+    } else {
+      data.paidAt = null;
+      if (paymentMethod !== undefined) data.paymentMethod = paymentMethod;
+      if (transactionRef !== undefined) data.transactionRef = transactionRef;
+    }
+
     const updated = await prisma.payroll.update({
       where: { id: payrollId },
-      data: {
-        status,
-        paidAt: status === "PAID" ? new Date() : null
-      }
+      data
     });
 
-    // Optional: Add audit log
+    const noteDetails = [];
+    if (status === "PAID") {
+      if (paymentMethod) noteDetails.push(`Method: ${paymentMethod}`);
+      if (transactionRef) noteDetails.push(`Ref: ${transactionRef}`);
+    }
+
+    // Add audit log
     await prisma.payrollAuditLog.create({
       data: {
         payrollId,
         action: status,
         performedById: user.id,
-        note: `Payroll marked as ${status}`
+        note: `Payroll marked as ${status}${noteDetails.length ? ` (${noteDetails.join(", ")})` : ""}`
       }
     });
 
     res.json(updated);
 
   } catch (err) {
+    console.error("Update status error:", err);
     res.status(500).json({ message: "Failed to update status" });
+  }
+};
+
+exports.bulkUpdateStatus = async (req, res) => {
+  try {
+    const { ids, status, paymentMethod, transactionRef, paidAt } = req.body;
+    const user = req.user;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: "No payroll IDs provided" });
+    }
+
+    const numericIds = ids.map(Number).filter(n => !isNaN(n));
+    const orgId = user.organizationId || user.orgId;
+
+    const payrolls = await prisma.payroll.findMany({
+      where: {
+        id: { in: numericIds },
+        ...(orgId ? { organizationId: orgId } : {}),
+        locked: false
+      }
+    });
+
+    const eligibleIds = payrolls.map(p => p.id);
+    if (eligibleIds.length === 0) {
+      return res.status(400).json({ message: "No unlocked payrolls found to update" });
+    }
+
+    const updateData = {
+      status,
+      paidAt: status === "PAID" ? (paidAt ? new Date(paidAt) : new Date()) : null
+    };
+
+    if (status === "PAID") {
+      if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
+      if (transactionRef !== undefined) updateData.transactionRef = transactionRef;
+    } else {
+      if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
+      if (transactionRef !== undefined) updateData.transactionRef = transactionRef;
+    }
+
+    await prisma.payroll.updateMany({
+      where: { id: { in: eligibleIds } },
+      data: updateData
+    });
+
+    // Create audit logs
+    const noteDetails = [];
+    if (status === "PAID") {
+      if (paymentMethod) noteDetails.push(`Method: ${paymentMethod}`);
+      if (transactionRef) noteDetails.push(`Ref: ${transactionRef}`);
+    }
+    const auditEntries = eligibleIds.map(id => ({
+      payrollId: id,
+      action: status,
+      performedById: user.id,
+      note: `Bulk marked as ${status}${noteDetails.length ? ` (${noteDetails.join(", ")})` : ""}`
+    }));
+    await prisma.payrollAuditLog.createMany({ data: auditEntries });
+
+    res.json({
+      success: true,
+      updatedCount: eligibleIds.length,
+      message: `${eligibleIds.length} payroll(s) updated to ${status}`
+    });
+  } catch (err) {
+    console.error("Bulk update status error:", err);
+    res.status(500).json({ message: "Failed to update bulk status" });
+  }
+};
+
+exports.bulkLock = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    const user = req.user;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: "No payroll IDs provided" });
+    }
+
+    const numericIds = ids.map(Number).filter(n => !isNaN(n));
+    const orgId = user.organizationId || user.orgId;
+
+    const result = await prisma.payroll.updateMany({
+      where: {
+        id: { in: numericIds },
+        ...(orgId ? { organizationId: orgId } : {}),
+        status: { in: ["GENERATED", "APPROVED"] },
+        locked: false
+      },
+      data: {
+        locked: true,
+        isEditable: false
+      }
+    });
+
+    res.json({
+      success: true,
+      count: result.count,
+      message: `${result.count} payroll(s) locked successfully`
+    });
+  } catch (err) {
+    console.error("Bulk lock error:", err);
+    res.status(500).json({ message: "Failed to lock payrolls" });
+  }
+};
+
+exports.exportPayrolls = async (req, res) => {
+  try {
+    const user = req.user;
+    const orgId = user.organizationId || user.orgId;
+    const { month, year, status, runId, ids, format } = req.query;
+
+    const where = {
+      ...(orgId ? { organizationId: orgId } : {}),
+      deletedAt: null
+    };
+
+    if (ids) {
+      const idList = String(ids).split(",").map(Number).filter(n => !isNaN(n));
+      if (idList.length > 0) {
+        where.id = { in: idList };
+      }
+    } else {
+      if (month && year && month !== "all") {
+        const m = Number(month);
+        const y = Number(year);
+        const start = moment({ year: y, month: m - 1 }).startOf("month").toDate();
+        const end = moment({ year: y, month: m - 1 }).endOf("month").toDate();
+        where.periodStart = { gte: start };
+        where.periodEnd = { lte: end };
+      } else if (year) {
+        const y = Number(year);
+        const start = moment({ year: y, month: 0 }).startOf("month").toDate();
+        const end = moment({ year: y, month: 11 }).endOf("month").toDate();
+        where.periodStart = { gte: start };
+        where.periodEnd = { lte: end };
+      }
+
+      if (status && status !== "all") {
+        where.status = status;
+      }
+
+      if (runId) {
+        where.runId = Number(runId);
+      }
+    }
+
+    const payrolls = await prisma.payroll.findMany({
+      where,
+      include: {
+        employee: {
+          include: {
+            department: true,
+            jobInfo: true,
+            company: true
+          }
+        },
+        components: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const isCsv = String(format || "").toLowerCase() === "csv";
+
+    if (isCsv) {
+      const headers = [
+        "Payroll ID",
+        "Employee ID",
+        "Employee Name",
+        "Email",
+        "Department",
+        "Designation",
+        "Period",
+        "Base Rate",
+        "Working Days",
+        "Present Days",
+        "Absent Days",
+        "Leave Days",
+        "Overtime Hours",
+        "Gross Salary",
+        "Total Deductions",
+        "Net Salary",
+        "Status",
+        "Payment Method",
+        "Transaction Ref",
+        "Paid Date"
+      ];
+
+      const rows = payrolls.map(p => {
+        const emp = p.employee;
+        const empName = emp ? `${emp.firstName || ""} ${emp.lastName || ""}`.trim() : "Unknown";
+        const dept = emp?.department?.title || "N/A";
+        const desig = emp?.jobInfo?.jobTitle || "Staff";
+        const periodStr = moment(p.periodStart).format("MMM YYYY");
+        const gross = Number(p.grossSalary || 0);
+        const net = Number(p.netSalary || 0);
+        const deductions = Math.max(0, gross - net);
+
+        return [
+          p.id,
+          emp?.id || "N/A",
+          `"${empName.replace(/"/g, '""')}"`,
+          `"${(emp?.email || "").replace(/"/g, '""')}"`,
+          `"${dept.replace(/"/g, '""')}"`,
+          `"${desig.replace(/"/g, '""')}"`,
+          `"${periodStr}"`,
+          Number(p.rate || 0),
+          p.workingDays || 0,
+          p.presentDays || 0,
+          p.absentDays || 0,
+          p.leaveDays || 0,
+          p.overtimeHours || 0,
+          gross,
+          deductions,
+          net,
+          p.status,
+          `"${(p.paymentMethod || "—").replace(/"/g, '""')}"`,
+          `"${(p.transactionRef || "—").replace(/"/g, '""')}"`,
+          p.paidAt ? moment(p.paidAt).format("YYYY-MM-DD") : "—"
+        ].join(",");
+      });
+
+      const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="Payroll_Export_${moment().format("YYYYMMDD_HHmmss")}.csv"`);
+      return res.send(csvContent);
+    }
+
+    // Default: Styled ExcelJS Workbook
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Frontpin HRMS";
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet("Payroll Summary", {
+      views: [{ showGridLines: true }]
+    });
+
+    worksheet.columns = [
+      { header: "ID", key: "id", width: 8 },
+      { header: "Emp ID", key: "empId", width: 12 },
+      { header: "Employee Name", key: "empName", width: 24 },
+      { header: "Department", key: "department", width: 20 },
+      { header: "Designation", key: "designation", width: 22 },
+      { header: "Period", key: "period", width: 14 },
+      { header: "Base Rate (PKR)", key: "rate", width: 16 },
+      { header: "Working Days", key: "workingDays", width: 14 },
+      { header: "Present Days", key: "presentDays", width: 14 },
+      { header: "Absent Days", key: "absentDays", width: 14 },
+      { header: "Overtime (Hrs)", key: "overtimeHours", width: 14 },
+      { header: "Gross Salary (PKR)", key: "grossSalary", width: 18 },
+      { header: "Deductions (PKR)", key: "deductions", width: 18 },
+      { header: "Net Salary (PKR)", key: "netSalary", width: 18 },
+      { header: "Status", key: "status", width: 14 },
+      { header: "Payment Method", key: "paymentMethod", width: 18 },
+      { header: "Transaction Ref", key: "transactionRef", width: 22 },
+      { header: "Paid Date", key: "paidAt", width: 16 }
+    ];
+
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1E3A8A" }
+    };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 26;
+
+    let totalGrossSum = 0;
+    let totalNetSum = 0;
+
+    payrolls.forEach((p, idx) => {
+      const emp = p.employee;
+      const empName = emp ? `${emp.firstName || ""} ${emp.lastName || ""}`.trim() : "Unknown";
+      const dept = emp?.department?.title || "N/A";
+      const desig = emp?.jobInfo?.jobTitle || "Staff";
+      const periodStr = moment(p.periodStart).format("MMM YYYY");
+      const gross = Number(p.grossSalary || 0);
+      const net = Number(p.netSalary || 0);
+      const deductions = Math.max(0, gross - net);
+
+      totalGrossSum += gross;
+      totalNetSum += net;
+
+      const row = worksheet.addRow({
+        id: p.id,
+        empId: emp?.id || "N/A",
+        empName,
+        department: dept,
+        designation: desig,
+        period: periodStr,
+        rate: Number(p.rate || 0),
+        workingDays: p.workingDays || 0,
+        presentDays: p.presentDays || 0,
+        absentDays: p.absentDays || 0,
+        overtimeHours: p.overtimeHours || 0,
+        grossSalary: gross,
+        deductions,
+        netSalary: net,
+        status: p.status,
+        paymentMethod: p.paymentMethod || "—",
+        transactionRef: p.transactionRef || "—",
+        paidAt: p.paidAt ? moment(p.paidAt).format("YYYY-MM-DD") : "—"
+      });
+
+      if (idx % 2 === 1) {
+        row.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF8FAFC" }
+        };
+      }
+    });
+
+    if (payrolls.length > 0) {
+      const totalRow = worksheet.addRow({
+        id: "TOTAL",
+        empId: "",
+        empName: `Total Count: ${payrolls.length}`,
+        department: "",
+        designation: "",
+        period: "",
+        rate: "",
+        workingDays: "",
+        presentDays: "",
+        absentDays: "",
+        overtimeHours: "",
+        grossSalary: totalGrossSum,
+        deductions: Math.max(0, totalGrossSum - totalNetSum),
+        netSalary: totalNetSum,
+        status: "",
+        paymentMethod: "",
+        transactionRef: "",
+        paidAt: ""
+      });
+      totalRow.font = { bold: true };
+      totalRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" }
+      };
+      totalRow.height = 22;
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="Payroll_Report_${moment().format("YYYYMMDD_HHmmss")}.xlsx"`
+    );
+    return res.send(buffer);
+  } catch (err) {
+    console.error("Export payrolls error:", err);
+    res.status(500).json({ message: "Failed to export payrolls" });
   }
 };
 exports.lockPayroll = async (req, res) => {
@@ -1126,7 +1505,19 @@ exports.generateRunPayrolls = async (req, res) => {
         organizationId: run.organizationId,
         deletedAt: null
       },
-      include: { payroll: true }
+      include: {
+        payroll: true,
+        jobInfo: true,
+        company: true,
+        department: true,
+        Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } }
+      }
+    });
+
+    const dayOverrides = await getDayOverrides({
+      organizationId: run.organizationId,
+      startDate: moment({ year: run.year, month: run.month - 1 }).subtract(1, "month").format("YYYY-MM-DD"),
+      endDate: moment({ year: run.year, month: run.month - 1 }).add(1, "month").format("YYYY-MM-DD")
     });
 
     let totalGross = 0;
@@ -1136,29 +1527,172 @@ exports.generateRunPayrolls = async (req, res) => {
     for (const emp of employees) {
       if (!emp.payroll) continue;
 
-      const grossSalary = emp.payroll.rate;
-      const netSalary = grossSalary;
+      const cycleDate = Number(emp.payroll.cycleDate) || 1;
+      let periodStart, periodEnd;
+
+      if (cycleDate <= 1) {
+        periodStart = moment({ year: run.year, month: run.month - 1 }).startOf("month");
+        periodEnd = moment({ year: run.year, month: run.month - 1 }).endOf("month");
+      } else {
+        periodEnd = moment({ year: run.year, month: run.month - 1 }).date(cycleDate - 1).endOf("day");
+        periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
+      }
+
+      const hiringDate = emp.jobInfo?.hiringDate ? moment(emp.jobInfo.hiringDate) : null;
+
+      // Skip if hired after periodEnd
+      if (hiringDate && hiringDate.isAfter(periodEnd)) {
+        continue;
+      }
+
+      // Prorate if hired during period
+      if (hiringDate && hiringDate.isAfter(periodStart) && hiringDate.isSameOrBefore(periodEnd)) {
+        periodStart = hiringDate.clone().startOf("day");
+      }
+
+      // Check existing payroll
+      const existing = await prisma.payroll.findFirst({
+        where: {
+          employeeId: emp.id,
+          deletedAt: null,
+          OR: [
+            { periodStart: periodStart.toDate(), periodEnd: periodEnd.toDate() },
+            {
+              periodStart: {
+                gte: periodStart.clone().startOf("day").toDate(),
+                lte: periodStart.clone().endOf("day").toDate()
+              }
+            }
+          ]
+        }
+      });
+
+      if (existing) {
+        continue;
+      }
+
+      // Fetch Attendance
+      const attendance = await prisma.attendance.findMany({
+        where: {
+          employeeId: emp.id,
+          date: { gte: periodStart.toDate(), lte: periodEnd.toDate() },
+          deletedAt: null
+        }
+      });
+
+      // Fetch Approved Leaves
+      const leaves = await prisma.leaveRequest.findMany({
+        where: {
+          employeeId: emp.id,
+          status: "APPROVED",
+          startDate: { lte: periodEnd.toDate() },
+          endDate: { gte: periodStart.toDate() }
+        }
+      });
+
+      // Fetch Approved Overtime
+      const overtimes = await prisma.overtime.findMany({
+        where: {
+          employeeId: emp.id,
+          status: "APPROVED",
+          date: { gte: periodStart.toDate(), lte: periodEnd.toDate() }
+        }
+      });
+
+      const hourlyRate = calculateHourlyRate(emp.payroll, emp.Schedule);
+      const overtimeHours = overtimes.reduce((sum, o) => sum + (Number(o.hours) || 0), 0);
+      const overtimeAmount = overtimes.reduce((sum, o) => {
+        if (o.amount !== undefined && o.amount !== null && Number(o.amount) > 0) {
+          return sum + Number(o.amount);
+        }
+        return sum + ((Number(o.hours) || 0) * hourlyRate * (Number(o.rate) || 1.5));
+      }, 0);
+
+      // Attendance, working days, absences calculation via shared helper
+      const {
+        workingDays,
+        presentDays,
+        absentDays,
+        paidLeaves,
+        unpaidLeaves,
+        leaveDays,
+        lateDays
+      } = calculatePayrollAttendance({
+        employee: emp,
+        periodStart,
+        periodEnd,
+        attendances: attendance,
+        leaves,
+        dayOverrides
+      });
+
+      // Salary calculation based on payoutType
+      const rate = Number(emp.payroll.rate) || 0;
+      const payoutType = emp.payroll.payoutType || "monthly";
+      let dailyRate = workingDays > 0 ? (rate / workingDays) : (rate / 30);
+      let absentDeduction = 0;
+      let baseSalary = rate;
+
+      if (payoutType === "daily") {
+        dailyRate = rate;
+        baseSalary = (presentDays + paidLeaves) * dailyRate;
+        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
+      } else if (payoutType === "hourly") {
+        const totalMinutes = attendance.reduce((sum, a) => sum + (Number(a.totalWorkedMinutes) || 0), 0);
+        baseSalary = (totalMinutes / 60) * rate;
+      } else {
+        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
+      }
+
+      const grossSalary = Math.max(0, baseSalary + overtimeAmount);
+      const netSalary = Math.max(0, grossSalary - absentDeduction);
 
       const payroll = await prisma.payroll.create({
         data: {
           employeeId: emp.id,
           organizationId: run.organizationId,
           runId: run.id,
-          periodStart: moment({ year: run.year, month: run.month - 1 }).startOf("month").toDate(),
-          periodEnd: moment({ year: run.year, month: run.month - 1 }).endOf("month").toDate(),
-          payoutType: emp.payroll.payoutType,
-          rate: emp.payroll.rate,
-          currency: emp.payroll.currency,
-          workingDays: 30,
-          presentDays: 30,
-          absentDays: 0,
-          leaveDays: 0,
-          lateDays: 0,
+          periodStart: periodStart.toDate(),
+          periodEnd: periodEnd.toDate(),
+          payoutType,
+          rate,
+          currency: emp.payroll.currency || "PKR",
+          workingDays,
+          presentDays,
+          absentDays,
+          leaveDays,
+          lateDays,
+          overtimeHours,
           grossSalary,
           netSalary,
+          status: "GENERATED",
           createdById: req.user.id
         }
       });
+
+      if (overtimeAmount > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "OVERTIME",
+            title: "Overtime",
+            amount: Number(overtimeAmount),
+            createdById: req.user.id
+          }
+        });
+      }
+
+      if (Number(absentDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Unpaid Days",
+            amount: Math.round(Number(absentDeduction) * 100) / 100,
+            createdById: req.user.id
+          }
+        });
+      }
 
       await prisma.payrollAuditLog.create({
         data: {
@@ -1183,10 +1717,16 @@ exports.generateRunPayrolls = async (req, res) => {
       }
     });
 
-    res.json({ message: "Payroll generated successfully" });
+    res.json({
+      success: true,
+      message: `Payroll generated successfully for ${count} employees`,
+      count,
+      totalGross,
+      totalNet
+    });
 
   } catch (err) {
-    console.log(err);
+    console.error("Generate Run Payrolls Error:", err);
     res.status(500).json({ message: "Generation failed" });
   }
 };
@@ -1224,18 +1764,23 @@ exports.lockRun = async (req, res) => {
 };
 exports.markRunPaid = async (req, res) => {
   const runId = Number(req.params.runId);
+  const { paymentMethod, transactionRef } = req.body || {};
 
   await prisma.payrollRun.update({
     where: { id: runId },
     data: { status: "PAID" }
   });
 
+  const payrollData = {
+    status: "PAID",
+    paidAt: new Date()
+  };
+  if (paymentMethod) payrollData.paymentMethod = paymentMethod;
+  if (transactionRef) payrollData.transactionRef = transactionRef;
+
   await prisma.payroll.updateMany({
     where: { runId },
-    data: {
-      status: "PAID",
-      paidAt: new Date()
-    }
+    data: payrollData
   });
 
   res.json({ message: "Payroll paid successfully" });
@@ -1260,6 +1805,59 @@ exports.getSingleRun = async (req, res) => {
 
   res.json(run);
 };
+/**
+ * Helper to recalculate and persist accurate grossSalary and netSalary for a payroll.
+ * Preserves the employee's base salary (rate) if no explicit BASIC component exists,
+ * sums all earnings components, subtracts all deductions, and updates DB.
+ */
+async function recalculatePayrollTotals(payrollId) {
+  const payroll = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    include: { components: true }
+  });
+
+  if (!payroll) return null;
+
+  const components = payroll.components || [];
+
+  const hasBasicComponent = components.some(
+    c => String(c.type || "").toUpperCase() === "BASIC"
+  );
+
+  const baseSalary = hasBasicComponent ? 0 : Number(payroll.rate || 0);
+
+  const extraEarnings = components
+    .filter(c =>
+      ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME", "INCREMENT", "KPIS", "BOUNTY", "ARREARS"].includes(
+        String(c.type || "").toUpperCase()
+      )
+    )
+    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
+  const extraDeductions = components
+    .filter(c =>
+      ["TAX", "LOAN", "DEDUCTION", "TARDIES", "UNPAID", "FOOD", "CT", "GYM", "ADVANCE"].includes(
+        String(c.type || "").toUpperCase()
+      )
+    )
+    .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
+  const grossSalary = Math.max(0, baseSalary + extraEarnings);
+  const netSalary = Math.max(0, grossSalary - extraDeductions);
+
+  const updated = await prisma.payroll.update({
+    where: { id: payrollId },
+    data: {
+      grossSalary,
+      netSalary
+    }
+  });
+
+  return { updated, grossSalary, netSalary };
+}
+
+exports.recalculatePayrollTotals = recalculatePayrollTotals;
+
 exports.addComponent = async (req, res) => {
   try {
     const payrollId = Number(req.params.id);
@@ -1299,31 +1897,8 @@ exports.addComponent = async (req, res) => {
       }
     });
 
-    // 🔥 Recalculate Payroll Totals
-    const components = await prisma.payrollComponent.findMany({
-      where: { payrollId }
-    });
-
-    const earnings = components
-      .filter(c =>
-        ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type)
-      )
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const deductions = components
-      .filter(c =>
-        ["TAX", "LOAN", "DEDUCTION"].includes(c.type)
-      )
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const netSalary = earnings - deductions;
-
-    await prisma.payroll.update({
-      where: { id: payrollId },
-      data: {
-        netSalary
-      }
-    });
+    // 🔥 Recalculate Payroll Totals preserving base salary
+    const totals = await recalculatePayrollTotals(payrollId);
 
     // 🔥 Audit Log
     await prisma.payrollAuditLog.create({
@@ -1337,7 +1912,8 @@ exports.addComponent = async (req, res) => {
     res.json({
       success: true,
       component,
-      netSalary
+      grossSalary: totals?.grossSalary,
+      netSalary: totals?.netSalary
     });
 
   } catch (err) {
@@ -1374,26 +1950,14 @@ exports.updateComponent = async (req, res) => {
       },
     });
 
-    const components = await prisma.payrollComponent.findMany({
-      where: { payrollId: payroll.id }
+    const totals = await recalculatePayrollTotals(payroll.id);
+
+    res.json({
+      success: true,
+      component: updatedComponent,
+      grossSalary: totals?.grossSalary,
+      netSalary: totals?.netSalary
     });
-
-    const earnings = components
-      .filter(c => ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type))
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const deductions = components
-      .filter(c => ["TAX", "LOAN", "DEDUCTION"].includes(c.type))
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const netSalary = earnings - deductions;
-
-    await prisma.payroll.update({
-      where: { id: payroll.id },
-      data: { netSalary }
-    });
-
-    res.json({ success: true, component: updatedComponent, netSalary });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to update component" });
@@ -1422,26 +1986,14 @@ exports.deleteComponent = async (req, res) => {
       where: { id: componentId },
     });
 
-    const components = await prisma.payrollComponent.findMany({
-      where: { payrollId: payroll.id }
+    const totals = await recalculatePayrollTotals(payroll.id);
+
+    res.json({
+      success: true,
+      message: "Component deleted successfully",
+      grossSalary: totals?.grossSalary,
+      netSalary: totals?.netSalary
     });
-
-    const earnings = components
-      .filter(c => ["BASIC", "ALLOWANCE", "BONUS", "COMMISSION", "OVERTIME"].includes(c.type))
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const deductions = components
-      .filter(c => ["TAX", "LOAN", "DEDUCTION"].includes(c.type))
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const netSalary = earnings - deductions;
-
-    await prisma.payroll.update({
-      where: { id: payroll.id },
-      data: { netSalary }
-    });
-
-    res.json({ success: true, message: "Component deleted successfully", netSalary });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to delete component" });
@@ -1910,7 +2462,7 @@ exports.getRiskAlerts = async (req, res) => {
 exports.updatePayroll = async (req, res) => {
   try {
     const payrollId = Number(req.params.id);
-    const { rate, overtimeAmount, bonus, grossDeductions, status } = req.body;
+    const { rate, overtimeAmount, bonus, grossDeductions, status, paymentMethod, transactionRef, paidAt } = req.body;
 
     const payroll = await prisma.payroll.findUnique({
       where: { id: payrollId },
@@ -1933,8 +2485,19 @@ exports.updatePayroll = async (req, res) => {
     if (status !== undefined) {
       updateData.status = status;
       if (status === "PAID") {
-        updateData.paidAt = new Date();
+        updateData.paidAt = paidAt ? new Date(paidAt) : new Date();
+      } else {
+        updateData.paidAt = null;
       }
+    }
+    if (paymentMethod !== undefined) {
+      updateData.paymentMethod = paymentMethod;
+    }
+    if (transactionRef !== undefined) {
+      updateData.transactionRef = transactionRef;
+    }
+    if (paidAt !== undefined && status === "PAID") {
+      updateData.paidAt = new Date(paidAt);
     }
 
     if (overtimeAmount !== undefined && !isNaN(Number(overtimeAmount))) {

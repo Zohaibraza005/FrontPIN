@@ -141,7 +141,27 @@ export const Payroll: React.FC = () => {
   const [editBonus, setEditBonus] = useState<number | string>('');
   const [editDeductions, setEditDeductions] = useState<number | string>('');
   const [editStatus, setEditStatus] = useState<string>('GENERATED');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<string>('BANK_TRANSFER');
+  const [editTransactionRef, setEditTransactionRef] = useState<string>('');
+  const [editPaidAt, setEditPaidAt] = useState<string>('');
   const [updating, setUpdating] = useState(false);
+
+  // Export states
+  const [exporting, setExporting] = useState(false);
+
+  // Bulk Selection States
+  const [selectedPayrollIds, setSelectedPayrollIds] = useState<number[]>([]);
+  const [bulkPayModalOpen, setBulkPayModalOpen] = useState(false);
+  const [bulkLockModalOpen, setBulkLockModalOpen] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+
+  // Single Pay Modal States
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payrollToPay, setPayrollToPay] = useState<any>(null);
+  const [paymentMethod, setPaymentMethod] = useState<string>('BANK_TRANSFER');
+  const [transactionRef, setTransactionRef] = useState<string>('');
+  const [paidDate, setPaidDate] = useState<string>(moment().format('YYYY-MM-DD'));
+  const [paying, setPaying] = useState(false);
 
   // Lock Confirmation Modal States
   const [lockModalOpen, setLockModalOpen] = useState(false);
@@ -289,6 +309,9 @@ export const Payroll: React.FC = () => {
     setEditBonus(payroll?.bonus ?? 0);
     setEditDeductions(payroll?.grossDeductions ?? 0);
     setEditStatus(payroll?.status || 'GENERATED');
+    setEditPaymentMethod(payroll?.paymentMethod || 'BANK_TRANSFER');
+    setEditTransactionRef(payroll?.transactionRef || '');
+    setEditPaidAt(payroll?.paidAt ? moment(payroll.paidAt).format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'));
     setEditOpen(true);
   };
 
@@ -302,6 +325,9 @@ export const Payroll: React.FC = () => {
         bonus: Number(editBonus),
         grossDeductions: Number(editDeductions),
         status: editStatus,
+        paymentMethod: editStatus === "PAID" ? editPaymentMethod : null,
+        transactionRef: editStatus === "PAID" ? (editTransactionRef.trim() || null) : null,
+        paidAt: editStatus === "PAID" ? (editPaidAt ? new Date(editPaidAt) : new Date()) : null,
       });
       toast.success('Payroll updated successfully');
       setEditOpen(false);
@@ -312,6 +338,126 @@ export const Payroll: React.FC = () => {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to update payroll');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleExport = async (format: "xlsx" | "csv" = "xlsx", specificIds?: number[]) => {
+    try {
+      setExporting(true);
+      await payrollAPI.exportPayroll({
+        month: filterMonth !== "all" ? Number(filterMonth) : undefined,
+        year: filterYear || undefined,
+        status: filterStatus !== "all" ? filterStatus : undefined,
+        ids: specificIds && specificIds.length > 0 ? specificIds : undefined,
+        format,
+      });
+      toast.success(`Payroll report exported successfully as ${format.toUpperCase()}`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to export payroll report");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleSelectAllRows = (checked: boolean) => {
+    if (checked) {
+      const allIds = (payrolls || []).map((p: any) => p.id);
+      setSelectedPayrollIds(allIds);
+    } else {
+      setSelectedPayrollIds([]);
+    }
+  };
+
+  const handleToggleRowSelect = (id: number) => {
+    setSelectedPayrollIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleStatusSelectChange = (payroll: any, newStatus: string) => {
+    if (newStatus === "PAID") {
+      setPayrollToPay(payroll);
+      setPaymentMethod(payroll.paymentMethod || "BANK_TRANSFER");
+      setTransactionRef(payroll.transactionRef || "");
+      setPaidDate(payroll.paidAt ? moment(payroll.paidAt).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"));
+      setPayModalOpen(true);
+    } else {
+      handleDirectStatusChange(payroll.id, newStatus as any);
+    }
+  };
+
+  const handleDirectStatusChange = async (id: number, status: "GENERATED" | "DRAFT") => {
+    try {
+      await payrollAPI.updateStatus(id, { status });
+      toast.success(`Status updated to ${status}`);
+      loadPayrolls();
+      loadAnalytics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Update failed");
+    }
+  };
+
+  const handleConfirmSinglePay = async () => {
+    if (!payrollToPay) return;
+    try {
+      setPaying(true);
+      await payrollAPI.updateStatus(payrollToPay.id, {
+        status: "PAID",
+        paymentMethod,
+        transactionRef: transactionRef.trim() || undefined,
+        paidAt: paidDate || new Date(),
+      });
+      toast.success(`Payroll for ${payrollToPay?.employee?.firstName || 'employee'} marked as PAID`);
+      setPayModalOpen(false);
+      setPayrollToPay(null);
+      loadPayrolls();
+      loadAnalytics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update payment");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const handleBulkPayConfirm = async () => {
+    if (selectedPayrollIds.length === 0) return;
+    try {
+      setBulkProcessing(true);
+      await payrollAPI.bulkUpdateStatus({
+        ids: selectedPayrollIds,
+        status: "PAID",
+        paymentMethod,
+        transactionRef: transactionRef.trim() || undefined,
+        paidAt: paidDate || new Date(),
+      });
+      toast.success(`${selectedPayrollIds.length} payroll(s) marked as PAID`);
+      setBulkPayModalOpen(false);
+      setSelectedPayrollIds([]);
+      loadPayrolls();
+      loadAnalytics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to update bulk status");
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const handleBulkLockConfirm = async () => {
+    if (selectedPayrollIds.length === 0) return;
+    try {
+      setBulkProcessing(true);
+      await payrollAPI.bulkLock({
+        ids: selectedPayrollIds,
+      });
+      toast.success(`${selectedPayrollIds.length} payroll(s) locked`);
+      setBulkLockModalOpen(false);
+      setSelectedPayrollIds([]);
+      loadPayrolls();
+      loadAnalytics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || "Failed to lock selected payrolls");
+    } finally {
+      setBulkProcessing(false);
     }
   };
 
@@ -1014,19 +1160,115 @@ export const Payroll: React.FC = () => {
                 ]}
               />
 
-              <Button variant="outline" size="sm" className="h-9 px-3 text-xs rounded-xl font-medium border-gray-200 hover:bg-gray-50">
-                <Download className="mr-1.5 size-3.5 text-gray-600" />
-                Export
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exporting || (payrolls || []).length === 0}
+                    className="h-9 px-3 text-xs rounded-xl font-bold border-gray-200 hover:bg-gray-50 flex items-center gap-1.5 text-gray-700 shadow-2xs"
+                  >
+                    {exporting ? (
+                      <Loader2 className="size-3.5 animate-spin text-blue-600" />
+                    ) : (
+                      <Download className="size-3.5 text-blue-600" />
+                    )}
+                    <span>Export All</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem
+                    onClick={() => handleExport("xlsx")}
+                    className="text-xs font-semibold cursor-pointer flex items-center gap-2 py-2"
+                  >
+                    <div className="size-2 rounded-full bg-emerald-500" />
+                    <span>Excel Spreadsheet (.xlsx)</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleExport("csv")}
+                    className="text-xs font-semibold cursor-pointer flex items-center gap-2 py-2"
+                  >
+                    <div className="size-2 rounded-full bg-blue-500" />
+                    <span>CSV Document (.csv)</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          {/* BULK ACTIONS TOOLBAR */}
+          {selectedPayrollIds.length > 0 && (
+            <div className="m-4 p-3.5 bg-indigo-50/90 border border-indigo-200 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-2xs animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-2.5">
+                <Badge className="bg-indigo-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-lg">
+                  {selectedPayrollIds.length} Selected
+                </Badge>
+                <span className="text-xs font-bold text-indigo-950">
+                  Bulk actions for selected employees
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setPaymentMethod("BANK_TRANSFER");
+                    setTransactionRef("");
+                    setPaidDate(moment().format("YYYY-MM-DD"));
+                    setBulkPayModalOpen(true);
+                  }}
+                  className="h-8 px-3 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <DollarSign className="size-3.5" />
+                  <span>Mark Selected as Paid</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setBulkLockModalOpen(true)}
+                  className="h-8 px-3 text-xs font-bold bg-white text-slate-800 border-slate-300 hover:bg-slate-50 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Lock className="size-3.5 text-slate-600" />
+                  <span>Lock Selected</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleExport("xlsx", selectedPayrollIds)}
+                  disabled={exporting}
+                  className="h-8 px-3 text-xs font-bold bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="size-3.5 text-indigo-600" />
+                  <span>Export Selected</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setSelectedPayrollIds([])}
+                  className="h-8 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-white/80 rounded-xl cursor-pointer"
+                >
+                  Clear Selection
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <Table>
               <TableHeader className="bg-gray-50/80">
                 <TableRow>
-                  <TableHead className="font-bold text-gray-700 text-xs pl-6">Employee</TableHead>
+                  <TableHead className="w-[45px] pl-6">
+                    <Checkbox
+                      checked={(payrolls || []).length > 0 && selectedPayrollIds.length === (payrolls || []).length}
+                      onCheckedChange={(checked) => handleSelectAllRows(!!checked)}
+                      aria-label="Select all payroll records"
+                    />
+                  </TableHead>
+                  <TableHead className="font-bold text-gray-700 text-xs">Employee</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Base Salary</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Overtime</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Net Pay</TableHead>
@@ -1057,8 +1299,17 @@ export const Payroll: React.FC = () => {
 
                   return (
                     <TableRow key={payroll.id} className="hover:bg-gray-50/80 transition-colors">
-                      {/* Employee Avatar + Info Cell */}
+                      {/* Checkbox Cell */}
                       <TableCell className="pl-6 py-3.5">
+                        <Checkbox
+                          checked={selectedPayrollIds.includes(payroll.id)}
+                          onCheckedChange={() => handleToggleRowSelect(payroll.id)}
+                          aria-label={`Select ${empName}`}
+                        />
+                      </TableCell>
+
+                      {/* Employee Avatar + Info Cell */}
+                      <TableCell className="py-3.5">
                         <div className="flex items-center gap-3">
                           <div className="size-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
                             {initials || "U"}
@@ -1093,28 +1344,35 @@ export const Payroll: React.FC = () => {
 
                       {/* Status Dropdown Cell */}
                       <TableCell className="py-3.5">
-                        <Select
-                          value={payroll.status}
-                          onValueChange={async (value) => {
-                            try {
-                              await payrollAPI.updateStatus(payroll.id, { status: value });
-                              toast.success("Status updated");
-                              loadPayrolls();
-                            } catch (err: any) {
-                              toast.error(err?.response?.data?.message || "Update failed");
-                            }
-                          }}
-                          disabled={payroll.locked}
-                        >
-                          <SelectTrigger className="w-[125px] h-8 text-xs font-semibold rounded-xl bg-gray-50 border-gray-200">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GENERATED">Generated</SelectItem>
-                            <SelectItem value="PAID">Paid</SelectItem>
-                            <SelectItem value="DRAFT">Draft</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="space-y-1">
+                          <Select
+                            value={payroll.status}
+                            onValueChange={(val) => handleStatusSelectChange(payroll, val)}
+                            disabled={payroll.locked}
+                          >
+                            <SelectTrigger className="w-[125px] h-8 text-xs font-semibold rounded-xl bg-gray-50 border-gray-200">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="GENERATED">Generated</SelectItem>
+                              <SelectItem value="PAID">Paid</SelectItem>
+                              <SelectItem value="DRAFT">Draft</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          {payroll.status === "PAID" && payroll.paymentMethod && (
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {payroll.paymentMethod.replace(/_/g, " ")}
+                              </span>
+                              {payroll.transactionRef && (
+                                <span className="text-[10px] text-gray-500 font-mono truncate max-w-[80px]" title={payroll.transactionRef}>
+                                  #{payroll.transactionRef}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
 
                       {/* Actions Cell */}
@@ -1430,6 +1688,51 @@ export const Payroll: React.FC = () => {
               </Select>
             </div>
 
+            {/* PAYMENT DETAILS IF PAID */}
+            {editStatus === "PAID" && (
+              <div className="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+                  <CreditCard className="size-3.5" />
+                  <span>Payment Details</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold text-gray-700">Payment Method</Label>
+                    <Select value={editPaymentMethod} onValueChange={setEditPaymentMethod}>
+                      <SelectTrigger className="h-8 text-xs font-semibold bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
+                        <SelectItem value="CASH">Cash</SelectItem>
+                        <SelectItem value="CHEQUE">Cheque</SelectItem>
+                        <SelectItem value="ONLINE">Online / Wallet</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold text-gray-700">Transaction / Cheque #</Label>
+                    <Input
+                      type="text"
+                      placeholder="e.g. TXN-89210"
+                      value={editTransactionRef}
+                      onChange={(e) => setEditTransactionRef(e.target.value)}
+                      className="h-8 text-xs bg-white font-mono"
+                    />
+                  </div>
+                  <div className="col-span-2 space-y-1">
+                    <Label className="text-[11px] font-bold text-gray-700">Payment Date</Label>
+                    <Input
+                      type="date"
+                      value={editPaidAt}
+                      onChange={(e) => setEditPaidAt(e.target.value)}
+                      className="h-8 text-xs bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* COMPUTED PREVIEW */}
             <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between text-xs font-semibold">
               <span className="text-gray-600">Calculated Net Salary:</span>
@@ -1586,6 +1889,242 @@ export const Payroll: React.FC = () => {
                 <>
                   <Lock className="size-3.5" />
                   Confirm & Lock
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SINGLE EMPLOYEE MARK AS PAID DIALOG */}
+      <Dialog open={payModalOpen} onOpenChange={setPayModalOpen}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2 text-emerald-800">
+              <CreditCard className="size-5 text-emerald-600" />
+              Mark as Paid - {payrollToPay?.employee ? `${payrollToPay.employee.firstName} ${payrollToPay.employee.lastName || ''}` : 'Employee'}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center justify-between text-xs font-semibold">
+              <span className="text-emerald-900">Net Salary Payable:</span>
+              <span className="font-mono text-sm font-bold text-emerald-700">
+                Rs. {Number(payrollToPay?.netSalary || payrollToPay?.rate || 0).toLocaleString()}
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Payment Method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger className="h-9 text-xs font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="CHEQUE">Cheque</SelectItem>
+                    <SelectItem value="ONLINE">Online Transfer / Wallet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Transaction Reference / Cheque #</Label>
+                <Input
+                  type="text"
+                  placeholder="e.g. TXN-89210 or Cheque #1024"
+                  value={transactionRef}
+                  onChange={(e) => setTransactionRef(e.target.value)}
+                  className="h-9 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Payment Date</Label>
+                <Input
+                  type="date"
+                  value={paidDate}
+                  onChange={(e) => setPaidDate(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-3 flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={paying}
+              onClick={() => {
+                setPayModalOpen(false);
+                setPayrollToPay(null);
+              }}
+              className="rounded-xl border-gray-300 text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={paying}
+              onClick={handleConfirmSinglePay}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-700 font-bold text-xs px-4 text-white shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              {paying ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-3.5" />
+                  Confirm & Mark Paid
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BULK MARK AS PAID DIALOG */}
+      <Dialog open={bulkPayModalOpen} onOpenChange={setBulkPayModalOpen}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2 text-emerald-800">
+              <CreditCard className="size-5 text-emerald-600" />
+              Bulk Mark as Paid ({selectedPayrollIds.length} Employees)
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-gray-600 leading-relaxed">
+              You are about to mark <strong>{selectedPayrollIds.length}</strong> payroll records as <strong>PAID</strong>. Specify the batch payment details below:
+            </p>
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Payment Method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger className="h-9 text-xs font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BANK_TRANSFER">Bank Transfer (Bulk)</SelectItem>
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="CHEQUE">Cheque</SelectItem>
+                    <SelectItem value="ONLINE">Online Transfer / Wallet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Batch Transaction / Reference # (Optional)</Label>
+                <Input
+                  type="text"
+                  placeholder="e.g. BATCH-SALARY-OCT26"
+                  value={transactionRef}
+                  onChange={(e) => setTransactionRef(e.target.value)}
+                  className="h-9 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700">Payment Date</Label>
+                <Input
+                  type="date"
+                  value={paidDate}
+                  onChange={(e) => setPaidDate(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-3 flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={bulkProcessing}
+              onClick={() => setBulkPayModalOpen(false)}
+              className="rounded-xl border-gray-300 text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={bulkProcessing}
+              onClick={handleBulkPayConfirm}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-700 font-bold text-xs px-4 text-white shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              {bulkProcessing ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-3.5" />
+                  Confirm Bulk Payment
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BULK LOCK CONFIRMATION DIALOG */}
+      <Dialog open={bulkLockModalOpen} onOpenChange={setBulkLockModalOpen}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-6 bg-white shadow-2xl border border-gray-200">
+          <div className="flex items-start gap-3.5">
+            <div className="size-11 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0">
+              <Lock className="size-5.5 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900 leading-snug">
+                Lock Selected Payrolls ({selectedPayrollIds.length})
+              </h3>
+              <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                Are you sure you want to lock all <strong>{selectedPayrollIds.length}</strong> selected payroll records?
+              </p>
+              <div className="text-xs text-amber-800 bg-amber-50/80 p-3 rounded-xl border border-amber-200/80 mt-3 space-y-1">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
+                  Irreversible Action Notice:
+                </p>
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  Locked records <strong>cannot be edited or deleted</strong>. All earnings and deductions for these employees will be finalized.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-5 flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={bulkProcessing}
+              onClick={() => setBulkLockModalOpen(false)}
+              className="rounded-xl border-gray-300 text-xs font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={bulkProcessing}
+              onClick={handleBulkLockConfirm}
+              className="rounded-xl bg-gray-900 hover:bg-black font-bold text-xs px-4 text-white shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              {bulkProcessing ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Locking...
+                </>
+              ) : (
+                <>
+                  <Lock className="size-3.5" />
+                  Confirm Bulk Lock
                 </>
               )}
             </Button>

@@ -8,6 +8,19 @@ exports.getLocations = async (req, res) => {
       organizationId: orgId,
       deletedAt: null,
     },
+    include: {
+      _count: {
+        select: {
+          employees: {
+            where: {
+              organizationId: orgId,
+              deletedAt: null,
+              NOT: { role: "ADMIN" },
+            },
+          },
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -129,11 +142,41 @@ exports.updateLocation = async (req, res) => {
           message: "Location not found",
         });
       }
+
+      // Check if another active location exists to reassign employees and schedules
+      const anotherLocation = await prisma.company.findFirst({
+        where: {
+          organizationId: orgId,
+          deletedAt: null,
+          id: { not: locationId },
+        },
+      });
+
+      if (anotherLocation) {
+        await prisma.employee.updateMany({
+          where: { companyId: locationId },
+          data: { companyId: anotherLocation.id },
+        });
+        await prisma.schedule.updateMany({
+          where: { companyId: locationId },
+          data: { companyId: anotherLocation.id },
+        });
+      } else {
+        await prisma.employee.updateMany({
+          where: { companyId: locationId },
+          data: { companyId: null },
+        });
+        await prisma.schedule.updateMany({
+          where: { companyId: locationId },
+          data: { companyId: null },
+        });
+      }
   
       await prisma.company.update({
         where: { id: locationId },
         data: {
           deletedAt: new Date(),
+          active: false,
         },
       });
   

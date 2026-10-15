@@ -849,7 +849,7 @@ export const AddEmployee: React.FC = () => {
                       Enable System Login Access
                     </Label>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Allow this employee to log into the Frontpin web app & mobile PIN system.
+                      Allow this employee to log into the HR Pro Management System web app & mobile PIN system.
                     </p>
                   </div>
                 </div>

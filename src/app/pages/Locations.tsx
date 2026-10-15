@@ -15,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
+  DialogFooter,
 } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import {
@@ -24,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { MapPin, Plus, Edit, Users, Clock } from 'lucide-react';
+import { MapPin, Plus, Edit, Users, Clock, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE_URL, locationAPI } from '../services/api';
 import { Checkbox } from '../components/ui/checkbox';
@@ -78,6 +80,8 @@ const Locations: React.FC<Props> = ({ google }) => {
   const [newLocationOpen, setNewLocationOpen] = useState(false);
   const [editLocation, setEditLocation] = useState<any | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [locationToDelete, setLocationToDelete] = useState<any | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
 const autocompleteRef = useRef<any>(null);
 const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -131,13 +135,31 @@ const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     if (!editLocation?.id) return;
     try {
       await locationAPI.deleteLocation(editLocation.id);
-      toast.success('Location deleted!');
+      toast.success('Location deleted successfully!');
       setNewLocationOpen(false);
       setIsEditMode(false);
       setEditLocation(null);
       fetchLocations();
-    } catch {
-      toast.error('Failed to delete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete');
+    }
+  };
+
+  const confirmDeleteLocation = (location: any) => {
+    setLocationToDelete(location);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!locationToDelete?.id) return;
+    try {
+      await locationAPI.deleteLocation(locationToDelete.id);
+      toast.success(`Location "${locationToDelete.name}" deleted successfully!`);
+      setDeleteDialogOpen(false);
+      setLocationToDelete(null);
+      fetchLocations();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete location');
     }
   };
 
@@ -391,51 +413,115 @@ const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {locations.map((location) => (
-          <Card key={location.id} className="hover:shadow-lg transition-shadow">
-            <CardHeader>
+          <Card key={location.id} className="hover:shadow-lg transition-shadow border border-gray-200">
+            <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-blue-100 rounded-lg">
                     <MapPin className="size-6 text-blue-600" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg">{location.name}</CardTitle>
-                    <Badge variant="outline" className="mt-1">
-                      {location.type}
+                    <CardTitle className="text-lg font-semibold">{location.name}</CardTitle>
+                    <Badge variant="outline" className="mt-1 capitalize">
+                      {location.type || 'Office'}
                     </Badge>
                   </div>
                 </div>
-                {location.active ? (
-                  <Badge className="bg-green-100 text-green-800">Active</Badge>
-                ) : (
-                  <Badge variant="secondary">Inactive</Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {location.active ? (
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Active</Badge>
+                  ) : (
+                    <Badge variant="secondary">Inactive</Badge>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="text-sm text-gray-600">
                 <p className="flex items-start gap-2">
-                  <MapPin className="size-4 mt-0.5 shrink-0" />
-                  {location.address}
+                  <MapPin className="size-4 mt-0.5 shrink-0 text-gray-400" />
+                  <span className="line-clamp-2">{location.address || 'No address specified'}</span>
                 </p>
               </div>
-              <div className="flex items-center justify-between pt-3 border-t">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <Clock className="size-4" />
-                  <span>Timezone: {location?.timezone}</span>
+
+              {/* Total Employees & Capacity */}
+              <div className="grid grid-cols-2 gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100">
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <Users className="size-4 text-blue-600" />
+                  <div>
+                    <span className="text-xs text-gray-500 block">Total Employees</span>
+                    <span className="font-bold text-gray-900 text-base">
+                      {location._count?.employees ?? 0}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <Users className="size-4" />
-                  <span>Capacity: {location.capacity}</span>
+                <div className="flex items-center gap-2 text-sm text-gray-700 justify-end">
+                  <div className="text-right">
+                    <span className="text-xs text-gray-500 block">Capacity</span>
+                    <span className="font-semibold text-gray-800 text-base">
+                      {location.capacity || 0}
+                    </span>
+                  </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => openEdit(location)}>
-                  <Edit className="size-4" />
-                </Button>
+              </div>
+
+              {/* Footer with Timezone, Edit and Delete Actions */}
+              <div className="flex items-center justify-between pt-2 border-t text-sm">
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <Clock className="size-3.5" />
+                  <span>{location?.timezone || 'Asia/Karachi'}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-blue-600 hover:bg-blue-50"
+                    onClick={() => openEdit(location)}
+                    title="Edit Location"
+                  >
+                    <Edit className="size-4 mr-1" />
+                    <span>Edit</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => confirmDeleteLocation(location)}
+                    title="Delete Location"
+                  >
+                    <Trash2 className="size-4 mr-1" />
+                    <span>Delete</span>
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Delete Location Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <Trash2 className="size-5" /> Delete Location
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-gray-600">
+              Are you sure you want to delete the location{" "}
+              <strong className="text-gray-900">"{locationToDelete?.name}"</strong>? Any active employees
+              currently at this location will be automatically reassigned to another available location.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0 pt-4">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleExecuteDelete}>
+              Delete Location
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

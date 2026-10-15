@@ -12,7 +12,7 @@ const TourContext = createContext<TourContextType | undefined>(undefined);
 const tourSteps: Step[] = [
   {
     target: '.tour-dashboard',
-    content: 'Welcome to FRONTPIN! This is your dashboard where you can see an overview of all important metrics.',
+    content: 'Welcome to HR Pro Management System! This is your dashboard where you can see an overview of all important metrics.',
     disableBeacon: true,
   },
   {
