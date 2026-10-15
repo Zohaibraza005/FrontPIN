@@ -673,7 +673,7 @@ export const AddEmployee: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-gray-400" />
-                    Biometric ID (Device ID)
+                    Biometric ID
                   </Label>
                   {biometricId && (
                     <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
@@ -739,7 +739,7 @@ export const AddEmployee: React.FC = () => {
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-gray-400" />
-                  National ID (CNIC / Passport)
+                  CNIC/Passport
                 </Label>
                 <Input
                   placeholder="35202-xxxxxxx-x"
@@ -1389,7 +1389,7 @@ export const AddEmployee: React.FC = () => {
                       <p><span className="font-medium text-gray-500">Email:</span> <span className="font-semibold text-gray-900">{email || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Username:</span> <span className="font-semibold text-gray-900">{username || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Phone Number:</span> <span className="font-semibold text-gray-900">{phoneNumber || '—'}</span></p>
-                      <p><span className="font-medium text-gray-500">National ID:</span> <span className="font-semibold text-gray-900">{nationalId || '—'}</span></p>
+                      <p><span className="font-medium text-gray-500">CNIC/Passport:</span> <span className="font-semibold text-gray-900">{nationalId || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Entity:</span> <span className="font-semibold text-gray-900">{entities.find(e => e.id.toString() === entityId)?.name || 'None'}</span></p>
                       <p><span className="font-medium text-gray-500">Gender:</span> <span className="font-semibold text-gray-900">{gender || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Age:</span> <span className="font-semibold text-gray-900">{age || '—'}</span></p>

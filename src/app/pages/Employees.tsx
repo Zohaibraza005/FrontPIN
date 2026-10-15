@@ -31,6 +31,7 @@ import {
   LayoutGrid,
   List,
   MapPin,
+  Globe,
   CheckCircle2,
   XCircle,
   Calendar,
@@ -47,7 +48,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../com
 import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import { API_URL, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { API_URL, departmentAPI, employeeAPI, entityAPI, locationAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 
 const getPaginationRange = (current: number, total: number) => {
@@ -87,6 +88,7 @@ export const Employees: React.FC = () => {
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
+  const [entities, setEntities] = useState<any[]>([]);
 
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -94,6 +96,7 @@ export const Employees: React.FC = () => {
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
+  const [filterEntity, setFilterEntity] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
   const [filterLocation, setFilterLocation] = useState<string>('all');
   const [filterLogin, setFilterLogin] = useState('all');
@@ -104,7 +107,7 @@ export const Employees: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterDepartment, filterRole, filterLocation, filterLogin]);
+  }, [searchQuery, filterDepartment, filterEntity, filterRole, filterLocation, filterLogin]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -204,6 +207,7 @@ export const Employees: React.FC = () => {
     fetchEmployees();
     fetchLocations();
     fetchDepartments();
+    fetchEntities();
 
     // 🔄 Real-time polling every 5 seconds for live employee updates from DB
     const pollInterval = setInterval(() => {
@@ -242,6 +246,15 @@ export const Employees: React.FC = () => {
     try {
       const res = await locationAPI.getLocations();
       setLocations(res.data || []);
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const fetchEntities = async () => {
+    try {
+      const res = await entityAPI.getEntities();
+      setEntities(res.data || []);
     } catch (err) {
       // ignore
     }
@@ -361,7 +374,12 @@ export const Employees: React.FC = () => {
       (filterLogin === 'yes' && Boolean(emp.canLogin)) ||
       (filterLogin === 'no' && !emp.canLogin);
 
-    return matchesDept && matchesRole && matchesLocation && matchesLogin;
+    const empEntityId = String(emp.entityId ?? emp.entity?.id ?? '');
+    const matchesEntity =
+      filterEntity === 'all' ||
+      (filterEntity === 'none' ? !empEntityId : empEntityId === filterEntity);
+
+    return matchesDept && matchesEntity && matchesRole && matchesLocation && matchesLogin;
   });
 
   // Pagination calculations
@@ -377,6 +395,7 @@ export const Employees: React.FC = () => {
   const isFiltered =
     searchQuery !== '' ||
     filterDepartment !== 'all' ||
+    filterEntity !== 'all' ||
     filterRole !== 'all' ||
     filterLocation !== 'all' ||
     filterLogin !== 'all';
@@ -384,6 +403,7 @@ export const Employees: React.FC = () => {
   const resetFilters = () => {
     setSearchQuery('');
     setFilterDepartment('all');
+    setFilterEntity('all');
     setFilterRole('all');
     setFilterLocation('all');
     setFilterLogin('all');
@@ -391,6 +411,12 @@ export const Employees: React.FC = () => {
   };
 
   // Dropdown options
+  const entityOptions = [
+    { value: 'all', label: 'All Entities' },
+    ...entities.map((en: any) => ({ value: String(en.id), label: en.name || `Entity #${en.id}` })),
+    { value: 'none', label: 'No Entity' },
+  ];
+
   const departmentOptions = [
     { value: 'all', label: 'All Departments' },
     ...(departments && departments.length > 0
@@ -498,7 +524,7 @@ export const Employees: React.FC = () => {
             title="Push all active employees to biometric machines"
           >
             <Cpu className={`size-3.5 ${isPushingMachine ? 'animate-spin text-blue-600' : 'text-gray-500'}`} />
-            <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
+            <span>{isPushingMachine ? 'Syncing...' : 'Sync'}</span>
           </Button>
 
           <Button
@@ -514,7 +540,7 @@ export const Employees: React.FC = () => {
           <Link to={'/employees/add'}>
             <Button className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl">
               <Plus className="size-3.5" />
-              Add Employee
+              Add
             </Button>
           </Link>
         </div>
@@ -536,6 +562,17 @@ export const Employees: React.FC = () => {
                 value={filterDepartment}
                 onValueChange={setFilterDepartment}
                 options={departmentOptions}
+              />
+
+              {/* Entity Filter */}
+              <SearchableSelect
+                className="w-[160px] h-9 rounded-xl"
+                icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                placeholder="Entity"
+                searchPlaceholder="Search entity..."
+                value={filterEntity}
+                onValueChange={setFilterEntity}
+                options={entityOptions}
               />
 
               {/* Role Filter */}
@@ -754,6 +791,12 @@ export const Employees: React.FC = () => {
                                 <MapPin className="size-3 text-gray-400 shrink-0" />
                                 <span>{locName}</span>
                               </div>
+                              {(emp.entity?.name || entities.find((en: any) => String(en.id) === String(emp.entityId))?.name) && (
+                                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                                  <Globe className="size-3 text-gray-400 shrink-0" />
+                                  <span>{emp.entity?.name || entities.find((en: any) => String(en.id) === String(emp.entityId))?.name}</span>
+                                </div>
+                              )}
                             </div>
                           </TableCell>
 

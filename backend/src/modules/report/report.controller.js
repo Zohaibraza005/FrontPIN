@@ -11,8 +11,8 @@ function getDateRange(filter, startDate, endDate) {
 
   switch (filter) {
     case "thisWeek":
-      start = moment().startOf("week");
-      end = moment().endOf("week");
+      start = moment().startOf("isoWeek");
+      end = moment().endOf("isoWeek");
       break;
     case "thisMonth":
       start = moment().startOf("month");
@@ -23,8 +23,8 @@ function getDateRange(filter, startDate, endDate) {
       end = moment().endOf("year");
       break;
     case "custom":
-      start = moment(startDate);
-      end = moment(endDate);
+      start = moment(startDate).startOf("day");
+      end = moment(endDate).endOf("day");
       break;
     default:
       start = moment("2000-01-01");
@@ -172,7 +172,7 @@ const employee = parseOptionalInt(employeeId);
       const grouped = {};
   
       attendance.forEach((a) => {
-        const label = moment(a.date).format("DD MMM");
+        const label = moment(a.date).utcOffset("+05:00").format("DD MMM");
   
         if (!grouped[label]) {
           grouped[label] = { label, present: 0, late: 0 };
@@ -184,13 +184,13 @@ const employee = parseOptionalInt(employeeId);
   
       const records = attendance.map((a) => ({
         id: a.id,
-        date: moment(a.date).format("YYYY-MM-DD"),
+        date: moment(a.date).utcOffset("+05:00").format("YYYY-MM-DD"),
         employeeName: `${a.employee?.firstName || ""} ${a.employee?.lastName || ""}`.trim(),
         employeeCode: a.employee?.employeeId || "N/A",
         department: a.employee?.department?.title || "N/A",
         location: a.employee?.company?.name || "N/A",
-        clockIn: a.clockIn ? moment(a.clockIn).format("hh:mm A") : "-",
-        clockOut: a.clockOut ? moment(a.clockOut).format("hh:mm A") : "-",
+        clockIn: a.checkInTime ? moment(a.checkInTime).utcOffset("+05:00").format("hh:mm A") : "-",
+        clockOut: a.checkOutTime ? moment(a.checkOutTime).utcOffset("+05:00").format("hh:mm A") : "-",
         totalHours: a.totalWorkedMinutes ? (a.totalWorkedMinutes / 60).toFixed(2) : "0.00",
         overtimeHours: a.overtimeMinutes ? (a.overtimeMinutes / 60).toFixed(2) : "0.00",
         status: a.status || (a.isLate ? "LATE" : "PRESENT"),

@@ -778,7 +778,7 @@ export const EmployeeDetail: React.FC = () => {
                   <Input value={personal.employeeId} onChange={e => setPersonal({ ...personal, employeeId: e.target.value })} placeholder="e.g. 1919" className={fieldInput} />
                 </div>
                 <div>
-                  <Label className={fieldLabel}>Biometric ID (Device ID)</Label>
+                  <Label className={fieldLabel}>Biometric ID</Label>
                   <Input value={personal.biometricId} onChange={e => setPersonal({ ...personal, biometricId: e.target.value })} placeholder="e.g. 1001" className={fieldInput} />
                 </div>
                 <div>

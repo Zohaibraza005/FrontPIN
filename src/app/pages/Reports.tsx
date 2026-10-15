@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   format,
   startOfMonth,
@@ -95,6 +95,9 @@ export const Reports: React.FC = () => {
   const [employeeId, setEmployeeId] = useState("all");
   const [employees, setEmployees] = useState<any[]>([]);
   const [monthlyReportEmployees, setMonthlyReportEmployees] = useState<any[]>([]);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const reportRequestId = useRef(0); // only the latest request may update the grid
+  const reportCache = useRef<Map<string, { at: number; employees: any[] }>>(new Map());
 
   useEffect(() => {
     loadFilters();
@@ -136,8 +139,7 @@ export const Reports: React.FC = () => {
   }, [dateRange, startDate, endDate, departmentId, locationId, employeeId]);
 
   const loadFilters = async () => {
-    const dep = await departmentAPI.getDepartments();
-    const loc = await locationAPI.getLocations();
+    const [dep, loc] = await Promise.all([departmentAPI.getDepartments(), locationAPI.getLocations()]);
     setDepartments(dep?.data || []);
     setLocations(loc?.data || []);
   };
@@ -155,71 +157,88 @@ export const Reports: React.FC = () => {
     setEmployeeId("all"); // reset employee when department changes
   }, [departmentId, locationId]);
 
+  // Shared query params for the current filters
+  const buildReportParams = () => {
+    const { start, end, view } = getDateInterval();
+    const formattedStart = format(start, "yyyy-MM-dd");
+    const formattedEnd = format(end, "yyyy-MM-dd");
+    const isAllDept = !departmentId || departmentId.toLowerCase() === "all";
+    const isAllLoc = !locationId || locationId.toLowerCase() === "all";
+    const isAllEmp = !employeeId || employeeId.toLowerCase() === "all";
+    return {
+      formattedStart,
+      formattedEnd,
+      view,
+      departmentId: !isAllDept ? departmentId : undefined,
+      locationId: !isAllLoc ? locationId : undefined,
+      employeeId: !isAllEmp ? employeeId : undefined,
+    };
+  };
+
   const loadReports = async () => {
+    const reqId = ++reportRequestId.current;
+    const p = buildReportParams();
+    const cacheKey = JSON.stringify(p);
+    const cached = reportCache.current.get(cacheKey);
+    if (cached && Date.now() - cached.at < 2 * 60 * 1000) {
+      setMonthlyReportEmployees(cached.employees);
+      setLoadingReport(false);
+      return;
+    }
+
+    setLoadingReport(true);
     try {
-      const { start, end, view } = getDateInterval();
-      const formattedStart = format(start, "yyyy-MM-dd");
-      const formattedEnd = format(end, "yyyy-MM-dd");
-
-      const filters: any = {
-        filter: dateRange || "all",
-        startDate: formattedStart,
-        endDate: formattedEnd,
-      };
-
-      const isAllDept = !departmentId || departmentId.toLowerCase() === "all";
-      const isAllLoc = !locationId || locationId.toLowerCase() === "all";
-      const isAllEmp = !employeeId || employeeId.toLowerCase() === "all";
-
-      if (!isAllDept) filters.departmentId = departmentId;
-      if (!isAllLoc) filters.companyId = locationId;
-      if (!isAllEmp) filters.employeeId = employeeId;
-
-      const activeDeptId = !isAllDept ? departmentId : undefined;
-      const activeLocId = !isAllLoc ? locationId : undefined;
-      const activeEmpId = !isAllEmp ? employeeId : undefined;
-
-      const [attendanceRes, performanceRes, tasksRes, monthlyReportRes] = await Promise.allSettled([
-        reportsAPI.getAttendanceReport(filters),
-        reportsAPI.getPerformanceReport(filters),
-        reportsAPI.getTaskAnalytics(filters),
-        attendanceAPI.getAttendanceReport({
-          view: view,
-          filter: dateRange,
-          date: formattedStart,
-          startDate: formattedStart,
-          endDate: formattedEnd,
-          departmentId: activeDeptId,
-          companyId: activeLocId,
-          locationId: activeLocId,
-          employeeId: activeEmpId,
-        }),
-      ]);
-
-      if (attendanceRes.status === "fulfilled") {
-        const attendance = attendanceRes.value;
-        setAttendanceTrend(attendance?.trend || []);
-        setAttendanceStats(attendance?.stats || {});
-        setAttendanceRecords(attendance?.records || []);
-      }
-      if (performanceRes.status === "fulfilled") {
-        const performance = performanceRes.value;
-        setPerformanceData(performance?.ranking || []);
-      }
-      if (tasksRes.status === "fulfilled") {
-        const tasks = tasksRes.value;
-        setTaskDistribution(tasks?.distribution || []);
-      }
-      if (monthlyReportRes.status === "fulfilled") {
-        const monthlyReport = monthlyReportRes.value;
-        setMonthlyReportEmployees(monthlyReport?.employees || []);
-      }
+      const monthlyReport = await attendanceAPI.getAttendanceReport({
+        view: p.view,
+        filter: dateRange,
+        date: p.formattedStart,
+        startDate: p.formattedStart,
+        endDate: p.formattedEnd,
+        departmentId: p.departmentId,
+        companyId: p.locationId,
+        locationId: p.locationId,
+        employeeId: p.employeeId,
+        compact: "1",
+      });
+      if (reqId !== reportRequestId.current) return; // a newer filter change superseded this response
+      const emps = monthlyReport?.employees || [];
+      reportCache.current.set(cacheKey, { at: Date.now(), employees: emps });
+      setMonthlyReportEmployees(emps);
     } catch (err) {
-      console.error("Failed to load reports:", err);
+      if (reqId === reportRequestId.current) {
+        console.error("Failed to load reports:", err);
+        toast.error("Failed to load attendance report");
+      }
+    } finally {
+      if (reqId === reportRequestId.current) setLoadingReport(false);
     }
   };
 
-  const exportToCSV = () => {
+  // Per-record list for CSV / print, fetched only when exporting
+  const fetchAttendanceRecords = async (): Promise<any[]> => {
+    const p = buildReportParams();
+    const filters: any = { filter: dateRange || "all", startDate: p.formattedStart, endDate: p.formattedEnd };
+    if (p.departmentId) filters.departmentId = p.departmentId;
+    if (p.locationId) filters.companyId = p.locationId;
+    if (p.employeeId) filters.employeeId = p.employeeId;
+    const res = await reportsAPI.getAttendanceReport(filters);
+    const records = res?.records || [];
+    setAttendanceRecords(records);
+    setAttendanceTrend(res?.trend || []);
+    setAttendanceStats(res?.stats || {});
+    return records;
+  };
+
+  const exportToCSV = async () => {
+    let attendanceRecords: any[] = [];
+    try {
+      toast.loading("Preparing CSV...", { id: "export-csv" });
+      attendanceRecords = await fetchAttendanceRecords();
+      toast.dismiss("export-csv");
+    } catch {
+      toast.error("Failed to load attendance records", { id: "export-csv" });
+      return;
+    }
     if (!attendanceRecords || attendanceRecords.length === 0) {
       toast.error("No attendance records to export.");
       return;
@@ -334,9 +353,7 @@ export const Reports: React.FC = () => {
 
       const dailyCodes = days.map((day) => {
         const dayStr = format(day, "yyyy-MM-dd");
-        const rec = emp.attendance?.find((a: any) =>
-          typeof a.date === "string" ? a.date.slice(0, 10) === dayStr : format(new Date(a.date), "yyyy-MM-dd") === dayStr
-        );
+        const rec = attendanceByEmp.get(emp.id)?.get(dayStr);
         const cellDate = new Date(`${dayStr}T00:00:00`);
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
 
@@ -459,7 +476,16 @@ export const Reports: React.FC = () => {
     }
   };
 
-  const printReport = () => {
+  const printReport = async () => {
+    let attendanceRecords: any[] = [];
+    try {
+      toast.loading("Preparing report...", { id: "export-print" });
+      attendanceRecords = await fetchAttendanceRecords();
+      toast.dismiss("export-print");
+    } catch {
+      toast.error("Failed to load attendance records", { id: "export-print" });
+      return;
+    }
     if (!attendanceRecords || attendanceRecords.length === 0) {
       toast.error("No attendance records to print.");
       return;
@@ -601,6 +627,20 @@ export const Reports: React.FC = () => {
     printWindow.document.close();
   };
 
+  // Map "yyyy-MM-dd" -> record for each employee, built once per data load
+  const attendanceByEmp = useMemo(() => {
+    const m = new Map<any, Map<string, any>>();
+    for (const emp of monthlyReportEmployees) {
+      const dm = new Map<string, any>();
+      for (const a of emp.attendance || []) {
+        const key = typeof a.date === "string" ? a.date.slice(0, 10) : format(new Date(a.date), "yyyy-MM-dd");
+        if (!dm.has(key)) dm.set(key, a);
+      }
+      m.set(emp.id, dm);
+    }
+    return m;
+  }, [monthlyReportEmployees]);
+
   return (
     <div className="space-y-3 max-w-full overflow-hidden p-1">
 
@@ -635,8 +675,15 @@ export const Reports: React.FC = () => {
             <CardHeader className="py-2.5 px-4 flex flex-row items-center justify-between flex-wrap gap-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
               <div>
                 <CardTitle className="text-sm font-bold">Real-Time Attendance Excel Grid View</CardTitle>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Showing {monthlyReportEmployees.length} employee records matching current filters
+                <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                  {loadingReport ? (
+                    <>
+                      <span className="inline-block size-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      Loading attendance{dateRange === "thisYear" ? " for the whole year (may take a few seconds)" : ""}...
+                    </>
+                  ) : (
+                    <>Showing {monthlyReportEmployees.length} employee records matching current filters</>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
@@ -728,8 +775,10 @@ export const Reports: React.FC = () => {
                 />
               </div>
             </CardHeader>
-            <CardContent className="p-2 sm:p-3">
-              {monthlyReportEmployees.length === 0 ? (
+            <CardContent className={`p-2 sm:p-3 transition-opacity ${loadingReport ? "opacity-50 pointer-events-none" : ""}`}>
+              {loadingReport && monthlyReportEmployees.length === 0 ? (
+                <div className="text-center py-8 text-sm text-muted-foreground">Loading attendance...</div>
+              ) : monthlyReportEmployees.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">
                   No real-time employee attendance records found for the selected filters.
                 </div>
@@ -792,9 +841,7 @@ export const Reports: React.FC = () => {
 
                             const dailyCells = days.map((day) => {
                               const dayStr = format(day, "yyyy-MM-dd");
-                              const rec = emp.attendance?.find((a: any) =>
-                                typeof a.date === "string" ? a.date.slice(0, 10) === dayStr : format(new Date(a.date), "yyyy-MM-dd") === dayStr
-                              );
+                              const rec = attendanceByEmp.get(emp.id)?.get(dayStr);
 
                               const cellDate = new Date(`${dayStr}T00:00:00`);
                               const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));

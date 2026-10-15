@@ -28,6 +28,19 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Weekday names for a "YYYY-MM-DD" string, cached (pure; the calendar weekday of a date string is timezone-independent)
+const _weekdayCache = new Map();
+function weekdayNamesFor(dateStr) {
+  let v = _weekdayCache.get(dateStr);
+  if (!v) {
+    const m = moment(dateStr, "YYYY-MM-DD");
+    v = { short: m.format("ddd").toLowerCase(), full: m.format("dddd").toLowerCase() };
+    if (_weekdayCache.size > 5000) _weekdayCache.clear();
+    _weekdayCache.set(dateStr, v);
+  }
+  return v;
+}
+
 function isOffDay(schedules, date, timezone = null, dayOverride = null) {
   // If Admin configured an override for this day, that takes absolute precedence!
   if (dayOverride) {
@@ -48,7 +61,10 @@ function isOffDay(schedules, date, timezone = null, dayOverride = null) {
   }
 
   let mDate;
-  if (typeof date === "string") {
+  let cachedNames = null;
+  if (typeof date === "string" && /^d{4}-d{2}-d{2}/.test(date)) {
+    cachedNames = weekdayNamesFor(date.slice(0, 10));
+  } else if (typeof date === "string") {
     const cleanStr = date.slice(0, 10);
     mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
   } else if (moment.isMoment(date)) {
@@ -59,8 +75,8 @@ function isOffDay(schedules, date, timezone = null, dayOverride = null) {
     mDate = timezone ? moment().tz(timezone) : moment();
   }
 
-  const shortDay = mDate.format("ddd").toLowerCase();
-  const fullDay = mDate.format("dddd").toLowerCase();
+  const shortDay = cachedNames ? cachedNames.short : mDate.format("ddd").toLowerCase();
+  const fullDay = cachedNames ? cachedNames.full : mDate.format("dddd").toLowerCase();
 
   const daysArr = activeSchedule.days.map((d) => {
     if (typeof d === "object" && d !== null) {
@@ -82,7 +98,10 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
   }
 
   let mDate;
-  if (typeof date === "string") {
+  let cachedNames = null;
+  if (typeof date === "string" && /^d{4}-d{2}-d{2}/.test(date)) {
+    cachedNames = weekdayNamesFor(date.slice(0, 10));
+  } else if (typeof date === "string") {
     const cleanStr = date.slice(0, 10);
     mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
   } else if (moment.isMoment(date)) {
@@ -93,8 +112,8 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
     mDate = timezone ? moment().tz(timezone) : moment();
   }
 
-  const shortDay = mDate.format("ddd").toLowerCase();
-  const fullDay = mDate.format("dddd").toLowerCase();
+  const shortDay = cachedNames ? cachedNames.short : mDate.format("ddd").toLowerCase();
+  const fullDay = cachedNames ? cachedNames.full : mDate.format("dddd").toLowerCase();
 
   const dayObj = schedule.days.find((d) => {
     if (typeof d === "object" && d !== null) {
@@ -1298,6 +1317,30 @@ exports.getAttendanceReport = async (req, res) => {
       endDate = baseDate.clone().endOf("month").toDate();
     }
 
+    // Reports page: whole year or an explicit startDate/endDate range
+    if (view === "yearly") {
+      startDate = baseDate.clone().startOf("year").toDate();
+      endDate = baseDate.clone().endOf("year").toDate();
+    }
+    if (!startDate && req.query.startDate && req.query.endDate) {
+      const rs = moment(req.query.startDate, "YYYY-MM-DD", true);
+      const re = moment(req.query.endDate, "YYYY-MM-DD", true);
+      if (rs.isValid() && re.isValid() && !re.isBefore(rs)) {
+        startDate = rs.startOf("day").toDate();
+        endDate = re.endOf("day").toDate();
+      }
+    }
+    if (!startDate) {
+      startDate = baseDate.clone().startOf("day").toDate();
+      endDate = baseDate.clone().endOf("day").toDate();
+    }
+    if (moment(endDate).diff(moment(startDate), "days") > 400) {
+      return res.status(400).json({ success: false, message: "Date range too large (max 400 days)" });
+    }
+
+    // compact=1 → read-only, minimal payload (date + status per day) for the Reports grid
+    const isCompact = req.query.compact === "1" || req.query.compact === "true";
+
     /* 🔍 Employee Filtering */
     let employeeWhere = {
       ...(user.orgId ? { organizationId: user.orgId } : {}),
@@ -1499,6 +1542,9 @@ exports.getAttendanceReport = async (req, res) => {
         }
       });
 
+      const empTodayStr = moment().tz(empTz).format("YYYY-MM-DD");
+      const serverTodayStr = moment().format("YYYY-MM-DD");
+
       const fullAttendance = allDates.map(dateStr => {
 
         const leaveKey = `${emp.id}_${dateStr}`;
@@ -1545,14 +1591,18 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🔴 No Attendance */
         if (!existing) {
-          const isToday = dateStr === moment().tz(empTz).format("YYYY-MM-DD");
-          const isFutureDay = moment(dateStr, "YYYY-MM-DD").isAfter(moment().startOf("day"));
+          const isToday = dateStr === empTodayStr;
+          const isFutureDay = dateStr > serverTodayStr;
 
-          const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
-          const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
-          const sTime = dayShift?.startTime || activeSched?.startTime || "09:00";
-          const shiftStartMoment = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
-          const shiftHasNotStarted = isToday && moment().tz(empTz).isBefore(shiftStartMoment);
+          // shift start only matters for today
+          let shiftHasNotStarted = false;
+          if (isToday) {
+            const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+            const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
+            const sTime = dayShift?.startTime || activeSched?.startTime || "09:00";
+            const shiftStartMoment = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+            shiftHasNotStarted = moment().tz(empTz).isBefore(shiftStartMoment);
+          }
 
           let defaultStatus = "ABSENT";
           if (isDayOff) {
@@ -1781,7 +1831,8 @@ exports.getAttendanceReport = async (req, res) => {
         const finalOtHours = Number((finalOtMinutes / 60).toFixed(2));
 
         // Asynchronously persist any corrected schedule/lateness/punch fields to the DB
-        if (existing?.id && (
+        // (skipped for compact/read-only report requests)
+        if (!isCompact && existing?.id && (
           existing.isLate !== isLate ||
           existing.lateMinutes !== lateMinutes ||
           existing.status !== finalStatus ||
@@ -1859,6 +1910,23 @@ exports.getAttendanceReport = async (req, res) => {
           tasks
         };
       });
+
+      if (isCompact) {
+        return {
+          id: emp.id,
+          employeeId: emp.employeeId,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          role: emp.role,
+          department: emp.department ? { title: emp.department.title } : null,
+          supervisor: emp.supervisor || null,
+          jobInfo: emp.jobInfo
+            ? { designation: emp.jobInfo.designation, employmentStatus: emp.jobInfo.employmentStatus }
+            : null,
+          Schedule: (emp.Schedule || []).map((s) => ({ id: s.id, days: s.days, deletedAt: s.deletedAt })),
+          attendance: fullAttendance.map((d) => ({ date: d.date, status: d.status })),
+        };
+      }
 
       // Never expose credentials; send the day list once (it used to be duplicated as `Attendance`)
       const { password, pin, Attendance, ...safeEmp } = emp;
