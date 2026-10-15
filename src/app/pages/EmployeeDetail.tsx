@@ -14,9 +14,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from '../components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
-import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins } from 'lucide-react';
+import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins, History, RotateCcw } from 'lucide-react';
 import { useParams, Link } from 'react-router';
-import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI } from '../services/api';
+import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI, entityAPI } from '../services/api';
+import { EMPLOYMENT_STATUSES, normalizeStatus, isSeparated } from '../utils/employmentStatus';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { avatarColor } from '../utils/avatar';
 import { Switch } from '../components/ui/switch';
@@ -24,6 +25,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import moment from 'moment';
 
 import { to12h, timeRange12h } from "../utils/time";
+import { DatePicker } from "../components/ui/date-picker";
 const ALL_WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const FULL_DAY_NAMES: Record<string, string> = {
   Mon: 'Monday',
@@ -101,8 +103,14 @@ export const EmployeeDetail: React.FC = () => {
   const [locationsList, setLocationsList] = useState<any[]>([]);
   const [departmentsList, setDepartmentsList] = useState<any[]>([]);
   const [supervisorsList, setSupervisorsList] = useState<any[]>([]);
+  const [entitiesList, setEntitiesList] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [savingSeparation, setSavingSeparation] = useState(false);
 
   const [job, setJob] = useState({
+    entityId: '',
+    entity: '',
     locationId: '',
     location: '',
     departmentId: '',
@@ -110,7 +118,7 @@ export const EmployeeDetail: React.FC = () => {
     supervisorId: '',
     supervisor: '',
     hiringDate: '',
-    employmentStatus: 'Active',
+    employmentStatus: 'Permanent',
     workMode: 'On-site',
   });
 
@@ -206,6 +214,18 @@ export const EmployeeDetail: React.FC = () => {
     const [docType, setDocType] = useState('');
     const [docFile, setDocFile] = useState<File | null>(null);
 
+  const fetchLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const res = await employeeAPI.getLogs(id!);
+      setLogs(Array.isArray(res?.data) ? res.data : []);
+    } catch {
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
   const fetchEmployee = async () => {
     try {
       const res = await employeeAPI.getDetail(id!);
@@ -225,6 +245,8 @@ export const EmployeeDetail: React.FC = () => {
       });
 
       setJob({
+        entityId: emp.entityId ? String(emp.entityId) : (emp.entity?.id ? String(emp.entity.id) : ''),
+        entity: emp.entity?.name || '',
         locationId: emp.companyId ? String(emp.companyId) : (emp.company?.id ? String(emp.company.id) : ''),
         location: emp.company?.name || emp.location?.name || '',
         departmentId: emp.departmentId ? String(emp.departmentId) : (emp.department?.id ? String(emp.department.id) : ''),
@@ -234,9 +256,22 @@ export const EmployeeDetail: React.FC = () => {
           ? `${emp.supervisor.firstName} ${emp.supervisor.lastName}`
           : '',
         hiringDate: emp.hiringDate ? emp.hiringDate.split('T')[0] : (emp.jobInfo?.hiringDate ? emp.jobInfo.hiringDate.split('T')[0] : ''),
-        employmentStatus: emp.employmentStatus || emp.jobInfo?.employmentStatus || 'Active',
+        employmentStatus: normalizeStatus(emp.jobInfo?.employmentStatus || emp.employmentStatus) || 'Permanent',
         workMode: emp.workMode || emp.jobInfo?.workMode || 'On-site',
       });
+
+      const ji = emp.jobInfo;
+      setSeparation(
+        isSeparated(ji?.employmentStatus)
+          ? {
+              type: ji.separationType,
+              reason: ji.separationReason,
+              comments: ji.separationComments,
+              date: ji.separationDate ? moment(ji.separationDate).format('DD MMM YYYY') : '',
+              clearanceDate: ji.clearanceDate ? moment(ji.clearanceDate).format('DD MMM YYYY') : '',
+            }
+          : null
+      );
 
       let extraHoursVal = 0;
       if (emp.jobInfo?.maxExtraHours !== null && emp.jobInfo?.maxExtraHours !== undefined) {
@@ -383,10 +418,18 @@ export const EmployeeDetail: React.FC = () => {
       } catch (err) {
         console.error("Metadata error:", err);
       }
+      try {
+        const entRes = await entityAPI.getEntities();
+        const list = entRes?.data ?? entRes;
+        if (Array.isArray(list)) setEntitiesList(list);
+      } catch (err) {
+        console.error("Entities error:", err);
+      }
     };
 
     fetchEmployee();
     fetchMetadata();
+    fetchLogs();
 
     const handleRealTimeSync = () => {
       fetchEmployee();
@@ -448,32 +491,21 @@ export const EmployeeDetail: React.FC = () => {
   const handleSaveJob = async () => {
     try {
       const payload: any = {};
+      if (job.entityId) payload.entityId = Number(job.entityId);
       if (job.locationId) payload.companyId = Number(job.locationId);
       if (job.departmentId) payload.departmentId = Number(job.departmentId);
       if (job.supervisorId) payload.supervisorId = Number(job.supervisorId);
       if (job.hiringDate) payload.hiringDate = job.hiringDate;
-      if (job.employmentStatus) payload.employmentStatus = job.employmentStatus;
+      // Separated is only set/cleared through the Separation section
+      if (job.employmentStatus && !isSeparated(job.employmentStatus)) payload.employmentStatus = job.employmentStatus;
       if (job.workMode) payload.workMode = job.workMode;
 
       await employeeAPI.updateEmployee(Number(id), payload);
       toast.success('Job information updated');
       setEditJob(false);
 
-      const res = await employeeAPI.getDetail(id!);
-      if (res?.data) {
-        setEmployee(res.data);
-        setJob({
-          locationId: res.data.companyId ? String(res.data.companyId) : '',
-          location: res.data.company?.name || res.data.location?.name || '',
-          departmentId: res.data.departmentId ? String(res.data.departmentId) : '',
-          department: res.data.department?.title || '',
-          supervisorId: res.data.supervisorId ? String(res.data.supervisorId) : '',
-          supervisor: res.data.supervisor ? `${res.data.supervisor.firstName} ${res.data.supervisor.lastName}` : '',
-          hiringDate: res.data.hiringDate ? res.data.hiringDate.split('T')[0] : (res.data.jobInfo?.hiringDate ? res.data.jobInfo.hiringDate.split('T')[0] : ''),
-          employmentStatus: res.data.employmentStatus || res.data.jobInfo?.employmentStatus || 'Active',
-          workMode: res.data.workMode || res.data.jobInfo?.workMode || 'On-site',
-        });
-      }
+      await fetchEmployee();
+      fetchLogs();
     } catch (err: any) {
       console.error("Save Job Error:", err);
       toast.error(err?.message || 'Failed to update job information');
@@ -553,20 +585,49 @@ export const EmployeeDetail: React.FC = () => {
     }
   };
 
-  const handleMarkSeparation = () => {
+  const handleMarkSeparation = async () => {
     if (!separationType || !separationDate) {
       toast.error('Please fill required fields');
       return;
     }
-    setSeparation({
-      type: separationType,
-      reason: separationReason,
-      comments: separationComments,
-      date: separationDate,
-      clearanceDate,
-    });
-    toast.success('Separation marked');
-    setShowSeparationModal(false);
+    setSavingSeparation(true);
+    try {
+      await employeeAPI.markSeparation(id!, {
+        type: separationType,
+        reason: separationReason,
+        comments: separationComments,
+        date: separationDate,
+        clearanceDate,
+      });
+      toast.success('Employee marked as separated');
+      setShowSeparationModal(false);
+      setSeparationType('');
+      setSeparationReason('');
+      setSeparationComments('');
+      setSeparationDate('');
+      setClearanceDate('');
+      await fetchEmployee();
+      fetchLogs();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to mark separation');
+    } finally {
+      setSavingSeparation(false);
+    }
+  };
+
+  const handleRevokeSeparation = async () => {
+    if (!window.confirm('Revoke this separation and make the employee active again?')) return;
+    setSavingSeparation(true);
+    try {
+      const res = await employeeAPI.revokeSeparation(id!);
+      toast.success(res?.message || 'Separation revoked');
+      await fetchEmployee();
+      fetchLogs();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to revoke separation');
+    } finally {
+      setSavingSeparation(false);
+    }
   };
 
   const handleUploadDocument = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -627,7 +688,17 @@ export const EmployeeDetail: React.FC = () => {
     const dot = s === "APPROVED" || s === "ACTIVE" ? "bg-emerald-500" : s === "REJECTED" || s === "SEPARATED" ? "bg-rose-500" : "bg-amber-500";
     return { cls, dot };
   };
-  const empStatus = employee.employmentStatus || employee.jobInfo?.employmentStatus || job.employmentStatus || 'Active';
+  const empStatus = normalizeStatus(employee.jobInfo?.employmentStatus || employee.employmentStatus) || job.employmentStatus || 'Permanent';
+  const statusKey = (st: string) => (st === 'Separated' ? 'SEPARATED' : st === 'Permanent' ? 'ACTIVE' : 'PENDING');
+  const LOG_FIELD_LABELS: Record<string, string> = {
+    employmentStatus: 'Employment Status',
+    entity: 'Entity',
+    department: 'Department',
+    location: 'Location',
+    supervisor: 'Supervisor',
+    designation: 'Designation',
+    separation: 'Separation',
+  };
   const rateSuffix = payroll.rateType === 'hourly' ? '/ hr' : payroll.rateType === 'daily' ? '/ day' : '/ mo';
 
   return (
@@ -659,8 +730,8 @@ export const EmployeeDetail: React.FC = () => {
             <div className="flex-1 min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">{fullName}</h1>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill(empStatus === 'Active' ? 'ACTIVE' : empStatus === 'Separated' ? 'SEPARATED' : 'PENDING').cls}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${statusPill(empStatus === 'Active' ? 'ACTIVE' : empStatus === 'Separated' ? 'SEPARATED' : 'PENDING').dot}`} />
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill(statusKey(empStatus)).cls}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusPill(statusKey(empStatus)).dot}`} />
                   {empStatus}
                 </span>
               </div>
@@ -722,6 +793,7 @@ export const EmployeeDetail: React.FC = () => {
               ["payroll", "Payroll", Banknote],
               ["approvals", "Approvals", Check],
               ["password-separation", "Password / Separation", Lock],
+              ["history", "History", History],
             ].map(([value, label, Icon]: any) => (
               <TabsTrigger
                 key={value}
@@ -843,6 +915,20 @@ export const EmployeeDetail: React.FC = () => {
             {editJob ? (
               <CardContent className="p-5 sm:p-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 <div>
+                  <Label className={fieldLabel}>Entity</Label>
+                  <SearchableSelect
+                    className="w-full mt-1.5 h-10 border-gray-300 dark:border-gray-700"
+                    placeholder="Select Entity"
+                    searchPlaceholder="Search entity..."
+                    value={job.entityId}
+                    onValueChange={(val) => {
+                      const found = entitiesList.find((en) => String(en.id) === String(val));
+                      setJob({ ...job, entityId: val, entity: found?.name || "" });
+                    }}
+                    options={entitiesList.map((en) => ({ value: String(en.id), label: en.name }))}
+                  />
+                </div>
+                <div>
                   <Label className={fieldLabel}>Location</Label>
                   <SearchableSelect
                     className="w-full mt-1.5 h-10 border-gray-300 dark:border-gray-700"
@@ -886,18 +972,25 @@ export const EmployeeDetail: React.FC = () => {
                 </div>
                 <div>
                   <Label className={fieldLabel}>Hiring Date</Label>
-                  <Input type="date" value={job.hiringDate} onChange={e => setJob({ ...job, hiringDate: e.target.value })} className={fieldInput} />
+                  <DatePicker value={job.hiringDate} onChange={e => setJob({ ...job, hiringDate: e.target.value })} className={fieldInput} />
                 </div>
                 <div>
                   <Label className={fieldLabel}>Employment Status</Label>
-                  <Select value={job.employmentStatus} onValueChange={v => setJob({ ...job, employmentStatus: v })}>
-                    <SelectTrigger className={`${fieldInput} w-full`}><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="On Leave">On Leave</SelectItem>
-                      <SelectItem value="Separated">Separated</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {isSeparated(job.employmentStatus) ? (
+                    <div className={`${fieldInput} w-full flex items-center px-3 text-gray-500`} title="Revoke the separation from the Password / Separation tab to change this">
+                      Separated
+                    </div>
+                  ) : (
+                    <Select value={job.employmentStatus} onValueChange={v => setJob({ ...job, employmentStatus: v })}>
+                      <SelectTrigger className={`${fieldInput} w-full`}><SelectValue placeholder="Select status" /></SelectTrigger>
+                      <SelectContent>
+                        {(EMPLOYMENT_STATUSES.includes(job.employmentStatus) || !job.employmentStatus
+                          ? EMPLOYMENT_STATUSES
+                          : [job.employmentStatus, ...EMPLOYMENT_STATUSES]
+                        ).map((st) => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div>
                   <Label className={fieldLabel}>Work Mode</Label>
@@ -914,14 +1007,15 @@ export const EmployeeDetail: React.FC = () => {
             ) : (
               <CardContent className="p-5 sm:p-6">
                 <dl className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-5">
+                  <ViewItem label="Entity" value={job.entity} />
                   <ViewItem label="Location" value={job.location} />
                   <ViewItem label="Department" value={job.department} />
                   <ViewItem label="Supervisor" value={job.supervisor} />
                   <ViewItem label="Hiring date" value={job.hiringDate ? moment(job.hiringDate).format('DD MMM YYYY') : ''} />
                   <ViewItem label="Employment status">
                     {job.employmentStatus ? (
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill(job.employmentStatus === 'Active' ? 'ACTIVE' : job.employmentStatus === 'Separated' ? 'SEPARATED' : 'PENDING').cls}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusPill(job.employmentStatus === 'Active' ? 'ACTIVE' : job.employmentStatus === 'Separated' ? 'SEPARATED' : 'PENDING').dot}`} />
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill(statusKey(job.employmentStatus)).cls}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusPill(statusKey(job.employmentStatus)).dot}`} />
                         {job.employmentStatus}
                       </span>
                     ) : undefined}
@@ -1445,7 +1539,7 @@ export const EmployeeDetail: React.FC = () => {
                 </div>
                 <div>
                   <Label className={fieldLabel}>Effective date</Label>
-                  <Input type="date" value={incrementDate} onChange={(e) => setIncrementDate(e.target.value)} className={fieldInput} />
+                  <DatePicker value={incrementDate} onChange={(e) => setIncrementDate(e.target.value)} className={fieldInput} />
                 </div>
               </div>
               <DialogFooter className="gap-2">
@@ -1589,9 +1683,20 @@ export const EmployeeDetail: React.FC = () => {
                     <UserX className="size-3.5" /> Mark Separation
                   </Button>
                 ) : (
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill('SEPARATED').cls}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${statusPill('SEPARATED').dot}`} /> Separated
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${statusPill('SEPARATED').cls}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${statusPill('SEPARATED').dot}`} /> Separated
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={savingSeparation}
+                      onClick={handleRevokeSeparation}
+                      className={editBtnCls}
+                    >
+                      <RotateCcw className="size-3.5" /> Revoke
+                    </Button>
+                  </div>
                 )}
               </CardHeader>
               <CardContent className="p-5 sm:p-6">
@@ -1651,11 +1756,11 @@ export const EmployeeDetail: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className={fieldLabel}>Separation date *</Label>
-                    <Input type="date" value={separationDate} onChange={(e) => setSeparationDate(e.target.value)} className={fieldInput} />
+                    <DatePicker value={separationDate} onChange={(e) => setSeparationDate(e.target.value)} className={fieldInput} />
                   </div>
                   <div>
                     <Label className={fieldLabel}>Clearance date</Label>
-                    <Input type="date" value={clearanceDate} onChange={(e) => setClearanceDate(e.target.value)} className={fieldInput} />
+                    <DatePicker value={clearanceDate} onChange={(e) => setClearanceDate(e.target.value)} className={fieldInput} />
                   </div>
                 </div>
                 <div>
@@ -1665,10 +1770,73 @@ export const EmployeeDetail: React.FC = () => {
               </div>
               <DialogFooter className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 gap-2">
                 <Button variant="outline" className="h-10 rounded-lg" onClick={() => setShowSeparationModal(false)}>Cancel</Button>
-                <Button variant="destructive" className="h-10 px-5 rounded-lg font-semibold" onClick={handleMarkSeparation}>Confirm Separation</Button>
+                <Button variant="destructive" className="h-10 px-5 rounded-lg font-semibold" disabled={savingSeparation} onClick={handleMarkSeparation}>
+                  {savingSeparation ? <Loader2 className="size-4 animate-spin" /> : null} Confirm Separation
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        {/* ── HISTORY ─────────────────────────────────────────────── */}
+        <TabsContent value="history">
+          <Card className={cardCls}>
+            <CardHeader className={cardHeaderCls}>
+              <div>
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Change History</CardTitle>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Status, entity, department, location, supervisor and separation changes</p>
+              </div>
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums">{logs.length} {logs.length === 1 ? 'entry' : 'entries'}</span>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50/60 dark:bg-gray-900/40 hover:bg-transparent">
+                      <TableHead className={`${th} pl-5`}>Date</TableHead>
+                      <TableHead className={th}>Field</TableHead>
+                      <TableHead className={th}>From</TableHead>
+                      <TableHead className={th}>To</TableHead>
+                      <TableHead className={`${th} pr-5`}>Changed by</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logsLoading && logs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
+                          <Loader2 className="size-4 animate-spin inline mr-2" /> Loading history…
+                        </TableCell>
+                      </TableRow>
+                    ) : logs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">No changes recorded yet.</TableCell>
+                      </TableRow>
+                    ) : (
+                      logs.map((log: any) => (
+                        <TableRow key={log.id} className="align-top">
+                          <TableCell className="pl-5 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                            <div className="font-medium">{moment(log.createdAt).format('DD MMM YYYY')}</div>
+                            <div className="text-xs text-gray-500">{moment(log.createdAt).format('hh:mm A')}</div>
+                          </TableCell>
+                          <TableCell className="text-sm font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                            {LOG_FIELD_LABELS[log.field] || log.field}
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-500 dark:text-gray-400">
+                            {log.oldValue ? <span className="line-through decoration-gray-300">{log.oldValue}</span> : '—'}
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-900 dark:text-gray-100">
+                            <div className="font-medium">{log.newValue || '—'}</div>
+                            {log.note && <div className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{log.note}</div>}
+                          </TableCell>
+                          <TableCell className="pr-5 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.changedByName || 'System'}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

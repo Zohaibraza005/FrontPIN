@@ -11,6 +11,7 @@ import { Label } from '../components/ui/label';
 import { Plus, Search, Laptop, Smartphone, Monitor, Armchair, Tablet } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { DatePicker } from "../components/ui/date-picker";
 export const Assets: React.FC = () => {
   const [assets, setAssets] = useState(mockAssets);
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,7 +98,7 @@ export const Assets: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Purchase Date</Label>
-                  <Input type="date" />
+                  <DatePicker />
                 </div>
                 <div className="space-y-2">
                   <Label>Value ($)</Label>

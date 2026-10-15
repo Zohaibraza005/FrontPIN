@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { loadSnapshot, logSnapshotChanges } = require("./employeeLog.service");
 const bcrypt = require("bcrypt");
 
 //////////////////////////////////////////////////////
@@ -386,6 +387,8 @@ exports.createEmployee = async (req, res) => {
 exports.updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
+    // snapshot for the change log (status, entity, department, location, supervisor)
+    const beforeSnapshot = await loadSnapshot(id).catch(() => null);
 
     const parseField = (val) => {
       if (!val) return {};
@@ -542,6 +545,11 @@ exports.updateEmployee = async (req, res) => {
         privileges: true,
       },
     });
+
+    if (beforeSnapshot) {
+      const afterSnapshot = await loadSnapshot(id).catch(() => null);
+      await logSnapshotChanges(id, beforeSnapshot, afterSnapshot, req.user);
+    }
 
     if (maxExtraHours !== undefined || allowExtraHours !== undefined) {
       try {
@@ -781,6 +789,7 @@ exports.getEmployeeDetail = async (req, res) => {
       include: {
         company: true,
         department: true,
+        entity: { select: { id: true, name: true } },
         appRole: true,
         supervisor: {
           select: {

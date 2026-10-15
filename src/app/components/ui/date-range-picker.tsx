@@ -21,6 +21,9 @@ export interface DatePickerWithRangeProps {
   placeholder?: string;
   align?: "center" | "start" | "end";
   showPresets?: boolean;
+  /** "sm" = compact toolbar control (default), "md" = full-width form field */
+  size?: "sm" | "md";
+  disabled?: boolean;
 }
 
 export function DatePickerWithRange({
@@ -30,6 +33,8 @@ export function DatePickerWithRange({
   placeholder = "Pick a date range",
   align = "end",
   showPresets = true,
+  size = "sm",
+  disabled,
 }: DatePickerWithRangeProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -68,13 +73,18 @@ export function DatePickerWithRange({
 
   return (
     <div className={cn("grid gap-2", className)}>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={(o) => !disabled && setOpen(o)}>
         <PopoverTrigger asChild>
           <Button
             id="date"
+            type="button"
             variant="outline"
+            disabled={disabled}
             className={cn(
-              "h-9 justify-start text-left font-normal bg-white dark:bg-gray-950 border-gray-200 dark:border-gray-800 rounded-xl px-3 shadow-2xs hover:bg-gray-50 dark:hover:bg-gray-900 text-xs sm:text-sm gap-2 shrink-0 transition-colors",
+              "justify-start text-left font-normal bg-white dark:bg-gray-950 px-3 hover:bg-gray-50 dark:hover:bg-gray-900 gap-2 transition-colors",
+              size === "md"
+                ? "h-10 w-full rounded-lg text-sm border-gray-300 dark:border-gray-700 shadow-xs"
+                : "h-9 rounded-xl text-xs sm:text-sm border-gray-200 dark:border-gray-800 shadow-2xs shrink-0",
               !date?.from && "text-muted-foreground"
             )}
           >
@@ -97,7 +107,7 @@ export function DatePickerWithRange({
                 role="button"
                 tabIndex={0}
                 onClick={handleClear}
-                className="ml-1 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-700 transition-colors"
+                className="ml-auto p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-700 transition-colors"
                 title="Clear date range"
               >
                 <X className="w-3.5 h-3.5" />

@@ -43,7 +43,8 @@ import {
 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 
-const employmentStatuses = ['Full-time', 'Part-time', 'Contract', 'Intern'];
+import { DatePicker } from "../components/ui/date-picker";
+const employmentStatuses = ['Internship', 'Probation', 'Permanent', 'Contract', 'Part-time'];
 const workModes = ['On-site', 'Remote', 'Hybrid'];
 const currencies = ['PKR', 'USD', 'EUR', 'GBP'];
 const cycleDates = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -83,7 +84,7 @@ export const AddEmployee: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [location, setLocation] = useState('');
   const [supervisorId, setSupervisorId] = useState('');
-  const [employmentStatus, setEmploymentStatus] = useState('Full-time');
+  const [employmentStatus, setEmploymentStatus] = useState('Permanent');
   const [designation, setDesignation] = useState('');
   const [hiringDate, setHiringDate] = useState('');
   const [workMode, setWorkMode] = useState('On-site');
@@ -299,7 +300,7 @@ export const AddEmployee: React.FC = () => {
     setLocation('');
     setEntityId('');
     setSupervisorId('');
-    setEmploymentStatus('Full-time');
+    setEmploymentStatus('Permanent');
     setDesignation('');
     setHiringDate('');
     setWorkMode('On-site');
@@ -1052,8 +1053,7 @@ export const AddEmployee: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Hiring Date</Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     className={visibleInputClass}
                     value={hiringDate}
                     onChange={e => setHiringDate(e.target.value)}
@@ -1062,8 +1062,7 @@ export const AddEmployee: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Joining Date</Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     className={visibleInputClass}
                     value={joiningDate}
                     onChange={e => setJoiningDate(e.target.value)}

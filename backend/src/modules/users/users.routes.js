@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("./users.controller");
+const history = require("./employeeHistory.controller");
 const { protect } = require("../../middleware/auth");
 const { upload } = require("../../middleware/upload");
 
@@ -14,6 +15,9 @@ router.delete("/:id", protect, controller.deleteEmployee);
 router.get("/active", protect, controller.getActiveEmployees);
 router.get("/:id/detail", protect, controller.getEmployeeDetail);
 router.post("/:id/increment", protect, controller.addIncrement);
+router.get("/:id/logs", protect, history.getEmployeeLogs);
+router.post("/:id/separation", protect, history.markSeparation);
+router.delete("/:id/separation", protect, history.revokeSeparation);
 router.put(
   "/update/organization/profile",
   protect,

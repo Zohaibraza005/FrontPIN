@@ -49,6 +49,7 @@ import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL, departmentAPI, employeeAPI, entityAPI, locationAPI } from '../services/api';
+import { EMPLOYMENT_STATUSES, normalizeStatus } from '../utils/employmentStatus';
 import { deviceService } from '../services/device.service';
 
 const getPaginationRange = (current: number, total: number) => {
@@ -100,6 +101,8 @@ export const Employees: React.FC = () => {
   const [filterRole, setFilterRole] = useState('all');
   const [filterLocation, setFilterLocation] = useState<string>('all');
   const [filterLogin, setFilterLogin] = useState('all');
+  // 'active' = everyone except separated (default)
+  const [filterStatus, setFilterStatus] = useState('active');
 
   // Pagination state for Employees
   const [currentPage, setCurrentPage] = useState(1);
@@ -107,7 +110,7 @@ export const Employees: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterDepartment, filterEntity, filterRole, filterLocation, filterLogin]);
+  }, [searchQuery, filterDepartment, filterEntity, filterRole, filterLocation, filterLogin, filterStatus]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -379,7 +382,12 @@ export const Employees: React.FC = () => {
       filterEntity === 'all' ||
       (filterEntity === 'none' ? !empEntityId : empEntityId === filterEntity);
 
-    return matchesDept && matchesEntity && matchesRole && matchesLocation && matchesLogin;
+    const empStatus = normalizeStatus(emp.jobInfo?.employmentStatus);
+    const matchesStatus =
+      filterStatus === 'all' ||
+      (filterStatus === 'active' ? empStatus !== 'Separated' : empStatus === filterStatus);
+
+    return matchesDept && matchesEntity && matchesRole && matchesLocation && matchesLogin && matchesStatus;
   });
 
   // Pagination calculations
@@ -398,7 +406,8 @@ export const Employees: React.FC = () => {
     filterEntity !== 'all' ||
     filterRole !== 'all' ||
     filterLocation !== 'all' ||
-    filterLogin !== 'all';
+    filterLogin !== 'all' ||
+    filterStatus !== 'active';
 
   const resetFilters = () => {
     setSearchQuery('');
@@ -407,10 +416,18 @@ export const Employees: React.FC = () => {
     setFilterRole('all');
     setFilterLocation('all');
     setFilterLogin('all');
+    setFilterStatus('active');
     setCurrentPage(1);
   };
 
   // Dropdown options
+  const statusOptions = [
+    { value: 'active', label: 'Active Staff' },
+    { value: 'all', label: 'All Statuses' },
+    ...EMPLOYMENT_STATUSES.map((st) => ({ value: st, label: st })),
+    { value: 'Separated', label: 'Separated' },
+  ];
+
   const entityOptions = [
     { value: 'all', label: 'All Entities' },
     ...entities.map((en: any) => ({ value: String(en.id), label: en.name || `Entity #${en.id}` })),
@@ -573,6 +590,17 @@ export const Employees: React.FC = () => {
                 value={filterEntity}
                 onValueChange={setFilterEntity}
                 options={entityOptions}
+              />
+
+              {/* Status Filter */}
+              <SearchableSelect
+                className="w-[150px] h-9 rounded-xl"
+                icon={<UserCheck className="w-3.5 h-3.5 text-gray-400" />}
+                placeholder="Status"
+                searchPlaceholder="Search status..."
+                value={filterStatus}
+                onValueChange={setFilterStatus}
+                options={statusOptions}
               />
 
               {/* Role Filter */}
@@ -776,6 +804,11 @@ export const Employees: React.FC = () => {
                                 <span className="text-[11px] text-gray-500 dark:text-gray-400">
                                   {empCode}
                                 </span>
+                                {normalizeStatus(emp.jobInfo?.employmentStatus) === 'Separated' && (
+                                  <span className="ml-1.5 inline-flex items-center px-1.5 py-px rounded-full border text-[10px] font-semibold bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800">
+                                    Separated
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </TableCell>

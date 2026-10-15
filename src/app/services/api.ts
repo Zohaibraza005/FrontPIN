@@ -800,6 +800,12 @@ export const employeeAPI = {
   },
   getDetail: (id: number | string) =>
     apiCall(`/employees/${id}/detail`),
+  getLogs: (id: number | string) =>
+    apiCall(`/employees/${id}/logs`),
+  markSeparation: (id: number | string, data: any) =>
+    apiCall(`/employees/${id}/separation`, { method: "POST", body: data }),
+  revokeSeparation: (id: number | string) =>
+    apiCall(`/employees/${id}/separation`, { method: "DELETE" }),
   addIncrement: async (id: number | string, data: any) => {
     return apiCall(`/employees/${id}/increment`, {
       method: 'POST',

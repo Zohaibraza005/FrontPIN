@@ -27,6 +27,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Plus, Check, X, Eye, Trash2, Pencil, Calendar, ChevronLeft, ChevronRight, MapPin, Plane } from "lucide-react";
 import { avatarColor } from "../utils/avatar";
 import { DatePickerWithRange } from "../components/ui/date-range-picker";
+import { toDate } from "../components/ui/date-picker";
 import type { DateRange } from "react-day-picker";
 
 const getPaginationRange = (current: number, total: number) => {
@@ -428,29 +429,20 @@ const calculateDays = (start: string, end: string) => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className={fieldLabel}>Start date</Label>
-                  <Input
-                    type="date"
-                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
-                    value={formData.startDate}
-                    onChange={(e) =>
-                      setFormData({ ...formData, startDate: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className={fieldLabel}>End date</Label>
-                  <Input
-                    type="date"
-                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
-                    value={formData.endDate}
-                    onChange={(e) =>
-                      setFormData({ ...formData, endDate: e.target.value })
-                    }
-                  />
-                </div>
+              <div className="space-y-1.5">
+                <Label className={fieldLabel}>Leave dates</Label>
+                <DatePickerWithRange
+                  size="md"
+                  align="start"
+                  showPresets={false}
+                  placeholder="Select start and end date"
+                  date={formData.startDate ? { from: toDate(formData.startDate), to: toDate(formData.endDate) } : undefined}
+                  setDate={(range) => {
+                    const start = range?.from ? format(range.from, "yyyy-MM-dd") : "";
+                    const end = range?.to ? format(range.to, "yyyy-MM-dd") : start;
+                    setFormData({ ...formData, startDate: start, endDate: end });
+                  }}
+                />
               </div>
               {requestDays > 0 && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
@@ -1062,29 +1054,20 @@ const calculateDays = (start: string, end: string) => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Start date</Label>
-                <Input
-                  type="date"
-                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
-                  value={formData.startDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>End date</Label>
-                <Input
-                  type="date"
-                  className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
-                  value={formData.endDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
-                  }
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Leave dates</Label>
+              <DatePickerWithRange
+                size="md"
+                align="start"
+                showPresets={false}
+                placeholder="Select start and end date"
+                date={formData.startDate ? { from: toDate(formData.startDate), to: toDate(formData.endDate) } : undefined}
+                setDate={(range) => {
+                  const start = range?.from ? format(range.from, "yyyy-MM-dd") : "";
+                  const end = range?.to ? format(range.to, "yyyy-MM-dd") : start;
+                  setFormData({ ...formData, startDate: start, endDate: end });
+                }}
+              />
             </div>
             {requestDays > 0 && (
               <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">

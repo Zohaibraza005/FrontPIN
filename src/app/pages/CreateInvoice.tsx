@@ -45,6 +45,7 @@ import {
 import { PDFViewer } from '@react-pdf/renderer';
 import { useNavigate } from 'react-router';
 
+import { DatePicker } from "../components/ui/date-picker";
 // PDF Styles
 const pdfStyles = StyleSheet.create({
   page: { padding: 40, fontFamily: 'Helvetica' },
@@ -503,12 +504,11 @@ export default function CreateInvoice() {
             <CardContent className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Issue Date</Label>
-                <Input type="date" value={issueDate} disabled />
+                <DatePicker value={issueDate} disabled />
               </div>
               <div className="space-y-2">
                 <Label>Due Date (optional)</Label>
-                <Input
-                  type="date"
+                <DatePicker
                   value={dueDate}
                   onChange={e => setDueDate(e.target.value)}
                   min={issueDate}

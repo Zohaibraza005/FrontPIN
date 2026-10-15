@@ -20,6 +20,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '
 import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
+import { DatePicker } from "../components/ui/date-picker";
 export const DetailProject: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [employees, setEmployees] = useState<any[]>([]);
@@ -476,8 +477,7 @@ export const DetailProject: React.FC = () => {
                   <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Deadline
                   </label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={taskDeadline}
                     onChange={(e) => setTaskDeadline(e.target.value)}
                     className="rounded-lg shadow-sm"

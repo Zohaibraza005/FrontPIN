@@ -1,6 +1,7 @@
 //@ts-nocheck
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { getEditWindow, timeOnRecordDate, isInsideWindow, windowLabel } from '../utils/shiftWindow';
 import { mockAttendance, mockEmployees, mockSchedules } from '../services/mockData';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -69,8 +70,6 @@ import { attendanceAPI, departmentAPI, employeeAPI, entityAPI, locationAPI } fro
 import { deviceService } from '../services/device.service';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { avatarColor } from '../utils/avatar';
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +94,7 @@ import {
 } from '../components/ui/sheet';
 
 import { timeRange12h } from "../utils/time";
+import { DatePicker } from "../components/ui/date-picker";
 function convertTo12Hour(timeStr) {
   // Input check
   if (!timeStr || typeof timeStr !== 'string') {
@@ -591,6 +591,8 @@ export const Attendance: React.FC = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('all');
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  // times saved when the edit modal opened – unchanged values are not re-validated
+  const editOriginalRef = useRef<{ in: any; out: any }>({ in: null, out: null });
   const [viewPanelOpen, setViewPanelOpen] = useState(false);
   const [viewRecord, setViewRecord] = useState(null);
 
@@ -783,7 +785,42 @@ export const Attendance: React.FC = () => {
     setViewPanelOpen(true);
   };
 
+  const getRecordWindow = (rec: any) => {
+    if (!rec) return null;
+    const sched = rec.schedule || rec.employee?.Schedule || report.find((e: any) => e.id === rec.employeeId)?.Schedule;
+    return getEditWindow(sched, rec.date);
+  };
+
+  const getEditTimeError = (rec: any) => {
+    if (!rec) return null;
+    const win = getRecordWindow(rec);
+    const sameAsSaved = (v: any, o: any) => v && o && new Date(v).getTime() === new Date(o).getTime();
+    const label = win ? windowLabel(win) : "";
+    if (rec.checkInTime && !sameAsSaved(rec.checkInTime, editOriginalRef.current.in) && !isInsideWindow(rec.checkInTime, win)) {
+      return `Check-in must be between ${label}.`;
+    }
+    if (rec.checkOutTime && !sameAsSaved(rec.checkOutTime, editOriginalRef.current.out) && !isInsideWindow(rec.checkOutTime, win)) {
+      return `Check-out must be between ${label}.`;
+    }
+    if (rec.checkInTime && rec.checkOutTime && new Date(rec.checkOutTime).getTime() <= new Date(rec.checkInTime).getTime()) {
+      return "Check-out must be after check-in.";
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    if (editModalOpen) {
+      editOriginalRef.current = { in: selectedRecord?.checkInTime || null, out: selectedRecord?.checkOutTime || null };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editModalOpen]);
+
   const handleSaveAttendance = async () => {
+    const timeError = getEditTimeError(selectedRecord);
+    if (timeError) {
+      toast.error(timeError);
+      return;
+    }
     const isFutureDate = isAfter(startOfDay(new Date(selectedRecord.date)), startOfDay(new Date()));
     if (isFutureDate || selectedRecord?.status === "UPCOMING_DAY" || selectedRecord?.status === "UPCOMING") {
       toast.error("There is no schedule for this day yet.");
@@ -1841,86 +1878,6 @@ export const Attendance: React.FC = () => {
         <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
           <div className="@container">
           <div className="flex flex-col @6xl:flex-row @6xl:items-center gap-2.5">
-            {/* Date controls */}
-            <div className="flex items-center gap-2 shrink-0">
-            {/* Date Navigation */}
-            <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
-                onClick={handlePrevDate}
-                title="Previous Period"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
-                onClick={handleNextDate}
-                disabled={isNextDisabled}
-                title="Next Period"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
-
-            {/* DatePicker Input Box (Same as Dashboard) */}
-            <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
-              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-              <DatePicker
-                selected={selectedDate}
-                maxDate={new Date()}
-                onChange={(date: Date | null) => {
-                  if (!date) return;
-                  if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
-                  setSelectedDate(date);
-                  if (activeTab === "weekly") setWeekOffset(0);
-                  if (activeTab === "monthly") setMonthOffset(0);
-                }}
-                showMonthDropdown={activeTab !== "monthly"}
-                showYearDropdown={activeTab !== "monthly"}
-                dropdownMode="select"
-                showMonthYearPicker={activeTab === "monthly"}
-                highlightDates={
-                  activeTab === "weekly"
-                    ? [
-                        {
-                          "react-datepicker__day--highlighted-custom-1": eachDayOfInterval({
-                            start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
-                            end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
-                          }),
-                        },
-                      ]
-                    : undefined
-                }
-                dateFormat={
-                  activeTab === "daily"
-                    ? "yyyy-MM-dd"
-                    : activeTab === "weekly"
-                    ? "'Week of' yyyy-MM-dd"
-                    : "MMMM yyyy"
-                }
-                className="w-28 sm:w-32 bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-xs sm:text-sm focus:outline-none cursor-pointer p-0"
-                placeholderText="Select date..."
-              />
-              {!isSameDay(selectedDate, new Date()) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDate(new Date());
-                    if (activeTab === "weekly") setWeekOffset(0);
-                    if (activeTab === "monthly") setMonthOffset(0);
-                  }}
-                  className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
-                >
-                  Today
-                </button>
-              )}
-            </div>
-            </div>
-
             {/* Filters: equal-width grid, single row on wide screens */}
             <div className={`flex-1 min-w-0 grid gap-2.5 grid-cols-2 @xl:grid-cols-3 ${user?.role === "ADMIN" ? "@3xl:grid-cols-5" : ""}`}>
             {user?.role === "ADMIN" && (
@@ -2050,8 +2007,8 @@ export const Attendance: React.FC = () => {
 
         <CardContent className="p-3 sm:p-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            {user?.role !== 'USER' && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {user?.role !== 'USER' ? (
                 <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900 p-1 rounded-xl">
                   <TabsTrigger 
                     value="daily" 
@@ -2072,8 +2029,74 @@ export const Attendance: React.FC = () => {
                     Monthly
                   </TabsTrigger>
                 </TabsList>
-              </div>
-            )}
+              ) : <span />}
+
+              {/* Date controls – right of the view tabs */}
+                <div className="flex items-center gap-2 shrink-0">
+                {/* Date Navigation */}
+                <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
+                    onClick={handlePrevDate}
+                    title="Previous Period"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
+                    onClick={handleNextDate}
+                    disabled={isNextDisabled}
+                    title="Next Period"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* DatePicker Input Box (Same as Dashboard) */}
+                <div className="inline-flex items-center gap-2 shrink-0">
+                  <DatePicker
+                    size="sm"
+                    required
+                    align="end"
+                    side="bottom"
+                    lockSide
+                    value={selectedDate}
+                    max={new Date()}
+                    displayFormat={
+                      activeTab === "daily"
+                        ? "dd MMM yyyy"
+                        : activeTab === "weekly"
+                        ? "'Week of' dd MMM yyyy"
+                        : "MMMM yyyy"
+                    }
+                    onDateChange={(date) => {
+                      if (!date) return;
+                      if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
+                      setSelectedDate(date);
+                      if (activeTab === "weekly") setWeekOffset(0);
+                      if (activeTab === "monthly") setMonthOffset(0);
+                    }}
+                  />
+                  {!isSameDay(selectedDate, new Date()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(new Date());
+                        if (activeTab === "weekly") setWeekOffset(0);
+                        if (activeTab === "monthly") setMonthOffset(0);
+                      }}
+                      className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+                </div>
+            </div>
 
             {/* Legend - Only show in Weekly and Monthly views, positioned in the next row */}
             {activeTab !== 'daily' && (
@@ -2605,9 +2628,7 @@ export const Attendance: React.FC = () => {
                         }));
                         return;
                       }
-                      const [hours, minutes] = e.target.value.split(":");
-                      const newDate = new Date(selectedRecord.date);
-                      newDate.setHours(Number(hours), Number(minutes), 0, 0);
+                      const newDate = timeOnRecordDate(selectedRecord.date, e.target.value, getRecordWindow(selectedRecord));
 
                       const inIso = newDate.toISOString();
                       setSelectedRecord((prev: any) => {
@@ -2649,9 +2670,7 @@ export const Attendance: React.FC = () => {
                         }));
                         return;
                       }
-                      const [hours, minutes] = e.target.value.split(":");
-                      const newDate = new Date(selectedRecord.date);
-                      newDate.setHours(Number(hours), Number(minutes), 0, 0);
+                      const newDate = timeOnRecordDate(selectedRecord.date, e.target.value, getRecordWindow(selectedRecord));
 
                       const outIso = newDate.toISOString();
                       setSelectedRecord((prev: any) => {
@@ -2672,6 +2691,27 @@ export const Attendance: React.FC = () => {
                 </div>
 
                 </div>
+
+                {(() => {
+                  const win = getRecordWindow(selectedRecord);
+                  const err = getEditTimeError(selectedRecord);
+                  if (!win && !err) return null;
+                  return (
+                    <div className="-mt-2 space-y-1.5">
+                      {win && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Allowed time: <span className="font-semibold text-gray-700 dark:text-gray-300">{windowLabel(win)}</span>
+                          {win.overtimeMinutes > 0 ? ` · includes ${formatMinutes(win.overtimeMinutes)} overtime` : " · no overtime allowed"}
+                        </p>
+                      )}
+                      {err && (
+                        <p className="flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {err}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Hours Breakdown */}
                 {(() => {
@@ -2761,7 +2801,7 @@ export const Attendance: React.FC = () => {
                 </Button>
 
                 <Button
-                  disabled={user?.role === 'USER'}
+                  disabled={user?.role === 'USER' || Boolean(getEditTimeError(selectedRecord))}
                   className="h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg" 
                   onClick={handleSaveAttendance}
                 >
@@ -3253,8 +3293,7 @@ export const Attendance: React.FC = () => {
                     <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
                     <span>Target Date *</span>
                   </label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={overrideDate}
                     onChange={(e) => setOverrideDate(e.target.value)}
                     className="h-10 text-xs sm:text-sm rounded-xl border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"

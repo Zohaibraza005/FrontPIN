@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { dashboardAPI, locationAPI, departmentAPI } from "../services/api";
 import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { avatarColor } from "../utils/avatar";
+import { DatePicker } from "../components/ui/date-picker";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   Card,
@@ -375,14 +376,15 @@ export const StatsDetails: React.FC = () => {
             </div>
   
             {/* Date Picker Box */}
-            <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
-              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-              <input
-                type="date"
+            <div className="inline-flex items-center gap-2 shrink-0">
+              <DatePicker
+                size="sm"
+                required
                 value={selectedDate}
                 max={todayStr}
-                onChange={(e) => handleDateChange(e.target.value)}
-                className="bg-transparent border-none outline-none font-semibold text-gray-900 dark:text-gray-100 cursor-pointer text-sm"
+                onValueChange={(v) => {
+                  if (v) handleDateChange(v);
+                }}
               />
               {selectedDate !== todayStr && (
                 <button

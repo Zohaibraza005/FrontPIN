@@ -1,6 +1,7 @@
 // attendance.controller.js
 
 const prisma = require("../../config/prisma");
+const { notSeparatedBefore } = require("../users/separation.util");
 const moment = require("moment-timezone");
 const {
   getDayOverrides,
@@ -129,6 +130,50 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
   }
 
   return { startTime, endTime };
+}
+
+// Manual edits must stay inside the employee's shift: from shift start (minus early-in margin)
+// to shift end plus the allowed overtime. Overnight shifts (e.g. 19:00–04:00) end on the next day.
+// Values equal to what is already saved are not re-checked, so existing device punches can still be kept.
+function validateEditWindow({ employee, dateValue, checkIn, checkOut, existing }) {
+  const activeSched = (employee?.Schedule || []).find((s) => s && !s.deletedAt);
+  if (!activeSched) return null;
+
+  const tz = employee?.company?.timezone || "Asia/Karachi";
+  const dateStr =
+    typeof dateValue === "string" && dateValue.length === 10
+      ? dateValue
+      : moment(dateValue).tz(tz).format("YYYY-MM-DD");
+  const { startTime, endTime } = getScheduleShiftForDay(activeSched, dateStr, tz);
+
+  const shiftStart = moment.tz(`${dateStr} ${startTime}`, "YYYY-MM-DD HH:mm", tz);
+  const shiftEnd = moment.tz(`${dateStr} ${endTime}`, "YYYY-MM-DD HH:mm", tz);
+  if (!shiftStart.isValid() || !shiftEnd.isValid()) return null;
+  if (shiftEnd.isSameOrBefore(shiftStart)) shiftEnd.add(1, "day");
+
+  const earlyMins = activeSched.allowEarlyIn ? Number(activeSched.earlyInMinutes) || 0 : 0;
+  const otMins = activeSched.overtimeAllowed ? Number(activeSched.overtimeMinutes) || 0 : 0;
+  const earliest = shiftStart.clone().subtract(earlyMins, "minutes");
+  const latest = shiftEnd.clone().add(otMins, "minutes");
+
+  const fmt = (m) => m.format("hh:mm A");
+  const windowText =
+    `${fmt(earliest)} – ${fmt(latest)}${latest.format("YYYY-MM-DD") !== dateStr ? " (next day)" : ""}` +
+    ` (shift ${fmt(shiftStart)} – ${fmt(shiftEnd)}${otMins ? ` + ${otMins} min overtime` : ", no overtime allowed"})`;
+
+  const unchanged = (val, old) => val && old && new Date(old).getTime() === val.getTime();
+  const outside = (d) => moment(d).isBefore(earliest) || moment(d).isAfter(latest);
+
+  if (checkIn && !unchanged(checkIn, existing?.checkInTime) && outside(checkIn)) {
+    return `Check-in must be between ${windowText}.`;
+  }
+  if (checkOut && !unchanged(checkOut, existing?.checkOutTime) && outside(checkOut)) {
+    return `Check-out must be between ${windowText}.`;
+  }
+  if (checkIn && checkOut && checkOut.getTime() <= checkIn.getTime()) {
+    return "Check-out must be after check-in.";
+  }
+  return null;
 }
 
 
@@ -1345,7 +1390,9 @@ exports.getAttendanceReport = async (req, res) => {
     let employeeWhere = {
       ...(user.orgId ? { organizationId: user.orgId } : {}),
       deletedAt: null,
-      NOT: { role: "ADMIN" }
+      NOT: { role: "ADMIN" },
+      // separated before this range starts -> not part of the report
+      AND: [notSeparatedBefore(startDate)],
     };
 
     if (user.role === "USER") {
@@ -2084,6 +2131,11 @@ exports.getAttendanceReport = async (req, res) => {
           return moment(c.date).format("YYYY-MM-DD") === targetDateStr || moment.utc(c.date).format("YYYY-MM-DD") === targetDateStr;
         }) || null;
       }
+
+      const windowError = validateEditWindow({ employee, dateValue: date, checkIn: finalCheckIn, checkOut: finalCheckOut, existing });
+      if (windowError) {
+        return res.status(400).json({ success: false, message: windowError });
+      }
   
       if (existing) {
         const attendance = await prisma.attendance.update({
@@ -2213,6 +2265,17 @@ exports.getAttendanceReport = async (req, res) => {
       if (status === "ABSENT" || status === "OFF_DAY" || status === "OFF" || status === "LEAVE") {
         finalCheckIn = null;
         finalCheckOut = null;
+      }
+
+      const windowError = validateEditWindow({
+        employee,
+        dateValue: date || targetDate,
+        checkIn: finalCheckIn,
+        checkOut: finalCheckOut,
+        existing: existingRecord,
+      });
+      if (windowError) {
+        return res.status(400).json({ success: false, message: windowError });
       }
 
       const activeSched = employee?.Schedule?.find(s => !s.deletedAt);
@@ -2530,7 +2593,8 @@ exports.exportAttendanceExcel = async (req, res) => {
     let employeeWhere = {
       ...(user.orgId ? { organizationId: user.orgId } : {}),
       deletedAt: null,
-      NOT: { role: "ADMIN" }
+      NOT: { role: "ADMIN" },
+      AND: [notSeparatedBefore(startDate)],
     };
 
     if (user.role === "USER") {

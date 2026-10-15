@@ -77,16 +77,12 @@ import { toast } from 'sonner';
 import { cn } from './ui/utils';
 
 import { to12h } from "../utils/time";
+// Ordered for leadership: overview first, then people, time, money, and company setup.
 const menuItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
-  { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
-  // { icon: FolderKanban, label: 'Projects', path: '/projects', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PROJECT' },
-  // { icon: CheckSquare, label: 'Tasks', path: '/tasks', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'TASK' },
-  // { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'INVOICE' },
-  { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
-  { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
+  { section: 'Overview', icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
+  { section: 'Overview', icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
   {
+    section: 'People',
     icon: Users,
     label: 'Employee',
     roles: ['ADMIN', 'SUPERVISOR', 'USER'],
@@ -97,12 +93,17 @@ const menuItems = [
       { label: 'Roles', path: '/roles', roles: ['ADMIN'] },
     ],
   },
-  { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
-  // { icon: MapPin, label: 'Locations', path: '/locations', roles: ['ADMIN'] },
-  // { icon: MapPin, label: 'Departments', path: '/departments', roles: ['ADMIN'] },
+  { section: 'Time & Attendance', icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
+  { section: 'Time & Attendance', icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
+  { section: 'Time & Attendance', icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
+  { section: 'Time & Attendance', icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
+  // { icon: FolderKanban, label: 'Projects', path: '/projects', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PROJECT' },
+  // { icon: CheckSquare, label: 'Tasks', path: '/tasks', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'TASK' },
+  // { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'INVOICE' },
+  { section: 'Finance', icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
   // { icon: UserPlus, label: 'Recruitment', path: '/jobs', roles: ['ADMIN'] },
-  { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
   {
+    section: 'Company',
     icon: Cog,
     label: 'Organization',
     roles: ['ADMIN', 'SUPERVISOR', 'USER'],
@@ -112,13 +113,45 @@ const menuItems = [
       { label: 'Departments', path: '/departments' },
       { label: 'Locations', path: '/locations' },
       { label: 'Entities', path: '/entities' },
-      // you can add more later: Settings, Billing, Branches, etc.
     ]
   },
-
-  // { icon: Cog, label: 'Organization', path: '/organization', roles: ['ADMIN'] },
   // { icon: Package, label: 'Assets', path: '/assets', roles: ['ADMIN'] },
 ];
+
+// "/" must match exactly, otherwise every page would count as Dashboard
+const pathMatches = (pathname: string, path?: string) =>
+  !!path && (path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(path + '/'));
+
+const navItemCls = (active: boolean) =>
+  cn(
+    "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all",
+    active
+      ? "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 shadow-xs"
+      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+  );
+
+const NavIcon = ({ icon: Icon, active }: any) => (
+  <span
+    className={cn(
+      "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+      active
+        ? "bg-blue-600 text-white shadow-sm"
+        : "bg-gray-100 text-gray-500 group-hover:bg-white group-hover:text-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:group-hover:bg-gray-800"
+    )}
+  >
+    <Icon className="size-4" />
+  </span>
+);
+
+const WithTip = ({ show, label, children }: any) =>
+  show ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  ) : (
+    children
+  );
 
 const getLocation = (): Promise<{ lat: number; lng: number }> => {
   return new Promise((resolve) => {
@@ -168,64 +201,68 @@ const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
     }
   }, [isChildActive]);
 
+  const childList = (
+    <div className="ml-[22px] mt-1 space-y-0.5 border-l border-gray-200 dark:border-gray-800 pl-3 pb-1">
+      {item.children.map((child: any) => {
+        const isExact = location.pathname === child.path;
+        const hasMoreSpecificChild = item.children.some(
+          (other: any) =>
+            other.path !== child.path &&
+            other.path.length > child.path.length &&
+            (location.pathname === other.path || location.pathname.startsWith(other.path + "/"))
+        );
+        const childActive =
+          isExact || (!hasMoreSpecificChild && location.pathname.startsWith(child.path + "/"));
+
+        return (
+          <Link
+            key={child.path}
+            to={child.path}
+            className={cn(
+              "relative flex items-center rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+              childActive
+                ? "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+            )}
+            onClick={onNavigate}
+          >
+            {childActive && <span className="absolute -left-[13px] top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-blue-600" />}
+            <span>{child.label}</span>
+          </Link>
+        );
+      })}
+    </div>
+  );
+
+  // Collapsed sidebar: show the children in a flyout menu
+  if (!sidebarOpen) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className={cn(navItemCls(isActive), "justify-center px-0")} title={item.label}>
+            <NavIcon icon={Icon} active={isActive} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" className="w-48 rounded-xl">
+          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">{item.label}</div>
+          {item.children.map((child: any) => (
+            <DropdownMenuItem key={child.path} asChild>
+              <Link to={child.path} onClick={onNavigate} className="cursor-pointer">{child.label}</Link>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   return (
-    <div key={item.label} className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-          isActive
-            ? "bg-blue-50 text-blue-700"
-            : "text-gray-700 hover:bg-gray-100"
-        )}
-      >
-        <div className="flex items-center gap-3">
-          <Icon className="size-5 shrink-0" />
-          {sidebarOpen && <span>{item.label}</span>}
-        </div>
-        {sidebarOpen && (
-          isOpen ? (
-            <ChevronDown className="size-4 opacity-70" />
-          ) : (
-            <ChevronRight className="size-4 opacity-70" />
-          )
-        )}
+    <div className="relative">
+      <button onClick={() => setIsOpen(!isOpen)} className={navItemCls(isActive)}>
+        <NavIcon icon={Icon} active={isActive} />
+        <span className="flex-1 text-left">{item.label}</span>
+        <ChevronDown className={cn("size-4 opacity-60 transition-transform", isOpen ? "rotate-0" : "-rotate-90")} />
       </button>
-
-      {/* Submenu */}
-      {isOpen && sidebarOpen && (
-        <div className="ml-8 mt-1 space-y-1 pb-2">
-          {item.children.map((child: any) => {
-            const ChildIcon = child.icon;
-            const isExact = location.pathname === child.path;
-            const hasMoreSpecificChild = item.children.some(
-              (other: any) =>
-                other.path !== child.path &&
-                other.path.length > child.path.length &&
-                (location.pathname === other.path || location.pathname.startsWith(other.path + "/"))
-            );
-            const childActive =
-              isExact || (!hasMoreSpecificChild && location.pathname.startsWith(child.path + "/"));
-
-            return (
-              <Link
-                key={child.path}
-                to={child.path}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  childActive
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                )}
-                onClick={onNavigate}
-              >
-                {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
-                <span>{child.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-      )}
+      {isOpen && childList}
     </div>
   );
 };
@@ -855,22 +892,27 @@ export const Layout: React.FC = () => {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 h-screen bg-white border-r border-gray-200 transition-all duration-300",
+          "fixed left-0 top-0 z-40 h-screen bg-white dark:bg-gray-950 border-r border-gray-200/80 dark:border-gray-800 transition-all duration-300",
           sidebarOpen ? "w-64" : "w-20",
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full",
           "lg:translate-x-0"
         )}
       >
+        <TooltipProvider delayDuration={150}>
         <div className="flex h-full flex-col">
-          {/* Fixed top header */}
-          <div className="flex h-16 items-center justify-between border-b border-gray-200 px-6 shrink-0">
-            {sidebarOpen ? (
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                HR PRO
-              </h1>
-            ) : (
-              <span className="text-2xl font-bold text-blue-600">HP</span>
-            )}
+          {/* Brand */}
+          <div className={cn("flex h-16 items-center border-b border-gray-200/80 dark:border-gray-800 shrink-0", sidebarOpen ? "justify-between px-5" : "justify-center px-2")}>
+            <Link to="/" className="flex items-center gap-2.5 min-w-0" onClick={() => setMobileMenuOpen(false)}>
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-bold text-white shadow-sm">
+                HP
+              </span>
+              {sidebarOpen && (
+                <span className="min-w-0 leading-tight">
+                  <span className="block text-base font-bold tracking-tight text-gray-900 dark:text-gray-100">HR Pro</span>
+                  <span className="block text-[11px] font-medium text-gray-500 dark:text-gray-400">Workforce management</span>
+                </span>
+              )}
+            </Link>
             <Button
               variant="ghost"
               size="sm"
@@ -881,68 +923,109 @@ export const Layout: React.FC = () => {
             </Button>
           </div>
 
-          {/* SCROLLABLE AREA – this MUST grow and scroll */}
+          {/* Navigation */}
           <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full px-3 py-4">
-              <nav className="space-y-1 min-h-[200px]">
-                {filteredMenuItems.map((item) => {
-                  const Icon = item.icon;
+            <ScrollArea className="h-full px-3 py-3">
+              <nav className="min-h-[200px]">
+                {filteredMenuItems.map((item, idx) => {
                   const isActive =
-                    location.pathname === item.path ||
-                    (item.path && location.pathname.startsWith(item.path)) ||
-                    (item.children?.some(child => location.pathname === child.path || location.pathname.startsWith(child.path)));
+                    pathMatches(location.pathname, item.path) ||
+                    Boolean(item.children?.some((child: any) => pathMatches(location.pathname, child.path)));
+                  const showSection = item.section && item.section !== filteredMenuItems[idx - 1]?.section;
+
+                  const sectionHeader = showSection ? (
+                    sidebarOpen ? (
+                      <div className={cn("px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500", idx === 0 ? "pt-1" : "pt-4")}>
+                        {item.section}
+                      </div>
+                    ) : (
+                      idx !== 0 && <div className="mx-3 my-3 border-t border-gray-200 dark:border-gray-800" />
+                    )
+                  ) : null;
 
                   // Has children → render as collapsible
                   if (item.children && item.children.length > 0) {
                     return (
-                      <CollapsibleSidebarItem
-                        key={item.label}
-                        item={item}
-                        sidebarOpen={sidebarOpen}
-                        isActive={isActive}
-                        onNavigate={() => setMobileMenuOpen(false)}
-                      />
+                      <React.Fragment key={item.label}>
+                        {sectionHeader}
+                        <div className="mb-0.5">
+                          <CollapsibleSidebarItem
+                            item={item}
+                            sidebarOpen={sidebarOpen}
+                            isActive={isActive}
+                            onNavigate={() => setMobileMenuOpen(false)}
+                          />
+                        </div>
+                      </React.Fragment>
                     );
                   }
 
-
                   // Normal menu item (no children)
                   return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-100"
-                      )}
-                      onClick={() => setMobileMenuOpen(false)}
-                    >
-                      <Icon className="size-5 shrink-0" />
-                      {sidebarOpen && <span>{item.label}</span>}
-                    </Link>
+                    <React.Fragment key={item.path}>
+                      {sectionHeader}
+                      <WithTip show={!sidebarOpen} label={item.label}>
+                        <Link
+                          to={item.path}
+                          className={cn(navItemCls(isActive), "mb-0.5", !sidebarOpen && "justify-center px-0")}
+                          onClick={() => setMobileMenuOpen(false)}
+                        >
+                          {isActive && sidebarOpen && <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-blue-600" />}
+                          <NavIcon icon={item.icon} active={isActive} />
+                          {sidebarOpen && <span className="flex-1">{item.label}</span>}
+                        </Link>
+                      </WithTip>
+                    </React.Fragment>
                   );
                 })}
               </nav>
 
-              {/* Extra padding at bottom so last item isn't hidden under logout */}
-              <div className="h-16" />
+              {/* Extra padding at bottom so last item isn't hidden under the footer */}
+              <div className="h-6" />
             </ScrollArea>
           </div>
 
-          {/* Fixed bottom – logout always visible */}
-          <div className="border-t border-gray-200 p-3 sm:p-4 shrink-0 bg-white">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 gap-3"
-              onClick={logout}
-            >
-              <LogOut className="size-5" />
-              {sidebarOpen && <span>Logout</span>}
-            </Button>
+          {/* Footer: signed-in user + logout */}
+          <div className="border-t border-gray-200/80 dark:border-gray-800 p-3 shrink-0 bg-white dark:bg-gray-950">
+            {sidebarOpen ? (
+              <div className="flex items-center gap-2.5 rounded-xl bg-gray-50 dark:bg-gray-900 px-2.5 py-2">
+                {user.profileImage ? (
+                  <img
+                    src={user.profileImage.startsWith("http") ? user.profileImage : `${API_URL}${user.profileImage}`}
+                    alt={user.firstName}
+                    className="size-8 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-xs font-semibold text-white">
+                    {(user.firstName?.charAt(0) || 'U').toUpperCase()}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1 leading-tight">
+                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{user.firstName} {user.lastName || ''}</p>
+                  <p className="truncate text-[11px] font-medium text-gray-500 dark:text-gray-400 capitalize">{String(user.role || 'user').toLowerCase()}</p>
+                </div>
+                <WithTip show label="Logout">
+                  <button
+                    onClick={logout}
+                    className="flex size-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 transition-colors"
+                  >
+                    <LogOut className="size-4" />
+                  </button>
+                </WithTip>
+              </div>
+            ) : (
+              <WithTip show label="Logout">
+                <button
+                  onClick={logout}
+                  className="mx-auto flex size-10 items-center justify-center rounded-xl text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              </WithTip>
+            )}
           </div>
         </div>
+        </TooltipProvider>
       </aside>
       {/* Mobile overlay */}
       {mobileMenuOpen && (
@@ -983,10 +1066,8 @@ export const Layout: React.FC = () => {
             <h2 className="text-xl font-semibold text-gray-900">
               {(() => {
                 const match = menuItems.find(item =>
-                  location.pathname.startsWith(item.path || "") ||
-                  item.children?.some(child =>
-                    location.pathname.startsWith(child.path)
-                  )
+                  pathMatches(location.pathname, item.path) ||
+                  item.children?.some((child: any) => pathMatches(location.pathname, child.path))
                 );
                 return match?.label || "Dashboard";
               })()}

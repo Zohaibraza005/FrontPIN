@@ -93,6 +93,9 @@ import {
 } from "../components/ui/alert-dialog";
 import { Link, useNavigate } from "react-router";
 
+import { DatePickerWithRange } from "../components/ui/date-range-picker";
+import { toDate } from "../components/ui/date-picker";
+import { format } from "date-fns";
 const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return "—";
   return new Date(dateString).toLocaleDateString("en-GB", {
@@ -926,38 +929,33 @@ export const Projects: React.FC = () => {
                         )}
                       </div>
                       
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">Start Date *</Label>
-                          <Input
-                            type="date"
-                            value={projectStartDate}
-                            onChange={(e) => {
-                              setProjectStartDate(e.target.value);
-                              setFormErrors((prev) => ({ ...prev, projectStartDate: "" }));
-                            }}
-                            className={`rounded-lg ${formErrors.projectStartDate ? 'border-red-500' : ''}`}
-                          />
-                          {formErrors.projectStartDate && (
-                            <p className="text-xs text-red-500 mt-1">{formErrors.projectStartDate}</p>
-                          )}
-                        </div>
-                        
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">End Date *</Label>
-                          <Input
-                            type="date"
-                            value={projectEndDate}
-                            onChange={(e) => {
-                              setProjectEndDate(e.target.value);
-                              setFormErrors((prev) => ({ ...prev, projectEndDate: "" }));
-                            }}
-                            className={`rounded-lg ${formErrors.projectEndDate ? 'border-red-500' : ''}`}
-                          />
-                          {formErrors.projectEndDate && (
-                            <p className="text-xs text-red-500 mt-1">{formErrors.projectEndDate}</p>
-                          )}
-                        </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Project Dates *</Label>
+                        <DatePickerWithRange
+                          size="md"
+                          align="start"
+                          showPresets={false}
+                          placeholder="Select start and end date"
+                          className={formErrors.projectStartDate || formErrors.projectEndDate ? "[&_button]:border-red-500" : ""}
+                          date={projectStartDate ? { from: toDate(projectStartDate), to: toDate(projectEndDate) } : undefined}
+                          setDate={(range) => {
+                            const start = range?.from ? format(range.from, "yyyy-MM-dd") : "";
+                            const end = range?.to ? format(range.to, "yyyy-MM-dd") : "";
+                            setProjectStartDate(start);
+                            setProjectEndDate(end);
+                            setFormErrors((prev) => ({
+                              ...prev,
+                              ...(start ? { projectStartDate: "" } : {}),
+                              ...(end ? { projectEndDate: "" } : {}),
+                            }));
+                          }}
+                        />
+                        {formErrors.projectStartDate && (
+                          <p className="text-xs text-red-500 mt-1">{formErrors.projectStartDate}</p>
+                        )}
+                        {formErrors.projectEndDate && (
+                          <p className="text-xs text-red-500 mt-1">{formErrors.projectEndDate}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1361,30 +1359,21 @@ export const Projects: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                    Start Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={editStartDate}
-                    onChange={(e) => setEditStartDate(e.target.value)}
-                    className="rounded-lg shadow-sm"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                    End Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={editEndDate}
-                    onChange={(e) => setEditEndDate(e.target.value)}
-                    className="rounded-lg shadow-sm"
-                  />
-                </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                  Project Dates
+                </Label>
+                <DatePickerWithRange
+                  size="md"
+                  align="start"
+                  showPresets={false}
+                  placeholder="Select start and end date"
+                  date={editStartDate ? { from: toDate(editStartDate), to: toDate(editEndDate) } : undefined}
+                  setDate={(range) => {
+                    setEditStartDate(range?.from ? format(range.from, "yyyy-MM-dd") : "");
+                    setEditEndDate(range?.to ? format(range.to, "yyyy-MM-dd") : "");
+                  }}
+                />
               </div>
 
               <Button

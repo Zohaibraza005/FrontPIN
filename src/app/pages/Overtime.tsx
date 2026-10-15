@@ -26,6 +26,7 @@ import {
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 
+import { DatePicker } from "../components/ui/date-picker";
 export const Overtime: React.FC = () => {
   const { user } = useAuth();
 
@@ -732,8 +733,7 @@ export const Overtime: React.FC = () => {
 
             <div>
               <label className={fieldLabel}>Date</label>
-              <Input
-                type="date"
+              <DatePicker
                 className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-xs focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20"
                 value={formData.date}
                 onChange={(e) =>

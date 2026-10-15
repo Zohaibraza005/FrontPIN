@@ -18,6 +18,7 @@ import {
 } from "../components/ui/select";
 import { toast } from "sonner";
 
+import { DatePicker } from "../components/ui/date-picker";
 export default function PostJob() {
   const navigate = useNavigate();
 
@@ -258,8 +259,7 @@ export default function PostJob() {
 
             <div className="space-y-2">
               <Label>Application Deadline</Label>
-              <Input
-                type="date"
+              <DatePicker
                 value={form.deadline}
                 onChange={(e) =>
                   setForm({ ...form, deadline: e.target.value })

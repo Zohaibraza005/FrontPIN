@@ -95,6 +95,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { ScrollArea } from "../components/ui/scroll-area";
 
+import { DatePicker } from "../components/ui/date-picker";
 interface Remark {
   id: string;
   title: string | null;
@@ -688,8 +689,7 @@ export const Tasks: React.FC = () => {
                       {/* Due Date */}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">Due Date *</Label>
-                        <Input
-                          type="date"
+                        <DatePicker
                           value={taskDeadline}
                           onChange={(e) => setTaskDeadline(e.target.value)}
                           className="rounded-lg shadow-sm"
@@ -1447,8 +1447,7 @@ export const Tasks: React.FC = () => {
 
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">Deadline</Label>
-                        <Input
-                          type="date"
+                        <DatePicker
                           value={selectedTask?.deadline?.split("T")[0]}
                           onChange={(e) =>
                             setSelectedTask({

@@ -36,6 +36,7 @@ import { Checkbox } from "../components/ui/checkbox";
 
 
 
+import { DatePicker } from "../components/ui/date-picker";
 const mockApplicants = [
   { id: 1, name: "Ali Khan", job: "Frontend Dev", status: "APPLIED", experience: 3, email: "ali@mail.com", phone: "0300" },
   { id: 2, name: "Sara Ahmed", job: "Backend Dev", status: "INTERVIEW", experience: 4, email: "sara@mail.com", phone: "0301" },
@@ -648,8 +649,7 @@ useEffect(() => {
       {/* Interview Date */}
       <div className="space-y-2">
         <Label>Interview Date</Label>
-        <Input
-          type="date"
+        <DatePicker
           value={interviewDate}
           onChange={(e) => setInterviewDate(e.target.value)}
         />

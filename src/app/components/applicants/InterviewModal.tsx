@@ -5,6 +5,7 @@ import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 
+import { DatePicker } from "../ui/date-picker";
 export default function InterviewModal({ open, setOpen }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -14,7 +15,7 @@ export default function InterviewModal({ open, setOpen }) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <Input type="date" />
+          <DatePicker />
           <Input placeholder="Interviewer Name" />
           <Input placeholder="Interview Mode (Online/Onsite)" />
 

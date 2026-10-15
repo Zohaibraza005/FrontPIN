@@ -2,6 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
+import { DatePicker } from "../ui/date-picker";
 export default function OfferModal({ open, setOpen }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -12,7 +13,7 @@ export default function OfferModal({ open, setOpen }) {
 
         <div className="space-y-4">
           <Input placeholder="Offered Salary" type="number" />
-          <Input type="date" placeholder="Joining Date" />
+          <DatePicker placeholder="Joining Date" />
           <Button className="w-full">Generate Offer</Button>
         </div>
       </DialogContent>

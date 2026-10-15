@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { notSeparatedBefore } = require("../users/separation.util");
 const moment = require("moment-timezone");
 const { DateTime } = require("luxon"); // or import { DateTime } from 'luxon';
 /* ---------------------------------- */
@@ -77,6 +78,7 @@ const getAdminDashboard = async (req, res) => {
       organizationId,
       deletedAt: null,
       NOT: { role: "ADMIN" },
+      AND: [notSeparatedBefore(localStartOfDay.toJSDate())],
     };
 
     if (isLocationFiltered) {
@@ -229,6 +231,7 @@ const getAdminDashboard = async (req, res) => {
           organizationId,
           deletedAt: null,
           NOT: { role: "ADMIN" },
+          AND: [notSeparatedBefore(localStartOfDay.toJSDate())],
           ...(isLocationFiltered ? { companyId: locationIdNum } : {}),
         },
       },
@@ -445,6 +448,7 @@ const getWeeklyTimesheet = async (req, res) => {
         organizationId,
         deletedAt: null,
         NOT: { role: "ADMIN" },
+        AND: [notSeparatedBefore(weekStart.toJSDate())],
         ...companyWhere,
         ...supervisorFilter,
       },
@@ -598,6 +602,7 @@ const getSupervisorDashboard = async (req, res) => {
     const employeeWhere = {
       organizationId,
       deletedAt: null,
+      AND: [notSeparatedBefore(localStartOfDay.toJSDate())],
       ...(isTeamOnly
         ? { OR: [{ id: supervisorId }, { supervisorId: supervisorId }] }
         : { NOT: { role: "ADMIN" } }),
@@ -1476,6 +1481,7 @@ const getStatsDetails = async (req, res) => {
         organizationId,
         deletedAt: null,
         NOT: { role: "ADMIN" },
+        AND: [notSeparatedBefore(localStartOfDay.toJSDate())],
         ...(role === "SUPERVISOR" ? supervisorWhere : {}),
         ...(role === "USER" ? { id: userId } : {}),
         ...locationFilter,
@@ -1669,6 +1675,7 @@ const getStatsDetails = async (req, res) => {
             organizationId,
             deletedAt: null,
             NOT: { role: "ADMIN" },
+            AND: [notSeparatedBefore(localStartOfDay.toJSDate())],
             ...(role === "SUPERVISOR" ? supervisorWhere : {}),
             ...(role === "USER" ? { id: userId } : {}),
             ...locationFilter,

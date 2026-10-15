@@ -108,8 +108,6 @@ import {
 } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
 import {
   Tooltip as UITooltip,
   TooltipContent as UITooltipContent,
@@ -117,6 +115,8 @@ import {
   TooltipProvider as UITooltipProvider,
 } from "../components/ui/tooltip";
 
+import { DatePickerWithRange } from "../components/ui/date-range-picker";
+import { DatePicker, toDate } from "../components/ui/date-picker";
 const COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"];
 
 export const Dashboard: React.FC = () => {
@@ -931,28 +931,19 @@ export const Dashboard: React.FC = () => {
                       <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-xs">
-                        <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                        <span className="font-bold text-indigo-600">
-                          {selectedDate === moment().format("YYYY-MM-DD") ? "Today:" : "Date:"}
-                        </span>
-                        <DatePicker
-                          selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                          maxDate={new Date()}
-                          onChange={(date: Date | null) => {
-                            if (!date) return;
-                            const today = new Date();
-                            today.setHours(23, 59, 59, 999);
-                            if (date > today) return;
-                            setSelectedDate(moment(date).format("YYYY-MM-DD"));
-                          }}
-                          dateFormat="dd MMM yyyy"
-                          showMonthDropdown
-                          showYearDropdown
-                          dropdownMode="select"
-                          className="bg-transparent border-none text-xs font-semibold text-gray-700 p-0 focus:outline-none cursor-pointer w-24"
-                        />
-                      </div>
+                      <span className="text-xs font-bold text-indigo-600">
+                        {selectedDate === moment().format("YYYY-MM-DD") ? "Today:" : "Date:"}
+                      </span>
+                      <DatePicker
+                        size="sm"
+                        align="end"
+                        required
+                        value={selectedDate}
+                        max={new Date()}
+                        onValueChange={(v) => {
+                          if (v) setSelectedDate(v);
+                        }}
+                      />
                       {selectedDate !== moment().format("YYYY-MM-DD") && (
                         <button
                           type="button"
@@ -1048,24 +1039,17 @@ export const Dashboard: React.FC = () => {
                 </div>
                 {/* Date filter (moved from the removed welcome card) */}
                 {user?.role !== "SUPERVISOR" && (
-                <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 pl-3 pr-1.5 py-1 rounded-xl shadow-2xs h-10">
-                  <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                <div className="inline-flex items-center gap-2">
                   <DatePicker
-                    selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                    maxDate={new Date()}
-                    onChange={(date: Date | null) => {
-                      if (!date) return;
-                      const today = new Date();
-                      today.setHours(23, 59, 59, 999);
-                      if (date > today) return;
-                      setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                    size="sm"
+                    align="end"
+                    required
+                    value={selectedDate}
+                    max={new Date()}
+                    displayFormat={viewMode === "month" ? "MMMM yyyy" : "dd MMM yyyy"}
+                    onValueChange={(v) => {
+                      if (v) setSelectedDate(v);
                     }}
-                    dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
-                    showMonthDropdown
-                    showYearDropdown
-                    dropdownMode="select"
-                    className="w-32 bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-sm focus:outline-none cursor-pointer p-0"
-                    placeholderText="Select date..."
                   />
                   {selectedDate !== moment().format("YYYY-MM-DD") && (
                     <button
@@ -2441,22 +2425,19 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div>
-              <Label className="text-xs font-semibold text-gray-700">Start Date</Label>
-              <Input
-                type="date"
-                value={leaveFormData.startDate}
-                onChange={(e) => setLeaveFormData({ ...leaveFormData, startDate: e.target.value })}
-                className="mt-1 rounded-xl border-gray-200"
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold text-gray-700">End Date</Label>
-              <Input
-                type="date"
-                value={leaveFormData.endDate}
-                onChange={(e) => setLeaveFormData({ ...leaveFormData, endDate: e.target.value })}
-                className="mt-1 rounded-xl border-gray-200"
+              <Label className="text-xs font-semibold text-gray-700">Leave Dates</Label>
+              <DatePickerWithRange
+                className="mt-1"
+                size="md"
+                align="start"
+                showPresets={false}
+                placeholder="Select start and end date"
+                date={leaveFormData.startDate ? { from: toDate(leaveFormData.startDate), to: toDate(leaveFormData.endDate) } : undefined}
+                setDate={(range) => {
+                  const start = range?.from ? moment(range.from).format("YYYY-MM-DD") : "";
+                  const end = range?.to ? moment(range.to).format("YYYY-MM-DD") : start;
+                  setLeaveFormData({ ...leaveFormData, startDate: start, endDate: end });
+                }}
               />
             </div>
 
