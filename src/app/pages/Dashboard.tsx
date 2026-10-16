@@ -56,6 +56,8 @@ import {
   User,
   Search,
   Building2,
+  ArrowRight,
+  MapPin,
 } from "lucide-react";
 import {
   BarChart,
@@ -115,6 +117,19 @@ import {
 } from "../components/ui/tooltip";
 
 const COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"];
+
+const DatePickerCustomInput = React.forwardRef<HTMLButtonElement, any>(({ value, onClick }, ref) => (
+  <button
+    type="button"
+    onClick={onClick}
+    ref={ref}
+    className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-3.5 py-1.5 rounded-xl shadow-2xs text-xs font-semibold text-gray-800 transition-all cursor-pointer"
+  >
+    <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+    <span>{value || "Select date"}</span>
+  </button>
+));
+DatePickerCustomInput.displayName = "DatePickerCustomInput";
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -577,6 +592,31 @@ export const Dashboard: React.FC = () => {
     overtime:  Number(item.overtimeHours),
   }));
 
+  const totalWeeklyWorkingHours = (weeklyDummyData || []).reduce(
+    (sum: number, d: any) => sum + (Number(d.workingHours) || 0),
+    0
+  );
+  const totalWeeklyOvertimeHours = (weeklyDummyData || []).reduce(
+    (sum: number, d: any) => sum + (Number(d.overtimeHours) || 0),
+    0
+  );
+  const activeWorkingDaysCount = (weeklyDummyData || []).filter(
+    (d: any) => (Number(d.workingHours) || 0) > 0
+  ).length;
+  const avgWorkingDayHours = totalWeeklyWorkingHours > 0 
+    ? totalWeeklyWorkingHours / (activeWorkingDaysCount > 0 ? activeWorkingDaysCount : 5) 
+    : 0;
+
+  const getLocationDisplay = () => {
+    if (!selectedLocation || selectedLocation === "ALL" || selectedLocation === "all") {
+      return "All locations";
+    }
+    const found = (locations as any[])?.find(
+      (l: any) => String(l.id) === String(selectedLocation) || l.name === selectedLocation
+    );
+    return found?.name || selectedLocation;
+  };
+
   // ── Employee-specific helpers and timers ──
   const getTodayRecord = () => {
     const todayStr = new Date().toDateString();
@@ -904,9 +944,9 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
             {/* Left: Stats Cards ── takes more space on large screens */}
             <div className="xl:col-span-8 space-y-6">
-              {user?.role === "SUPERVISOR" ? (
+              {user?.role === "SUPERVISOR" && (
                 /* Supervisor Welcome Card – Clock In / Clock Out Attendance Box */
-                <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 md:p-7 min-h-[175px]">
+                <Card className="shadow-xs border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 md:p-7 min-h-[175px]">
                   <div className="flex justify-between items-start">
                     <div>
                       <h2 className="text-xl font-bold text-gray-900">
@@ -914,56 +954,18 @@ export const Dashboard: React.FC = () => {
                       </h2>
                       <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-xs">
-                        <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                        <span className="font-bold text-indigo-600">
-                          {selectedDate === moment().format("YYYY-MM-DD") ? "Today:" : "Date:"}
-                        </span>
-                        <DatePicker
-                          selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                          maxDate={new Date()}
-                          onChange={(date: Date | null) => {
-                            if (!date) return;
-                            const today = new Date();
-                            today.setHours(23, 59, 59, 999);
-                            if (date > today) return;
-                            setSelectedDate(moment(date).format("YYYY-MM-DD"));
-                          }}
-                          dateFormat="dd MMM yyyy"
-                          showMonthDropdown
-                          showYearDropdown
-                          dropdownMode="select"
-                          className="bg-transparent border-none text-xs font-semibold text-gray-700 p-0 focus:outline-none cursor-pointer w-24"
-                        />
-                      </div>
-                      {selectedDate !== moment().format("YYYY-MM-DD") && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
-                          className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors whitespace-nowrap shadow-xs"
-                        >
-                          Today
-                        </button>
-                      )}
-                    </div>
                   </div>
 
                   <div className="flex flex-row items-center justify-between gap-6 my-auto pt-4">
                     <div className="flex flex-col space-y-4">
                       <div className="relative pl-6 space-y-3">
-                        {/* Vertical line connecting check-in and check-out */}
                         <div className="absolute left-[4px] top-2 bottom-2 w-0.5 bg-gray-200" />
-                        
-                        {/* Check In Row */}
                         <div className="flex items-center gap-3 text-sm whitespace-nowrap">
                           <span className="absolute left-0 w-2.5 h-2.5 rounded-full border-2 border-green-500 bg-white" />
                           <span className="font-semibold text-gray-700">CLOCK IN</span>
                           <span className="text-gray-400">—</span>
                           <span className="text-gray-600 font-medium">{checkInTimeFormatted}</span>
                         </div>
-
-                        {/* Check Out Row */}
                         <div className="flex items-center gap-3 text-sm whitespace-nowrap">
                           <span className="absolute left-0 w-2.5 h-2.5 rounded-full border-2 border-red-500 bg-white" />
                           <span className="font-semibold text-gray-700">Clock Out</span>
@@ -971,7 +973,6 @@ export const Dashboard: React.FC = () => {
                           <span className="text-gray-600 font-medium">{checkOutTimeFormatted}</span>
                         </div>
                       </div>
-
                       <div>
                         <div className="text-2xl font-bold text-gray-900">
                           {todayHoursText}
@@ -979,144 +980,49 @@ export const Dashboard: React.FC = () => {
                         <p className="text-xs text-gray-500">Today's Hours</p>
                       </div>
                     </div>
-
-                    {/* SVG Illustration - Modern Office Workstation */}
-                    <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
-                      <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
-                        {/* Background soft circle */}
-                        <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
-                        
-                        {/* Laptop screen base */}
-                        <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
-                        <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
-                        
-                        {/* Laptop keyboard area */}
-                        <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
-                        <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
-                        
-                        {/* Coffee mug */}
-                        <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
-                        <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
-                        <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
-                        
-                        {/* Potted Plant */}
-                        <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
-                        <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
-                        <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
-                        <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
-                        
-                        {/* Large clock */}
-                        <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
-                        <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                        <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                        <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
-                        
-                        {/* Code symbols on screen */}
-                        <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
-                        <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
-                        <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
-                        
-                        {/* Floating calendar checklist checkmark */}
-                        <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
-                        <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
                   </div>
                 </Card>
-              ) : (
-                /* Admin Welcome Card – clean white card with vector illustration */
-                <div className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-6 md:p-7 flex flex-row items-center justify-between gap-4 min-h-[175px]">
-                  {/* LEFT SIDE: Welcome Text + Date Filter */}
-                  <div className="space-y-4 max-w-[65%] sm:max-w-[70%]">
-                    <div>
-                      <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 leading-tight">
-                        Welcome back
-                         {/* {user?.name || "User"}! */}
-                      </h1>
-                      <p className="text-sm text-gray-500 font-medium mt-1">
-                        Here's what's happening with your company today.
-                      </p>
-                    </div>
-
-                    {/* DATE FILTER */}
-                    <div className="inline-flex items-center gap-2.5 bg-gray-50/90 border border-gray-200/80 p-2.5 rounded-2xl">
-                      <Calendar className="w-4 h-4 text-blue-600 ml-1 shrink-0" />
-                      <DatePicker
-                        selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
-                        maxDate={new Date()}
-                        onChange={(date: Date | null) => {
-                          if (!date) return;
-                          const today = new Date();
-                          today.setHours(23, 59, 59, 999);
-                          if (date > today) return;
-                          setSelectedDate(moment(date).format("YYYY-MM-DD"));
-                        }}
-                        dateFormat={viewMode === "month" ? "MMMM yyyy" : viewMode === "week" ? "yyyy-'W'II" : "yyyy-MM-dd"}
-                        showMonthDropdown
-                        showYearDropdown
-                        dropdownMode="select"
-                        className="text-gray-900 font-semibold bg-white w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-xs cursor-pointer"
-                        placeholderText="Select date..."
-                      />
-                      {selectedDate !== moment().format("YYYY-MM-DD") && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
-                          className="text-xs font-semibold px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs"
-                        >
-                          Today
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* RIGHT SIDE: SVG Vector Illustration */}
-                  <div className="hidden sm:block w-32 h-32 md:w-36 md:h-36 opacity-95 select-none flex-shrink-0">
-                    <svg viewBox="0 0 200 200" className="w-full h-full text-indigo-600 fill-current">
-                      {/* Background soft circle */}
-                      <circle cx="100" cy="100" r="80" className="text-indigo-50/50" />
-                      
-                      {/* Laptop screen base */}
-                      <rect x="50" y="80" width="100" height="60" rx="8" className="text-indigo-100" />
-                      <rect x="55" y="85" width="90" height="42" rx="4" className="text-white" />
-                      
-                      {/* Laptop keyboard area */}
-                      <path d="M40,140 L160,140 L150,148 L50,148 Z" className="text-indigo-300" />
-                      <rect x="85" y="142" width="30" height="4" rx="1" className="text-indigo-400" />
-                      
-                      {/* Coffee mug */}
-                      <rect x="154" y="115" width="12" height="18" rx="2" className="text-amber-500" />
-                      <path d="M166,120 C170,120 170,128 166,128" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
-                      <path d="M150,110 C152,108 154,110 156,108" fill="none" stroke="#f59e0b" strokeWidth="1" />
-                      
-                      {/* Potted Plant */}
-                      <path d="M25,120 L37,120 L34,136 L28,136 Z" className="text-emerald-300" />
-                      <path d="M31,105 C25,110 28,120 31,120 C34,120 37,110 31,105 Z" className="text-emerald-500" />
-                      <path d="M22,112 C18,118 25,123 27,120 C29,117 26,112 22,112 Z" className="text-emerald-600" />
-                      <path d="M40,112 C44,118 37,123 35,120 C33,117 36,112 40,112 Z" className="text-emerald-600" />
-                      
-                      {/* Large clock */}
-                      <circle cx="100" cy="50" r="32" className="text-white" stroke="#6366f1" strokeWidth="4.5" />
-                      <line x1="100" y1="50" x2="100" y2="32" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                      <line x1="100" y1="50" x2="116" y2="50" stroke="#4f46e5" strokeWidth="3.5" strokeLinecap="round" />
-                      <circle cx="100" cy="50" r="3.5" className="text-indigo-700" />
-                      
-                      {/* Code symbols on screen */}
-                      <rect x="62" y="92" width="35" height="5" rx="1.5" className="text-indigo-400" />
-                      <rect x="62" y="102" width="22" height="5" rx="1.5" className="text-indigo-300" />
-                      <rect x="62" y="112" width="45" height="5" rx="1.5" className="text-indigo-200" />
-                      
-                      {/* Floating calendar checklist checkmark */}
-                      <circle cx="152" cy="70" r="7" className="text-amber-100" stroke="#f59e0b" strokeWidth="1.5" />
-                      <path d="M149,70 L151,72 L154,68" fill="none" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                </div>
               )}
 
-              <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                Attendance Stats
-              </h2>
+              {/* Attendance Stats Header + Date Picker */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 tracking-tight">
+                    Attendance Stats
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Click a card to see the employees behind the number
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <DatePicker
+                    selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
+                    maxDate={new Date()}
+                    onChange={(date: Date | null) => {
+                      if (!date) return;
+                      const today = new Date();
+                      today.setHours(23, 59, 59, 999);
+                      if (date > today) return;
+                      setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                    }}
+                    dateFormat="dd MMM yyyy"
+                    showMonthDropdown
+                    showYearDropdown
+                    dropdownMode="select"
+                    customInput={<DatePickerCustomInput />}
+                  />
+                  {selectedDate !== moment().format("YYYY-MM-DD") && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                      className="text-xs font-semibold px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs cursor-pointer"
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+              </div>
 
               <div className="grid gap-3.5 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 <StatCard
@@ -1182,126 +1088,157 @@ export const Dashboard: React.FC = () => {
 
 
               <div className="mt-8">
-  <h2 className="text-xl font-semibold text-gray-800 mb-5 flex items-center gap-2">
-    
-    Weekly TimeSheet Overview
-  </h2>
+                <Card className="border border-gray-200/80 shadow-xs rounded-2xl overflow-hidden bg-white">
+                  <CardHeader className="p-5 pb-3 bg-white">
+                    <CardTitle className="text-base sm:text-lg font-bold text-gray-900">
+                      Weekly Timesheet Overview
+                    </CardTitle>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Working hours & overtime from attendance · checked-out shifts only
+                    </p>
 
-  <Card className="border shadow-sm">
-    <CardHeader className="pb-2">
-      <CardTitle className="text-lg">Working Hours Breakdown</CardTitle>
-      <p className="text-sm text-muted-foreground">
-        {weeklyDummyData?.[0]?.date ? `Week: ${weeklyDummyData[0].date} – ${weeklyDummyData[6].date}` : "No data"}
-      </p>
-    </CardHeader>
+                    <div className="flex items-center gap-2 flex-wrap mt-2.5">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-50 border border-gray-200/80 text-xs font-medium text-gray-700">
+                        <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>
+                          {weeklyDummyData?.[0]?.date && weeklyDummyData?.[6]?.date
+                            ? `${moment(weeklyDummyData[0].date).format("D MMM")} – ${moment(weeklyDummyData[6].date).format("D MMM YYYY")}`
+                            : `${moment(selectedDate).startOf("isoWeek").format("D MMM")} – ${moment(selectedDate).endOf("isoWeek").format("D MMM YYYY")}`}
+                        </span>
+                      </div>
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-50 border border-gray-200/80 text-xs font-medium text-gray-700">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                        <span>{getLocationDisplay()}</span>
+                      </div>
+                    </div>
 
-    <CardContent>
-      <div className="h-[340px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={weeklyDummyData}
-            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
-            <XAxis 
-              dataKey="day" 
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 13 }}
-            />
-            <YAxis 
-              label={{ 
-                value: 'Hours', 
-                angle: -90, 
-                position: 'insideLeft',
-                fill: '#64748b',
-                fontSize: 13
-              }}
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 12 }}
-              tickFormatter={(value) => `${value}h`}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: 'white',
-                border: '1px solid #e2e8f0',
-                borderRadius: '6px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
-              }}
-              formatter={(value: string) => [`${Number(value).toFixed(1)} hrs`, '']}
-              labelFormatter={(label) => `Day: ${label}`}
-            />
-            <Legend 
-              verticalAlign="top" 
-              height={36}
-              wrapperStyle={{ fontSize: '13px' }}
-            />
+                    {/* 3 Summary KPI Cards: Total working, Total overtime, Avg per working day */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
+                      <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-2xs">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="size-2 rounded-full bg-[#10b981] shrink-0" />
+                          <span className="text-xs font-medium text-gray-500">Total working</span>
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 tracking-tight">
+                          {totalWeeklyWorkingHours.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h
+                        </div>
+                      </div>
 
-            <Bar 
-              dataKey="workingHours" 
-              name="Working Time" 
-              stackId="a" 
-              fill="#22c55e" 
-              radius={[4, 4, 0, 0]} 
-            />
-            <Bar 
-              dataKey="breakHours" 
-              name="Break Time" 
-              stackId="a" 
-              fill="#eab308" 
-              radius={[4, 4, 0, 0]} 
-            />
-            <Bar 
-              dataKey="overtimeHours" 
-              name="Overtime" 
-              fill="#a855f7" 
-              radius={[4, 4, 0, 0]} 
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+                      <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-2xs">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="size-2 rounded-full bg-[#8b5cf6] shrink-0" />
+                          <span className="text-xs font-medium text-gray-500">Total overtime</span>
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 tracking-tight">
+                          {totalWeeklyOvertimeHours.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h
+                        </div>
+                      </div>
 
-      {/* Summary row – dynamic */}
-      {weeklyDummyData?.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mt-6 text-center text-sm">
-          <div>
-            <p className="text-gray-500">Total Working</p>
-            <p className="font-semibold text-green-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.workingHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500">Total Break</p>
-            <p className="font-semibold text-yellow-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.breakHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500">Total Overtime</p>
-            <p className="font-semibold text-purple-600">
-              {weeklyDummyData.reduce((sum, d) => sum + Number(d.overtimeHours), 0).toFixed(1)} hrs
-            </p>
-          </div>
-        </div>
-      )}
-    </CardContent>
-  </Card>
-</div>
+                      <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-2xs">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Clock className="size-3.5 text-gray-400 shrink-0" />
+                          <span className="text-xs font-medium text-gray-500">Avg per working day</span>
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 tracking-tight">
+                          {avgWorkingDayHours.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h
+                        </div>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="p-5 pt-1">
+                    {/* Legend aligned to the right */}
+                    <div className="flex items-center justify-end gap-4 mb-3 text-xs font-medium text-gray-500">
+                      <div className="flex items-center gap-1.5">
+                        <span className="size-2.5 rounded-xs bg-[#10b981]" />
+                        <span>Working</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="size-2.5 rounded-xs bg-[#8b5cf6]" />
+                        <span>Overtime</span>
+                      </div>
+                    </div>
+
+                    <div className="h-[340px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={weeklyDummyData}
+                          margin={{ top: 10, right: 15, left: -10, bottom: 0 }}
+                          barGap={6}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="day" 
+                            axisLine={false}
+                            tickLine={{ stroke: '#cbd5e1' }}
+                            tickSize={6}
+                            tick={{ fill: '#64748b', fontSize: 12, fontWeight: 500 }}
+                          />
+                          <YAxis 
+                            yAxisId="left"
+                            orientation="left"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#64748b', fontSize: 12 }}
+                            tickFormatter={(value) => `${value}h`}
+                          />
+                          <YAxis 
+                            yAxisId="right"
+                            orientation="right"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: '#8b5cf6', fontSize: 12 }}
+                            tickFormatter={(value) => `${value}h`}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'white',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '12px',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                              fontSize: '12px',
+                            }}
+                            formatter={(value: any, name: string) => [`${Number(value || 0).toFixed(1)} hrs`, name]}
+                            labelFormatter={(label) => `Day: ${label}`}
+                          />
+                          <Bar 
+                            yAxisId="left"
+                            dataKey="workingHours" 
+                            name="Working" 
+                            fill="#10b981" 
+                            radius={[6, 6, 0, 0]} 
+                            barSize={24}
+                          />
+                          <Bar 
+                            yAxisId="right"
+                            dataKey="overtimeHours" 
+                            name="Overtime" 
+                            fill="#8b5cf6" 
+                            radius={[6, 6, 0, 0]} 
+                            barSize={24}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
 
             {/* Right: Today's Attendance Widget ── sleek & professional */}
             <div className="xl:col-span-4 xl:sticky xl:top-6">
-              <Card className="h-full shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col">
+              <Card className="h-full shadow-2xs border border-gray-200/80 rounded-2xl overflow-hidden bg-white flex flex-col">
                 <CardHeader className="bg-white p-5 pb-4 border-b border-gray-100">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="size-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                        <Clock className="size-5" />
+                      <div className="size-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
+                        <Clock className="size-4.5" />
                       </div>
                       <div>
                         <CardTitle className="text-base font-bold text-gray-900">
                           Today's Attendance
                         </CardTitle>
-                        <p className="text-xs text-gray-400 font-medium">Real-time tracking</p>
+                        <p className="text-xs text-gray-400 font-normal">Real-time tracking</p>
                       </div>
                     </div>
                     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
@@ -1313,24 +1250,24 @@ export const Dashboard: React.FC = () => {
 
                 <CardContent className="p-4 flex flex-col flex-1 min-h-[460px]">
                   <Tabs defaultValue="present" className="flex flex-col flex-1">
-                    <TabsList className="grid grid-cols-3 gap-1.5 bg-gray-100/80 p-1.5 rounded-xl mb-4 border border-gray-200/60 h-auto">
+                    <TabsList className="grid grid-cols-3 gap-1 bg-gray-100/70 p-1 rounded-xl mb-4 h-auto border-0">
                       <TabsTrigger
                         value="present"
-                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-xs transition-all"
+                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-2xs text-gray-600 transition-all cursor-pointer"
                       >
                         Present ({getFilteredEmployees("present").length})
                       </TabsTrigger>
 
                       <TabsTrigger
                         value="break"
-                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-orange-700 data-[state=active]:shadow-xs transition-all"
+                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-orange-700 data-[state=active]:shadow-2xs text-gray-600 transition-all cursor-pointer"
                       >
                         Break ({getFilteredEmployees("break").length})
                       </TabsTrigger>
 
                       <TabsTrigger
                         value="absent"
-                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-rose-700 data-[state=active]:shadow-xs transition-all"
+                        className="rounded-lg text-xs font-semibold py-1.5 px-2 data-[state=active]:bg-white data-[state=active]:text-rose-700 data-[state=active]:shadow-2xs text-gray-600 transition-all cursor-pointer"
                       >
                         Absent ({getFilteredEmployees("absent").length})
                       </TabsTrigger>
@@ -2512,6 +2449,32 @@ interface StatCardProps {
   attendanceSheetOpen?: boolean;
 }
 
+const getInitials = (name: string) => {
+  if (!name) return "U";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+};
+
+const getAvatarStyle = (name: string) => {
+  const palette = [
+    { bg: "bg-[#fef3c7]", text: "text-[#b45309]" }, // Amber (AR)
+    { bg: "bg-[#ffe4e6]", text: "text-[#e11d48]" }, // Rose (AQ)
+    { bg: "bg-[#ccfbf1]", text: "text-[#0f766e]" }, // Teal (AK)
+    { bg: "bg-[#e0f2fe]", text: "text-[#0284c7]" }, // Sky/Blue (AA)
+    { bg: "bg-purple-100", text: "text-purple-800" },
+    { bg: "bg-indigo-100", text: "text-indigo-800" },
+    { bg: "bg-emerald-100", text: "text-emerald-800" },
+  ];
+  let hash = 0;
+  for (let i = 0; i < (name?.length || 0); i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return palette[Math.abs(hash) % palette.length];
+};
+
 export const StatCard = ({
   label,
   title,
@@ -2534,77 +2497,58 @@ export const StatCard = ({
     navigate(`/stats/${slug}?date=${selectedDate}&location=${selectedLocation}`);
   };
 
-  const styleMap = {
-    blue: {
-      bgIcon: "bg-blue-50 text-blue-600",
-      btn: "text-blue-700 border-blue-100 hover:bg-blue-50/50",
-    },
-    green: {
-      bgIcon: "bg-emerald-50 text-emerald-600",
-      btn: "text-emerald-700 border-emerald-100 hover:bg-emerald-50/50",
-    },
-    red: {
-      bgIcon: "bg-rose-50 text-rose-600",
-      btn: "text-rose-700 border-rose-100 hover:bg-rose-50/50",
-    },
-    amber: {
-      bgIcon: "bg-amber-50 text-amber-600",
-      btn: "text-amber-700 border-amber-100 hover:bg-amber-50/50",
-    },
-    orange: {
-      bgIcon: "bg-orange-50 text-orange-600",
-      btn: "text-orange-700 border-orange-100 hover:bg-orange-50/50",
-    },
-    purple: {
-      bgIcon: "bg-purple-50 text-purple-600",
-      btn: "text-purple-700 border-purple-100 hover:bg-purple-50/50",
-    },
-    gray: {
-      bgIcon: "bg-gray-50 text-gray-600",
-      btn: "text-gray-700 border-gray-100 hover:bg-gray-50/50",
-    },
-  }[color] || {
-    bgIcon: "bg-blue-50 text-blue-600",
-    btn: "text-blue-700 border-blue-100 hover:bg-blue-50/50",
+  const styleMap: Record<string, { bgIcon: string }> = {
+    blue: { bgIcon: "bg-blue-50 text-blue-500" },
+    green: { bgIcon: "bg-emerald-50 text-emerald-500" },
+    red: { bgIcon: "bg-rose-50 text-rose-500" },
+    amber: { bgIcon: "bg-amber-50 text-amber-500" },
+    orange: { bgIcon: "bg-orange-50 text-orange-500" },
+    purple: { bgIcon: "bg-purple-50 text-purple-500" },
+    gray: { bgIcon: "bg-gray-50 text-gray-500" },
   };
 
+  const currentStyle = styleMap[color] || styleMap.blue;
+
   return (
-    <Card
+    <div
       onClick={handleClick}
-      className="shadow-xs border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-4.5 sm:p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all group"
+      className="shadow-2xs border border-gray-100/90 bg-white rounded-2xl p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-200 transition-all group min-h-[148px]"
     >
-      <div>
-        <h3 className="text-sm font-bold text-gray-900 mb-3">{title}</h3>
-        <div className="flex items-center gap-3.5">
-          <div
-            className={`size-11 rounded-xl ${styleMap.bgIcon} flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105`}
-          >
-            {Icon ? (
-              <Icon className="size-5" />
-            ) : img ? (
-              <img
-                src={img}
-                alt={title}
-                width={22}
-                height={22}
-                className="object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <span className="font-bold text-sm">{label?.charAt(0)}</span>
-            )}
-          </div>
-          <div>
-            <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
-              {value}
-            </p>
-            <p className="text-xs font-semibold text-gray-700">{label}</p>
-          </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-600">{title}</span>
+        <div
+          className={`size-9 rounded-xl ${currentStyle.bgIcon} flex items-center justify-center shrink-0 transition-transform group-hover:scale-105`}
+        >
+          {Icon ? (
+            <Icon className="size-4.5" />
+          ) : img ? (
+            <img
+              src={img}
+              alt={title}
+              width={18}
+              height={18}
+              className="object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <span className="font-bold text-xs">{label?.charAt(0)}</span>
+          )}
         </div>
       </div>
-    </Card>
+
+      <div className="my-2">
+        <p className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none">
+          {value ?? 0}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-gray-400 font-normal">
+        <span>{label}</span>
+        <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all" />
+      </div>
+    </div>
   );
 };
 
@@ -2686,18 +2630,18 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
       <div className="flex flex-col flex-1 min-h-0 space-y-3">
         {/* Search Input */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
           <Input
             placeholder={`Search ${title.toLowerCase()} employees...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/80 border-gray-200/80 rounded-xl focus:bg-white transition-all"
+            className="w-full pl-9 pr-3 py-2 text-xs bg-white border-gray-200/90 rounded-xl focus:bg-white focus:border-blue-500 transition-all placeholder:text-gray-400 shadow-2xs"
           />
         </div>
 
         {/* Count info */}
-        <div className="flex items-center justify-between px-1">
-          <p className="text-[11px] font-semibold text-gray-400">
+        <div className="flex items-center justify-between px-0.5">
+          <p className="text-xs text-gray-400 font-medium">
             Showing {paginatedEmployees.length} of {filteredEmployees.length}
           </p>
         </div>
@@ -2717,54 +2661,68 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
             </div>
           ) : (
             <div className="space-y-2">
-              {paginatedEmployees.map((emp: any) => (
-                <div
-                  key={emp.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleView(emp);
-                  }}
-                  className={`
-                    flex items-center justify-between 
-                    p-2.5 rounded-xl border border-gray-100
-                    bg-white hover:bg-blue-50/40 hover:border-blue-200
-                    transition-all duration-150 cursor-pointer shadow-2xs group
-                  `}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${currentBadge.bg} ${currentBadge.text}`}>
-                      {emp.name?.charAt(0)?.toUpperCase() || "E"}
+              {paginatedEmployees.map((emp: any) => {
+                const avatarStyle = getAvatarStyle(emp.name);
+                return (
+                  <div
+                    key={emp.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleView(emp);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl border border-gray-100 bg-white hover:bg-gray-50/70 transition-all duration-150 cursor-pointer shadow-2xs group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`size-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarStyle.bg} ${avatarStyle.text}`}
+                      >
+                        {getInitials(emp.name)}
+                      </div>
+                      <span className="font-semibold text-xs sm:text-sm text-gray-900 truncate group-hover:text-blue-600 transition-colors">
+                        {emp.name}
+                      </span>
                     </div>
-                    <span className="font-semibold text-xs text-gray-900 truncate group-hover:text-blue-600 transition-colors">
-                      {emp.name}
-                    </span>
-                  </div>
 
-                  <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 border border-gray-200/70 px-2 py-0.5 rounded-lg shrink-0">
-                    <Clock className="w-3 h-3 text-blue-500" />
-                    <span>{emp.clockIn || "—"}</span>
+                    <div className="flex items-center gap-1.5 text-xs font-semibold shrink-0">
+                      {status === "absent" ? (
+                        <>
+                          <span className="size-2 rounded-full bg-rose-500 shrink-0" />
+                          <span className="text-rose-600 font-medium text-xs">Absent</span>
+                        </>
+                      ) : status === "break" ? (
+                        <>
+                          <span className="size-2 rounded-full bg-orange-500 shrink-0" />
+                          <span className="text-orange-600 font-medium text-xs">{emp.clockIn || "On Break"}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="size-2 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="text-gray-700 font-semibold text-xs">{emp.clockIn || "—"}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-2 text-xs">
-            <span className="text-[11px] font-semibold text-gray-400">
+          <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-2 text-xs">
+            <span className="text-xs text-gray-400 font-medium">
               Page {currentPage} of {totalPages}
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="h-7 px-2 text-[11px] font-semibold rounded-lg border-gray-200"
+                className="h-7 px-2.5 text-xs font-medium rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 shadow-2xs cursor-pointer"
               >
-                <ChevronLeft className="size-3.5" />
+                <ChevronLeft className="size-3 mr-0.5" />
                 Prev
               </Button>
               <Button
@@ -2772,10 +2730,10 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
                 size="sm"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="h-7 px-2 text-[11px] font-semibold rounded-lg border-gray-200"
+                className="h-7 px-2.5 text-xs font-medium rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 shadow-2xs cursor-pointer"
               >
                 Next
-                <ChevronRight className="size-3.5" />
+                <ChevronRight className="size-3 ml-0.5" />
               </Button>
             </div>
           </div>

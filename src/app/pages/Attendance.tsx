@@ -26,6 +26,7 @@ import {
   addMonths,
   subMonths,
   isAfter,
+  isBefore,
   startOfDay
 } from 'date-fns';
 import { 
@@ -307,6 +308,31 @@ export const getEmployeeScheduleForDate = (schedules: any, date: Date | string, 
   const targetDate = typeof date === "string" ? new Date(date.length <= 10 ? `${date}T00:00:00` : date) : new Date(date);
   const shortDay = format(targetDate, "EEE").toLowerCase();
   const fullDay = format(targetDate, "EEEE").toLowerCase();
+  const isPast = isBefore(startOfDay(targetDate), startOfDay(new Date()));
+
+  // For historical attendance records on past dates, NEVER recalculate using a newly updated schedule.
+  // Respect the historical snapshotted shift times and records!
+  if (isPast && fallbackRecord?.shiftStartTime && fallbackRecord?.shiftEndTime) {
+    return {
+      isScheduled: true,
+      isWorkingDay: fallbackRecord.status !== "OFF_DAY",
+      dayName: format(targetDate, "EEEE"),
+      startTime: fallbackRecord.shiftStartTime,
+      endTime: fallbackRecord.shiftEndTime,
+      startTime12: convertTo12Hour(fallbackRecord.shiftStartTime),
+      endTime12: convertTo12Hour(fallbackRecord.shiftEndTime),
+      allowEarlyIn: Boolean(activeSched?.allowEarlyIn),
+      earlyInMinutes: activeSched?.earlyInMinutes ?? 15,
+      allowEarlyOut: Boolean(activeSched?.allowEarlyOut),
+      earlyOutMinutes: activeSched?.earlyOutMinutes ?? 15,
+      overtimeAllowed: Boolean(activeSched?.overtimeAllowed),
+      overtimeMinutes: activeSched?.overtimeMinutes ?? 30,
+      allowHalfDay: Boolean(activeSched?.allowHalfDay),
+      halfDayMinutes: activeSched?.halfDayMinutes ?? 240,
+      breaksAllowed: Boolean(activeSched?.breaksAllowed),
+      breakDurations: activeSched?.breakDurations || [],
+    };
+  }
 
   if (!activeSched) {
     if (fallbackRecord?.shiftStartTime && fallbackRecord?.shiftEndTime) {
@@ -678,6 +704,50 @@ export const Attendance: React.FC = () => {
     setViewPanelOpen(true);
   };
 
+  const getSelectedRecordPunches = (record: any) => {
+    if (!record) return [];
+
+    let punches: any[] = [];
+
+    // 1. Direct punches array on record
+    if (Array.isArray(record.punches) && record.punches.length > 0) {
+      punches = [...record.punches];
+    }
+    // 2. Check if employee has punches array for this date
+    else if (Array.isArray(record.employee?.punches) && record.employee.punches.length > 0) {
+      const recDateStr = format(new Date(record.date), "yyyy-MM-dd");
+      punches = record.employee.punches.filter((p: any) => {
+        if (!p.punchTime) return false;
+        return format(new Date(p.punchTime), "yyyy-MM-dd") === recDateStr;
+      });
+    }
+
+    // 3. Fallback: If no raw biometric punches exist, but check-in / check-out times are present,
+    // generate punch items so user always sees the punches
+    if (punches.length === 0 && (record.checkInTime || record.checkOutTime)) {
+      if (record.checkInTime) {
+        punches.push({
+          id: 'punch-in',
+          type: 'CHECK_IN',
+          punchTime: record.checkInTime,
+          device: record.device || 'Biometric Terminal',
+          method: 'Biometric'
+        });
+      }
+      if (record.checkOutTime) {
+        punches.push({
+          id: 'punch-out',
+          type: 'CHECK_OUT',
+          punchTime: record.checkOutTime,
+          device: record.device || 'Biometric Terminal',
+          method: 'Biometric'
+        });
+      }
+    }
+
+    return punches.sort((a, b) => new Date(a.punchTime).getTime() - new Date(b.punchTime).getTime());
+  };
+
   const handleSaveAttendance = async () => {
     const isFutureDate = isAfter(startOfDay(new Date(selectedRecord.date)), startOfDay(new Date()));
     if (isFutureDate || selectedRecord?.status === "UPCOMING_DAY" || selectedRecord?.status === "UPCOMING") {
@@ -848,7 +918,7 @@ export const Attendance: React.FC = () => {
           if (isTooltipDisabled && !finalRecord.overrideType) {
             return;
           }
-          setSelectedRecord(finalRecord);
+          setSelectedRecord({ ...finalRecord, employee: emp });
           setEditModalOpen(true);
         }}
         className={`relative ${isTooltipDisabled && !finalRecord.overrideType ? "cursor-default select-none" : "cursor-pointer transition-all hover:scale-[1.03] hover:shadow-xs"} ${
@@ -2255,7 +2325,7 @@ export const Attendance: React.FC = () => {
                                       toast.error("This is an Off Day. Attendance cannot be marked for this day.");
                                       return;
                                     }
-                                    setSelectedRecord(finalRecord);
+                                    setSelectedRecord({ ...finalRecord, employee: emp });
                                     setEditModalOpen(true);
                                   }}
                                 >
@@ -2396,7 +2466,7 @@ export const Attendance: React.FC = () => {
 
       {/* Edit Modal Dialog */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="max-w-md rounded-2xl shadow-2xl p-6">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6">
           {selectedRecord && (
             <>
               <DialogHeader className="border-b pb-3">
@@ -2577,11 +2647,103 @@ export const Attendance: React.FC = () => {
 
                 <Button 
                   disabled={user?.role === 'USER'} 
-                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-md transition-all mt-2" 
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-md transition-all mt-2 cursor-pointer" 
                   onClick={handleSaveAttendance}
                 >
                   Save Changes
                 </Button>
+
+                {/* 🧾 Daily Attendance Punches (Invoice / Receipt Style) */}
+                {(() => {
+                  const displayPunches = getSelectedRecordPunches(selectedRecord);
+                  return (
+                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Punch Logs ({displayPunches.length})</span>
+                        </h4>
+                        <span className="text-[11px] text-gray-400 font-mono">
+                          Real-time Device Logs
+                        </span>
+                      </div>
+
+                      {displayPunches.length > 0 ? (
+                        <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
+                          <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-52 overflow-y-auto">
+                            {displayPunches.map((punch: any, idx: number) => {
+                              const isCheckIn = punch.type === "CHECK_IN";
+                              const isCheckOut = punch.type === "CHECK_OUT";
+
+                              return (
+                                <div 
+                                  key={punch.id || idx} 
+                                  className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
+                                >
+                                  {/* Punch # and Direction */}
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                      #{idx + 1}
+                                    </span>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Badge 
+                                          variant="outline"
+                                          className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
+                                            isCheckIn 
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
+                                              : isCheckOut 
+                                              ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300" 
+                                              : "bg-gray-50 text-gray-700 border-gray-300"
+                                          }`}
+                                        >
+                                          {isCheckIn ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowDownRight className="w-3 h-3 text-emerald-600" />
+                                              IN
+                                            </span>
+                                          ) : isCheckOut ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowUpRight className="w-3 h-3 text-blue-600" />
+                                              OUT
+                                            </span>
+                                          ) : (
+                                            punch.type
+                                          )}
+                                        </Badge>
+                                        <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                          {punch.device || "Biometric Terminal"}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+                                        <span className="capitalize">{punch.method || "Biometric"}</span>
+                                        {punch.ip && <span>• IP: {punch.ip}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Timestamp */}
+                                  <div className="text-right shrink-0">
+                                    <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-mono">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-400 text-xs italic py-4 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+                          No raw biometric punches recorded for this date.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </>
           )}

@@ -49,12 +49,13 @@ async function syncEmployeeRecentAttendances(employeeId, updatedSchedule) {
     if (!employee) return;
     const timezone = employee.company?.timezone || "Asia/Karachi";
 
-    // Recent attendances within 7 days
-    const recentLimit = moment().tz(timezone).subtract(7, "days").startOf("day").toDate();
+    // IMPORTANT: NEVER retroactively rewrite past days' attendance records!
+    // Schedule updates only apply from TODAY onwards.
+    const todayStart = moment().tz(timezone).startOf("day").toDate();
     const attendances = await prisma.attendance.findMany({
       where: {
         employeeId: Number(employeeId),
-        date: { gte: recentLimit },
+        date: { gte: todayStart },
         checkInTime: { not: null },
       },
     });

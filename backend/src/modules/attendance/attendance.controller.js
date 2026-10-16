@@ -139,7 +139,7 @@ async function getEmployeeTodayRange(employeeId) {
 async function getEmployeeTodayRangeOther(employeeId) {
   const employee = await prisma.employee.findUnique({
     where: { id: employeeId },
-    include: { company: true },
+    include: { company: true, jobInfo: true },
   });
 
   if (!employee) throw new Error("Employee not found");
@@ -627,12 +627,20 @@ exports.verifyPin = async (req, res) => {
 
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
+      include: { jobInfo: true },
     });
 
     if (!employee || employee.pin !== pin) {
       return res.status(401).json({
         success: false,
         message: "Invalid PIN",
+      });
+    }
+
+    if (employee.jobInfo?.employmentStatus === "Separated") {
+      return res.status(403).json({
+        success: false,
+        message: "This employee account has been separated from the company. System activities are restricted.",
       });
     }
 
@@ -824,6 +832,13 @@ exports.clockIn = async (req, res) => {
       todayDay,
       todayDateString,
     } = await getEmployeeTodayRangeOther(employeeId);
+
+    if (employee.jobInfo?.employmentStatus === "Separated") {
+      return res.status(403).json({
+        success: false,
+        message: "This employee account has been separated from the company. System activities are restricted.",
+      });
+    }
 
     /////////////////////////////////////////////////////////
     // 2️⃣ Check Existing Attendance (Timezone Safe)
@@ -1191,12 +1206,20 @@ exports.verifyPin = async (req, res) => {
 
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
+      include: { jobInfo: true },
     });
 
     if (!employee || employee.pin !== pin) {
       return res.status(401).json({
         success: false,
         message: "Invalid PIN",
+      });
+    }
+
+    if (employee.jobInfo?.employmentStatus === "Separated") {
+      return res.status(403).json({
+        success: false,
+        message: "This employee account has been separated from the company. System activities are restricted.",
       });
     }
 
@@ -1575,10 +1598,19 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🟢 Attendance Exists */
 
+        const todayStr = moment().tz(empTz).format("YYYY-MM-DD");
+        const isPastDate = dateStr < todayStr;
+
         const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
         const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
-        const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
-        const eTime = dayShift.endTime || activeSched?.endTime || "18:00";
+
+        // For past days, ALWAYS honor the historical snapshotted shift so schedule updates never alter past days!
+        const sTime = (isPastDate && existing.shiftStartTime)
+          ? existing.shiftStartTime
+          : (dayShift.startTime || activeSched?.startTime || "09:00");
+        const eTime = (isPastDate && existing.shiftEndTime)
+          ? existing.shiftEndTime
+          : (dayShift.endTime || activeSched?.endTime || "18:00");
         const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
         const allowedEarlyOutMins = activeSched?.allowEarlyOut ? (Number(activeSched.earlyOutMinutes) || 0) : 0;
 
@@ -1697,35 +1729,44 @@ exports.getAttendanceReport = async (req, res) => {
         let isEarlyOut = false;
         let earlyOutMinutes = 0;
 
-        if (finalCheckIn && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
-          const checkInMoment = moment(finalCheckIn).tz(empTz);
-          const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
+        if (isPastDate && existing.shiftStartTime && existing.status) {
+          // Strictly freeze and preserve historical lateness, early-out, and status on past dates!
+          isLate = Boolean(existing.isLate);
+          lateMinutes = Number(existing.lateMinutes) || 0;
+          isEarlyOut = Boolean(existing.isEarlyOut);
+          earlyOutMinutes = Number(existing.earlyOutMinutes) || 0;
+          finalStatus = existing.status;
+        } else {
+          if (finalCheckIn && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
+            const checkInMoment = moment(finalCheckIn).tz(empTz);
+            const lateThreshold = shiftStartLocal.clone().add(graceMinutes, "minutes");
 
-          if (checkInMoment.isAfter(lateThreshold)) {
-            isLate = true;
-            lateMinutes = checkInMoment.diff(shiftStartLocal, "minutes");
-            finalStatus = "TARDY";
-          } else {
-            isLate = false;
-            lateMinutes = 0;
-            if (finalStatus === "TARDY" || finalStatus === "LATE" || !finalStatus || finalStatus === "ABSENT") {
-              finalStatus = "PRESENT";
+            if (checkInMoment.isAfter(lateThreshold)) {
+              isLate = true;
+              lateMinutes = checkInMoment.diff(shiftStartLocal, "minutes");
+              finalStatus = "TARDY";
+            } else {
+              isLate = false;
+              lateMinutes = 0;
+              if (finalStatus === "TARDY" || finalStatus === "LATE" || !finalStatus || finalStatus === "ABSENT") {
+                finalStatus = "PRESENT";
+              }
             }
           }
-        }
 
-        if (finalCheckIn && finalCheckOut && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
-          const checkInMoment = moment(finalCheckIn).tz(empTz);
-          const checkOutMoment = moment(finalCheckOut).tz(empTz);
-          const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
+          if (finalCheckIn && finalCheckOut && finalStatus !== "LEAVE" && finalStatus !== "OFF_DAY") {
+            const checkInMoment = moment(finalCheckIn).tz(empTz);
+            const checkOutMoment = moment(finalCheckOut).tz(empTz);
+            const earlyOutThreshold = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
 
-          if (
-            checkInMoment.diff(shiftStartLocal, "minutes") < 240 &&
-            checkOutMoment.isBefore(earlyOutThreshold) &&
-            checkOutMoment.isAfter(checkInMoment)
-          ) {
-            earlyOutMinutes = Math.max(0, shiftEndLocal.diff(checkOutMoment, "minutes"));
-            if (earlyOutMinutes > 0) isEarlyOut = true;
+            if (
+              checkInMoment.diff(shiftStartLocal, "minutes") < 240 &&
+              checkOutMoment.isBefore(earlyOutThreshold) &&
+              checkOutMoment.isAfter(checkInMoment)
+            ) {
+              earlyOutMinutes = Math.max(0, shiftEndLocal.diff(checkOutMoment, "minutes"));
+              if (earlyOutMinutes > 0) isEarlyOut = true;
+            }
           }
         }
 
@@ -1773,7 +1814,8 @@ exports.getAttendanceReport = async (req, res) => {
         const finalOtHours = Number((finalOtMinutes / 60).toFixed(2));
 
         // Asynchronously persist any corrected schedule/lateness/punch fields to the DB
-        if (existing?.id && (
+        // IMPORTANT: NEVER overwrite shift times, lateness, or status on past dates!
+        if (!isPastDate && existing?.id && (
           existing.isLate !== isLate ||
           existing.lateMinutes !== lateMinutes ||
           existing.status !== finalStatus ||
@@ -1798,6 +1840,16 @@ exports.getAttendanceReport = async (req, res) => {
               earlyOutMinutes,
             }
           }).catch(err => console.error("[Report Sync Attendance Error]", err.message));
+        } else if (isPastDate && existing?.id && ((!existing.checkInTime && finalCheckIn) || (!existing.checkOutTime && finalCheckOut))) {
+          // If a past record was only missing punch times, attach punch times without altering shift or lateness
+          prisma.attendance.update({
+            where: { id: existing.id },
+            data: {
+              ...(finalCheckIn && !existing.checkInTime ? { checkInTime: finalCheckIn } : {}),
+              ...(finalCheckOut && !existing.checkOutTime ? { checkOutTime: finalCheckOut } : {}),
+              ...(finalCheckIn && finalCheckOut && !existing.totalWorkedMinutes ? { totalWorkedMinutes } : {})
+            }
+          }).catch(err => console.error("[Report Sync Punch Error]", err.message));
         }
 
         const tasks = existing.activities
@@ -2670,11 +2722,17 @@ exports.exportAttendanceExcel = async (req, res) => {
         }
 
         let st = (existing.status || "").toUpperCase();
-        if (existing.checkInTime && st !== "LEAVE" && st !== "OFF_DAY") {
+        const empTz = emp.company?.timezone || "Asia/Karachi";
+        const todayStr = moment().tz(empTz).format("YYYY-MM-DD");
+        const isPastDate = dateStr < todayStr;
+
+        if (isPastDate && (st === "PRESENT" || st === "TARDY" || st === "LATE" || st === "LEAVE" || st === "OFF_DAY")) {
+          // Strictly preserve historical status for all past days!
+          if (st === "LATE") st = "TARDY";
+        } else if (existing.checkInTime && st !== "LEAVE" && st !== "OFF_DAY") {
           const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
-          const empTz = emp.company?.timezone || "Asia/Karachi";
           const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
-          const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
+          const sTime = (isPastDate && existing.shiftStartTime) ? existing.shiftStartTime : (dayShift.startTime || activeSched?.startTime || "09:00");
           const graceMinutes = activeSched?.allowEarlyIn ? (Number(activeSched.earlyInMinutes) || 0) : 0;
           const checkInMoment = moment(existing.checkInTime).tz(empTz);
           const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);

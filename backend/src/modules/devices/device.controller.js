@@ -248,7 +248,7 @@ async function findEmployee(biometricId, employeeName) {
           employeeId: `BIO-${bioIdStr}`,
           organizationId: orgId,
           companyId: firstComp?.id || 1,
-          canLogin: false,
+          canLogin: true,
           role: "USER",
         },
         include: {

@@ -61,7 +61,7 @@ import { reportsAPI, departmentAPI, locationAPI ,employeeAPI, attendanceAPI} fro
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export const Reports: React.FC = () => {
-  const [dateRange, setDateRange] = useState("all");
+  const [dateRange, setDateRange] = useState("thisMonth");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [departmentId, setDepartmentId] = useState("all");
@@ -644,10 +644,8 @@ export const Reports: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Time</SelectItem>
                     <SelectItem value="thisWeek">This Week</SelectItem>
                     <SelectItem value="thisMonth">This Month</SelectItem>
-                    <SelectItem value="thisYear">This Year</SelectItem>
                     <SelectItem value="custom">Custom Date</SelectItem>
                   </SelectContent>
                 </Select>

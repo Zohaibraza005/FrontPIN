@@ -441,6 +441,23 @@ exports.updateEmployee = async (req, res) => {
       updateData.password = await bcrypt.hash(passwordToUpdate, 10);
     }
 
+    if (parsedPersonal.canLogin !== undefined || req.body.canLogin !== undefined) {
+      updateData.canLogin = Boolean(parsedPersonal.canLogin ?? req.body.canLogin);
+    }
+
+    if (employmentStatus === "Separated" || req.body.employmentStatus === "Separated") {
+      updateData.canLogin = false;
+    } else if (employmentStatus && employmentStatus !== "Separated" && (req.body.canLogin === undefined && parsedPersonal.canLogin === undefined)) {
+      // If actively changing from separated back to active, re-enable login
+      const currentEmp = await prisma.employee.findUnique({
+        where: { id: parseInt(id) },
+        include: { jobInfo: true }
+      });
+      if (currentEmp?.jobInfo?.employmentStatus === "Separated") {
+        updateData.canLogin = true;
+      }
+    }
+
     if (companyId) updateData.companyId = parseInt(companyId);
     if (departmentId !== undefined) updateData.departmentId = departmentId ? parseInt(departmentId) : null;
     if (entityId !== undefined) updateData.entityId = entityId ? parseInt(entityId) : null;
@@ -805,7 +822,7 @@ exports.getEmployeeDetail = async (req, res) => {
           take: 20,
         },
         Schedule: {
-          where: { deletedAt: null },
+          orderBy: { createdAt: "desc" },
         },
       },
     });

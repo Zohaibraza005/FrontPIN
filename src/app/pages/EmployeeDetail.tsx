@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from '../components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
-import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins } from 'lucide-react';
+import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins, RotateCcw, History, CreditCard, CheckSquare, ArrowRightLeft, ArrowRight, TrendingUp, ShieldCheck, UserCheck, Filter, Sparkles } from 'lucide-react';
 import { useParams, Link } from 'react-router';
 import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI } from '../services/api';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
@@ -33,9 +33,25 @@ const FULL_DAY_NAMES: Record<string, string> = {
   Sun: 'Sunday',
 };
 
+const formatTimeTo12h = (timeStr?: string) => {
+  if (!timeStr) return '—';
+  if (timeStr.includes('AM') || timeStr.includes('PM')) return timeStr;
+  const parts = timeStr.split(':');
+  if (parts.length >= 2) {
+    let hours = parseInt(parts[0], 10);
+    const mins = parts[1].padStart(2, '0');
+    if (isNaN(hours)) return timeStr;
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${hours.toString().padStart(2, '0')}:${mins} ${ampm}`;
+  }
+  return timeStr;
+};
+
 const documentTypes = ['CNIC', 'Contract', 'Degree', 'Experience Letter', 'Other'];
-const separationTypes = ['Resignation', 'Termination', 'End of Contract', 'Retirement'];
-const separationReasons = ['Better Opportunity', 'Personal Reasons', 'Performance', 'Misconduct', 'Other'];
+const separationTypes = ['Resignation', 'Termination', 'End of Contract', 'Retirement', 'Redundancy', 'Other'];
+const separationReasons = ['Better Opportunity', 'Personal Reasons', 'Performance', 'Misconduct', 'Relocation', 'Mutual Agreement', 'Other'];
 // ── Mock data / constants ────────────────────────────────────────────────
 const ALL_PRIVILEGES = [
   { id: 'EMPLOYEE', label: 'Employee' },
@@ -59,6 +75,36 @@ const mockDocuments = [
 
 
 
+export interface EmployeeAuditLog {
+  id: string;
+  type: 'TRANSFER' | 'LOCATION' | 'SUPERVISOR' | 'ROLE' | 'STATUS' | 'SCHEDULE' | 'PAYROLL' | 'INCREMENT' | 'SEPARATION' | 'NOTE' | 'ONBOARDING' | 'SYSTEM';
+  category: 'Transfers' | 'Job & Role' | 'Schedule' | 'Payroll' | 'System';
+  title: string;
+  fromValue?: string;
+  toValue?: string;
+  description: string;
+  date: string;
+  actor?: string;
+}
+
+const getStoredAuditLogs = (empId: string | number): EmployeeAuditLog[] => {
+  try {
+    const raw = localStorage.getItem(`frontpin_audit_logs_${empId}`);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error("Failed to read audit logs:", e);
+  }
+  return [];
+};
+
+const saveAuditLogs = (empId: string | number, logs: EmployeeAuditLog[]) => {
+  try {
+    localStorage.setItem(`frontpin_audit_logs_${empId}`, JSON.stringify(logs));
+  } catch (e) {
+    console.error("Failed to save audit logs:", e);
+  }
+};
+
 export const EmployeeDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   // const employee = mockEmployees.find((e) => e.id === id);
@@ -69,7 +115,28 @@ export const EmployeeDetail: React.FC = () => {
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [showIncrementModal, setShowIncrementModal] = useState(false);
   const [showSeparationModal, setShowSeparationModal] = useState(false);
-  
+
+  // History & Audit Log states
+  const [auditLogs, setAuditLogs] = useState<EmployeeAuditLog[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<string>('all');
+  const [showAddLogModal, setShowAddLogModal] = useState(false);
+  const [manualLogType, setManualLogType] = useState<string>('TRANSFER');
+  const [manualLogFrom, setManualLogFrom] = useState<string>('');
+  const [manualLogTo, setManualLogTo] = useState<string>('');
+  const [manualLogNote, setManualLogNote] = useState<string>('');
+
+  const appendAuditLog = (entry: Omit<EmployeeAuditLog, 'id' | 'date'> & { date?: string }) => {
+    const newEntry: EmployeeAuditLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      date: entry.date || new Date().toISOString(),
+      ...entry,
+    };
+    setAuditLogs((prev) => {
+      const next = [newEntry, ...prev];
+      if (id) saveAuditLogs(id, next);
+      return next;
+    });
+  };
 
   const [employee, setEmployee] = useState<any>(null);
   
@@ -101,6 +168,7 @@ export const EmployeeDetail: React.FC = () => {
   const [supervisorsList, setSupervisorsList] = useState<any[]>([]);
 
   const [job, setJob] = useState({
+    entity: '',
     locationId: '',
     location: '',
     departmentId: '',
@@ -108,7 +176,7 @@ export const EmployeeDetail: React.FC = () => {
     supervisorId: '',
     supervisor: '',
     hiringDate: '',
-    employmentStatus: 'Active',
+    employmentStatus: 'Permanent',
     workMode: 'On-site',
   });
 
@@ -223,6 +291,7 @@ export const EmployeeDetail: React.FC = () => {
       });
 
       setJob({
+        entity: emp.company?.name || emp.entity || '',
         locationId: emp.companyId ? String(emp.companyId) : (emp.company?.id ? String(emp.company.id) : ''),
         location: emp.company?.name || emp.location?.name || '',
         departmentId: emp.departmentId ? String(emp.departmentId) : (emp.department?.id ? String(emp.department.id) : ''),
@@ -232,7 +301,7 @@ export const EmployeeDetail: React.FC = () => {
           ? `${emp.supervisor.firstName} ${emp.supervisor.lastName}`
           : '',
         hiringDate: emp.hiringDate ? emp.hiringDate.split('T')[0] : (emp.jobInfo?.hiringDate ? emp.jobInfo.hiringDate.split('T')[0] : ''),
-        employmentStatus: emp.employmentStatus || emp.jobInfo?.employmentStatus || 'Active',
+        employmentStatus: emp.employmentStatus || emp.jobInfo?.employmentStatus || 'Permanent',
         workMode: emp.workMode || emp.jobInfo?.workMode || 'On-site',
       });
 
@@ -263,6 +332,38 @@ export const EmployeeDetail: React.FC = () => {
         monthlyLeaves: emp.payroll?.monthlyLeaves ?? 3,
         maxExtraHours: extraHoursVal,
       });
+
+      // Check separation status
+      const savedSep = localStorage.getItem(`emp_separation_${emp.id || id}`);
+      if (savedSep) {
+        try {
+          const parsed = JSON.parse(savedSep);
+          setSeparation(parsed);
+          setSeparationType(parsed.type || '');
+          setSeparationReason(parsed.reason || '');
+          setSeparationDate(parsed.date || '');
+          setClearanceDate(parsed.clearanceDate || '');
+          setSeparationComments(parsed.comments || '');
+        } catch (e) {
+          setSeparation({
+            type: 'Separation',
+            reason: 'Offboarded',
+            date: emp.jobInfo?.updatedAt ? emp.jobInfo.updatedAt.split('T')[0] : 'Recorded',
+            comments: '',
+          });
+        }
+      } else if (emp.jobInfo?.employmentStatus === 'Separated' || emp.employmentStatus === 'Separated' || emp.canLogin === false) {
+        const fallbackSep = {
+          type: 'Separation',
+          reason: 'Offboarded',
+          date: emp.updatedAt ? emp.updatedAt.split('T')[0] : (emp.jobInfo?.updatedAt ? emp.jobInfo.updatedAt.split('T')[0] : 'Recorded'),
+          clearanceDate: '',
+          comments: 'Employee account marked as separated in system.',
+        };
+        setSeparation(fallbackSep);
+      } else {
+        setSeparation(null);
+      }
 
       // Populate schedule from emp.Schedule
       if (emp?.Schedule) {
@@ -358,6 +459,118 @@ export const EmployeeDetail: React.FC = () => {
         setPrivileges([]);
       }
 
+      // Load or initialize audit logs
+      // Load or initialize audit logs
+      let currentLogs = getStoredAuditLogs(emp.id || id!);
+      const initialLogs: EmployeeAuditLog[] = [];
+
+      // If employee has increments from DB, seed them
+      if (emp.increments && Array.isArray(emp.increments)) {
+        emp.increments.forEach((inc: any) => {
+          initialLogs.push({
+            id: `inc_${inc.id}`,
+            type: 'INCREMENT',
+            category: 'Payroll',
+            title: `Salary Increment Applied (${inc.type === 'PERCENTAGE' || inc.type === 'percentage' ? `${inc.value}%` : `${Number(inc.value).toLocaleString()} PKR`})`,
+            fromValue: inc.previousSalary ? `${Number(inc.previousSalary).toLocaleString()} PKR` : undefined,
+            toValue: inc.type === 'PERCENTAGE' || inc.type === 'percentage' ? `+${inc.value}%` : `+${Number(inc.value).toLocaleString()} PKR`,
+            description: `Salary increment recorded in payroll system. Effective date: ${inc.effectiveDate ? moment(inc.effectiveDate).format('DD MMM YYYY') : 'Applied'}.`,
+            date: inc.effectiveDate || inc.createdAt || new Date().toISOString(),
+            actor: 'Finance Dept',
+          });
+        });
+      }
+
+      // Job & Department placement milestone
+      if (emp.department?.title || emp.company?.name) {
+        initialLogs.push({
+          id: `init_dept_${emp.id}`,
+          type: 'TRANSFER',
+          category: 'Transfers',
+          title: `Assigned to ${emp.department?.title || 'General'} Department`,
+          fromValue: 'Onboarding',
+          toValue: emp.department?.title || 'General',
+          description: `Employee placed in ${emp.department?.title || 'General'} department at ${emp.company?.name || emp.location?.name || 'Johar Town Lahore'}. Employment status: ${emp.employmentStatus || emp.jobInfo?.employmentStatus || 'Permanent'}.`,
+          date: emp.jobInfo?.hiringDate || emp.hiringDate || emp.createdAt || new Date().toISOString(),
+          actor: 'HR Admin',
+        });
+      }
+
+      // Location assignment milestone
+      if (emp.company?.name || emp.location?.name) {
+        initialLogs.push({
+          id: `init_loc_${emp.id}`,
+          type: 'LOCATION',
+          category: 'Transfers',
+          title: `Branch Assignment: ${emp.company?.name || emp.location?.name || 'Johar Town Branch'}`,
+          fromValue: 'Initial Placement',
+          toValue: emp.company?.name || emp.location?.name || 'Johar Town Branch',
+          description: `Stationed at ${emp.company?.name || emp.location?.name || 'Johar Town Branch'} with work mode: ${emp.workMode || emp.jobInfo?.workMode || 'On-site'}.`,
+          date: emp.jobInfo?.hiringDate || emp.hiringDate || emp.createdAt || new Date().toISOString(),
+          actor: 'HR Admin',
+        });
+      }
+
+      // Schedule milestones & update logs from DB
+      if (emp.Schedule) {
+        const sList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
+        const sortedScheds = [...sList].sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+        sortedScheds.forEach((sc: any, idx: number) => {
+          const daysStr = Array.isArray(sc.days)
+            ? sc.days.map((d: any) => typeof d === 'string' ? d : (d.day || d.name || d.dayFull)).join(', ')
+            : 'Mon - Fri';
+          const prevSc = idx > 0 ? sortedScheds[idx - 1] : null;
+          const prevDaysStr = prevSc && Array.isArray(prevSc.days)
+            ? prevSc.days.map((d: any) => typeof d === 'string' ? d : (d.day || d.name || d.dayFull)).join(', ')
+            : null;
+
+          initialLogs.push({
+            id: `sched_${sc.id || idx}`,
+            type: 'SCHEDULE',
+            category: 'Schedule',
+            title: idx === 0 ? 'Initial Shift Schedule Assigned' : 'Shift Schedule & Timings Updated',
+            fromValue: prevSc ? `${prevDaysStr} (${formatTimeTo12h(prevSc.startTime || '09:00')} - ${formatTimeTo12h(prevSc.endTime || '18:00')})` : 'Standard Shift Template',
+            toValue: `${daysStr} (${formatTimeTo12h(sc.startTime || '09:00')} - ${formatTimeTo12h(sc.endTime || '18:00')})`,
+            description: `Shift hours configured to ${formatTimeTo12h(sc.startTime || '09:00')} - ${formatTimeTo12h(sc.endTime || '18:00')} on [${daysStr}]. Overtime: ${sc.overtimeAllowed ? `${sc.overtimeMinutes}m` : 'No'}, Grace early-in: ${sc.earlyInMinutes || 15}m, early-out: ${sc.earlyOutMinutes || 15}m.`,
+            date: sc.createdAt || sc.updatedAt || emp.createdAt || new Date().toISOString(),
+            actor: idx === 0 ? 'System Onboarding' : 'HR Admin',
+          });
+        });
+      }
+
+      // Onboarding milestone
+      initialLogs.push({
+        id: `init_onboard_${emp.id}`,
+        type: 'ONBOARDING',
+        category: 'System',
+        title: `Employee Account Onboarded`,
+        fromValue: undefined,
+        toValue: `ID: ${emp.employeeId || 'BIO-' + (emp.biometricId || emp.id)}`,
+        description: `Employee profile registered into Frontpin HRMS with Biometric ID ${emp.biometricId || '—'} and official email ${emp.email || '—'}.`,
+        date: emp.createdAt || emp.jobInfo?.hiringDate || new Date().toISOString(),
+        actor: 'System Onboarding',
+      });
+
+      if (!currentLogs || currentLogs.length === 0) {
+        currentLogs = initialLogs;
+      } else {
+        // Merge missing logs (especially schedule updates) from DB into currentLogs
+        initialLogs.forEach((initLog) => {
+          const alreadyExists = currentLogs.some(
+            (existingLog) => existingLog.id === initLog.id || (existingLog.type === initLog.type && existingLog.date === initLog.date)
+          );
+          if (!alreadyExists) {
+            currentLogs.push(initLog);
+          }
+        });
+      }
+
+      // Sort logs by date descending (latest first)
+      currentLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      setAuditLogs(currentLogs);
+      if (emp.id || id) saveAuditLogs(emp.id || id!, currentLogs);
+
       setLoading(false);
     } catch (err) {
       toast.error('Failed to load employee details');
@@ -412,6 +625,16 @@ export const EmployeeDetail: React.FC = () => {
         value: incrementValue,
         effectiveDate: incrementDate
       });
+
+      appendAuditLog({
+        type: 'INCREMENT',
+        category: 'Payroll',
+        title: `Salary Increment Awarded`,
+        fromValue: `${Number(payroll.rate).toLocaleString()} ${payroll.currency}`,
+        toValue: incrementType === 'percentage' ? `+${incrementValue}%` : `+${Number(incrementValue).toLocaleString()} ${payroll.currency}`,
+        description: `Applied ${incrementType === 'percentage' ? `${incrementValue}%` : `${Number(incrementValue).toLocaleString()} ${payroll.currency}`} increment effective from ${incrementDate ? moment(incrementDate).format('DD MMM YYYY') : 'Immediate'}.`,
+        actor: 'HR / Finance',
+      });
   
       toast.success("Increment applied");
       setShowIncrementModal(false);
@@ -425,6 +648,34 @@ export const EmployeeDetail: React.FC = () => {
   // ── Handlers ────────────────────────────────────────────────────────────
   const handleSavePersonal = async () => {
     try {
+      const prevRoleName = employee?.appRole?.name || employee?.role || 'User';
+      const newRoleObj = rolesList.find((r) => String(r.id) === String(personal.roleId));
+      const newRoleName = newRoleObj?.name || (personal.roleId ? 'Custom Role' : 'No Role Assigned');
+
+      if (String(employee?.roleId || employee?.appRole?.id || '') !== String(personal.roleId || '')) {
+        appendAuditLog({
+          type: 'ROLE',
+          category: 'Job & Role',
+          title: `System Role & Permissions Updated`,
+          fromValue: prevRoleName,
+          toValue: newRoleName,
+          description: `User role permissions changed from "${prevRoleName}" to "${newRoleName}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      if (personal.biometricId && String(employee?.biometricId || '') !== String(personal.biometricId)) {
+        appendAuditLog({
+          type: 'SYSTEM',
+          category: 'System',
+          title: `Biometric Punch ID Changed`,
+          fromValue: employee?.biometricId ? String(employee.biometricId) : 'None',
+          toValue: String(personal.biometricId),
+          description: `Employee punch biometric ID updated from ${employee?.biometricId || 'None'} to ${personal.biometricId}.`,
+          actor: 'HR Admin',
+        });
+      }
+
       await employeeAPI.updateEmployee(Number(id), {
         firstName: personal.firstName,
         lastName: personal.lastName,
@@ -453,6 +704,85 @@ export const EmployeeDetail: React.FC = () => {
       if (job.employmentStatus) payload.employmentStatus = job.employmentStatus;
       if (job.workMode) payload.workMode = job.workMode;
 
+      // Track department transfer (e.g. Tech -> Sales or GMB)
+      const prevDeptName = employee?.department?.title || job.department || 'Unassigned';
+      const newDeptObj = departmentsList.find((d) => String(d.id) === String(job.departmentId));
+      const newDeptName = newDeptObj?.title || job.department;
+
+      if (job.departmentId && String(employee?.departmentId || '') !== String(job.departmentId) && prevDeptName !== newDeptName) {
+        appendAuditLog({
+          type: 'TRANSFER',
+          category: 'Transfers',
+          title: `Department Transfer: ${prevDeptName} → ${newDeptName}`,
+          fromValue: prevDeptName,
+          toValue: newDeptName,
+          description: `Employee transferred from department "${prevDeptName}" to "${newDeptName}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      // Track location transfer
+      const prevLocName = employee?.company?.name || employee?.location?.name || job.location || 'Johar Town Branch';
+      const newLocObj = locationsList.find((l) => String(l.id) === String(job.locationId));
+      const newLocName = newLocObj?.name || job.location;
+
+      if (job.locationId && String(employee?.companyId || employee?.locationId || '') !== String(job.locationId) && prevLocName !== newLocName) {
+        appendAuditLog({
+          type: 'LOCATION',
+          category: 'Transfers',
+          title: `Location Relocation: ${prevLocName} → ${newLocName}`,
+          fromValue: prevLocName,
+          toValue: newLocName,
+          description: `Employee relocated from "${prevLocName}" to "${newLocName}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      // Track supervisor change
+      const prevSupName = employee?.supervisor ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}` : (job.supervisor || 'Unassigned');
+      const newSupObj = supervisorsList.find((s) => String(s.id) === String(job.supervisorId));
+      const newSupName = newSupObj ? `${newSupObj.firstName} ${newSupObj.lastName}` : job.supervisor;
+
+      if (job.supervisorId && String(employee?.supervisorId || '') !== String(job.supervisorId) && prevSupName !== newSupName) {
+        appendAuditLog({
+          type: 'SUPERVISOR',
+          category: 'Job & Role',
+          title: `Reporting Supervisor Reassigned`,
+          fromValue: prevSupName,
+          toValue: newSupName,
+          description: `Reporting supervisor changed from "${prevSupName}" to "${newSupName}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      // Track employment status change
+      const prevStatus = employee?.employmentStatus || employee?.jobInfo?.employmentStatus || 'Permanent';
+      if (job.employmentStatus && prevStatus !== job.employmentStatus) {
+        appendAuditLog({
+          type: 'STATUS',
+          category: 'Job & Role',
+          title: `Employment Status Changed`,
+          fromValue: prevStatus,
+          toValue: job.employmentStatus,
+          description: `Employment status updated from "${prevStatus}" to "${job.employmentStatus}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      // Track work mode change
+      const prevWorkMode = employee?.workMode || employee?.jobInfo?.workMode || 'On-site';
+      if (job.workMode && prevWorkMode !== job.workMode) {
+        appendAuditLog({
+          type: 'STATUS',
+          category: 'Job & Role',
+          title: `Work Mode Updated`,
+          fromValue: prevWorkMode,
+          toValue: job.workMode,
+          description: `Work arrangement shifted from "${prevWorkMode}" to "${job.workMode}".`,
+          actor: 'HR Admin',
+        });
+      }
+
       await employeeAPI.updateEmployee(Number(id), payload);
       toast.success('Job information updated');
       setEditJob(false);
@@ -461,6 +791,7 @@ export const EmployeeDetail: React.FC = () => {
       if (res?.data) {
         setEmployee(res.data);
         setJob({
+          entity: res.data.company?.name || res.data.entity || '',
           locationId: res.data.companyId ? String(res.data.companyId) : '',
           location: res.data.company?.name || res.data.location?.name || '',
           departmentId: res.data.departmentId ? String(res.data.departmentId) : '',
@@ -468,7 +799,7 @@ export const EmployeeDetail: React.FC = () => {
           supervisorId: res.data.supervisorId ? String(res.data.supervisorId) : '',
           supervisor: res.data.supervisor ? `${res.data.supervisor.firstName} ${res.data.supervisor.lastName}` : '',
           hiringDate: res.data.hiringDate ? res.data.hiringDate.split('T')[0] : (res.data.jobInfo?.hiringDate ? res.data.jobInfo.hiringDate.split('T')[0] : ''),
-          employmentStatus: res.data.employmentStatus || res.data.jobInfo?.employmentStatus || 'Active',
+          employmentStatus: res.data.employmentStatus || res.data.jobInfo?.employmentStatus || 'Permanent',
           workMode: res.data.workMode || res.data.jobInfo?.workMode || 'On-site',
         });
       }
@@ -481,6 +812,20 @@ export const EmployeeDetail: React.FC = () => {
   const handleSavePayroll = async () => {
     try {
       const extraHrs = Math.max(0, Number(payroll.maxExtraHours) || 0);
+      const prevSalary = employee?.payroll?.rate || 0;
+
+      if (Number(prevSalary) !== Number(payroll.rate)) {
+        appendAuditLog({
+          type: 'PAYROLL',
+          category: 'Payroll',
+          title: `Base Compensation Adjusted`,
+          fromValue: `${Number(prevSalary).toLocaleString()} ${payroll.currency}`,
+          toValue: `${Number(payroll.rate).toLocaleString()} ${payroll.currency}`,
+          description: `Base compensation adjusted from ${Number(prevSalary).toLocaleString()} to ${Number(payroll.rate).toLocaleString()} ${payroll.currency} (${payroll.rateType}), Cycle date: Day ${payroll.cycleDate}.`,
+          actor: 'HR / Finance',
+        });
+      }
+
       await employeeAPI.updateEmployee(Number(id), {
         payroll: {
           currency: payroll.currency,
@@ -525,6 +870,22 @@ export const EmployeeDetail: React.FC = () => {
           ? daySchedules[schedule.workingDays[0]]
           : { startTime: schedule.shiftStart, endTime: schedule.shiftEnd };
 
+        const prevSchedStart = employee?.Schedule?.[0]?.startTime || '09:00';
+        const prevSchedEnd = employee?.Schedule?.[0]?.endTime || '18:00';
+        const prevDays = employee?.Schedule?.[0]?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        const prevDaysStr = Array.isArray(prevDays) ? prevDays.map((d: any) => typeof d === 'string' ? d : (d.day || d.name)).join(', ') : 'Mon - Fri';
+        const newDaysStr = schedule.workingDays.join(', ');
+
+        appendAuditLog({
+          type: 'SCHEDULE',
+          category: 'Schedule',
+          title: `Shift Schedule & Timings Updated`,
+          fromValue: `${prevDaysStr} (${formatTimeTo12h(prevSchedStart)} - ${formatTimeTo12h(prevSchedEnd)})`,
+          toValue: `${newDaysStr} (${formatTimeTo12h(schedule.shiftStart)} - ${formatTimeTo12h(schedule.shiftEnd)})`,
+          description: `Working schedule updated to ${schedule.workingDays.length} working days (${newDaysStr}) with shift hours ${formatTimeTo12h(schedule.shiftStart)} - ${formatTimeTo12h(schedule.shiftEnd)}. Early-in: ${schedule.earlyInMargin}m, Early-out: ${schedule.earlyOutMargin}m, Overtime: ${schedule.overtimeAllowed ? `${schedule.overtimeMinutes}m` : 'No'}.`,
+          actor: 'HR Admin',
+        });
+
         await scheduleAPI.updateSchedule(schedule.id, {
           days: daysPayload,
           startTime: firstWorkingDayTime.startTime || schedule.shiftStart,
@@ -551,20 +912,116 @@ export const EmployeeDetail: React.FC = () => {
     }
   };
 
-  const handleMarkSeparation = () => {
-    if (!separationType || !separationDate) {
-      toast.error('Please fill required fields');
+  const handleConfirmSeparation = async () => {
+    if (!separationType) {
+      toast.error('Please select separation type');
       return;
     }
-    setSeparation({
+    if (!separationReason) {
+      toast.error('Please select separation reason');
+      return;
+    }
+    if (!separationDate) {
+      toast.error('Please select separation date');
+      return;
+    }
+
+    const sepPayload = {
       type: separationType,
       reason: separationReason,
-      comments: separationComments,
+      comments: separationComments || '',
       date: separationDate,
-      clearanceDate,
-    });
-    toast.success('Separation marked');
-    setShowSeparationModal(false);
+      clearanceDate: clearanceDate || '',
+    };
+
+    try {
+      await employeeAPI.updateEmployee(Number(id), {
+        employmentStatus: 'Separated',
+        canLogin: false,
+        job: {
+          employmentStatus: 'Separated',
+        },
+      });
+
+      setSeparation(sepPayload);
+      localStorage.setItem(`emp_separation_${id}`, JSON.stringify(sepPayload));
+
+      appendAuditLog({
+        type: 'SEPARATION',
+        category: 'Job & Role',
+        title: `Employment Separation Recorded (${separationType})`,
+        fromValue: 'Active Good Standing',
+        toValue: `Separated (${separationType})`,
+        description: `Employee marked as separated. Reason: ${separationReason}. Effective Date: ${separationDate}. Clearance Date: ${clearanceDate || 'N/A'}. Comments: ${separationComments || 'None'}. All active operations, login, and clock-in are restricted. All historical attendance, payroll, and logs are preserved.`,
+        actor: 'HR Admin',
+      });
+
+      setJob((prev) => ({ ...prev, employmentStatus: 'Separated' }));
+      if (employee) {
+        setEmployee((prev: any) => ({
+          ...prev,
+          canLogin: false,
+          employmentStatus: 'Separated',
+          jobInfo: {
+            ...(prev?.jobInfo || {}),
+            employmentStatus: 'Separated',
+          },
+        }));
+      }
+
+      toast.success('Separation confirmed. Employee activities restricted.');
+      setShowSeparationModal(false);
+      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
+      fetchEmployee();
+    } catch (err: any) {
+      console.error("Separation Error:", err);
+      toast.error(err?.message || 'Failed to record separation');
+    }
+  };
+
+  const handleReinstateEmployee = async () => {
+    try {
+      await employeeAPI.updateEmployee(Number(id), {
+        employmentStatus: 'Permanent',
+        canLogin: true,
+        job: {
+          employmentStatus: 'Permanent',
+        },
+      });
+
+      setSeparation(null);
+      localStorage.removeItem(`emp_separation_${id}`);
+
+      appendAuditLog({
+        type: 'STATUS',
+        category: 'Job & Role',
+        title: `Employee Reinstated to Active`,
+        fromValue: 'Separated',
+        toValue: 'Permanent',
+        description: `Separation revoked. Employee account reinstated to active permanent status. Login and attendance clock-in permissions restored.`,
+        actor: 'HR Admin',
+      });
+
+      setJob((prev) => ({ ...prev, employmentStatus: 'Permanent' }));
+      if (employee) {
+        setEmployee((prev: any) => ({
+          ...prev,
+          canLogin: true,
+          employmentStatus: 'Permanent',
+          jobInfo: {
+            ...(prev?.jobInfo || {}),
+            employmentStatus: 'Permanent',
+          },
+        }));
+      }
+
+      toast.success('Employee reinstated to active status');
+      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
+      fetchEmployee();
+    } catch (err: any) {
+      console.error("Reinstate Error:", err);
+      toast.error(err?.message || 'Failed to reinstate employee');
+    }
   };
 
   const handleUploadDocument = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -585,76 +1042,86 @@ export const EmployeeDetail: React.FC = () => {
   return (
     <div className="space-y-5 p-4 sm:p-6 max-w-7xl mx-auto">
       {/* ── Top Navigation / Breadcrumb ──────────────────────────────────────── */}
-      <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-500">
-        <Link to="/employees" className="inline-flex items-center gap-1.5 hover:text-sky-600 font-medium transition-colors">
+      <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-500">
+        <Link to="/employees" className="inline-flex items-center gap-1.5 hover:text-slate-900 font-medium transition-colors">
           <ArrowLeft className="size-4" />
           <span>Employees</span>
         </Link>
-        <span className="text-gray-300">/</span>
-        <span className="text-gray-900 font-semibold truncate">
+        <span className="text-slate-300">/</span>
+        <span className="text-slate-900 font-semibold truncate">
           {employee.firstName} {employee.lastName}
         </span>
       </div>
 
       {/* ── Modern Profile Header Card ────────────────────────────────────────── */}
-      <Card className="shadow-xs border-gray-200 rounded-2xl overflow-hidden bg-white">
+      <Card className="shadow-xs border-slate-200/80 rounded-2xl overflow-hidden bg-white">
         <CardContent className="p-5 sm:p-6">
           <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 items-start sm:items-center">
             {/* Photo Avatar */}
-            <div className="relative size-20 sm:size-24 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center overflow-hidden border-4 border-white shadow-xs shrink-0">
+            <div className="relative size-20 sm:size-24 rounded-full bg-[#FAF5FF] text-[#A855F7] flex items-center justify-center overflow-hidden shrink-0">
               {employee.profileImage ? (
                 <img src={API_URL + employee.profileImage} alt="Employee" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-xl sm:text-2xl font-bold tracking-wider">
-                  {`${employee.firstName?.[0] || ''}${employee.lastName?.[0] || ''}`.toUpperCase() || 'E'}
+                <span className="text-2xl sm:text-3xl font-bold tracking-tight">
+                  {`${employee.firstName?.[0] || ''}${employee.lastName?.[0] || ''}`.toUpperCase() || 'W7'}
                 </span>
               )}
             </div>
 
             {/* Profile Info */}
-            <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex-1 min-w-0 space-y-1.5">
               <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                   {employee.firstName} {employee.lastName}
                 </h1>
-                <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 font-semibold px-2.5 py-0.5 text-xs rounded-lg">
-                  {employee.designation || employee.jobInfo?.designation || 'Employee'}
-                </Badge>
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 font-medium px-2.5 py-0.5 text-xs rounded-full flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  {employee.employmentStatus || employee.jobInfo?.employmentStatus || 'Active'}
-                </Badge>
+                {separation || job.employmentStatus === 'Separated' || employee.employmentStatus === 'Separated' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                    <span className="size-1.5 rounded-full bg-red-500" />
+                    Separated
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#ECFDF3] text-[#027A48] border border-[#ABEFC6]">
+                    <span className="size-1.5 rounded-full bg-[#12B76A]" />
+                    {job.employmentStatus || employee.employmentStatus || 'Permanent'}
+                  </span>
+                )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-sm text-gray-600 pt-1">
+              <p className="text-sm text-slate-500 font-normal">
+                {employee.designation || employee.jobInfo?.designation || 'Employee'}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
                 {(employee.employeeId || employee.id) && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-gray-400 font-mono">ID:</span>
-                    <span className="font-semibold text-gray-800">{employee.employeeId || `#${employee.id}`}</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-slate-200 bg-white text-xs text-slate-600">
+                    <span className="text-slate-400 font-medium">ID</span>
+                    <span className="font-semibold text-slate-800">{employee.employeeId || `BIO-${employee.biometricId || employee.id}`}</span>
                   </div>
                 )}
                 {employee.biometricId && (
-                  <div className="flex items-center gap-1.5 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 text-xs">
-                    <span className="text-purple-500 font-medium">Bio ID:</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-purple-200 bg-purple-50/70 text-xs font-semibold text-purple-700">
+                    <span className="text-purple-500 font-medium">Bio ID</span>
                     <span className="font-bold text-purple-700">{employee.biometricId}</span>
                   </div>
                 )}
-                {employee.hiringDate && (
-                  <div className="flex items-center gap-1.5">
-                    <Briefcase className="size-3.5 text-gray-400" />
-                    <span>Hired: <strong className="text-gray-700 font-medium">{moment(employee.hiringDate).format('DD MMM YYYY')}</strong></span>
-                  </div>
-                )}
-                {(employee?.company?.name || employee?.location?.name) && (
-                  <div className="flex items-center gap-1.5">
-                    <MapPin className="size-3.5 text-gray-400" />
-                    <span>{employee?.company?.name || employee?.location?.name}</span>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700">
+                  <Shield className="size-3.5 text-slate-400" />
+                  <span>
+                    {rolesList.find((r: any) => String(r.id) === String(personal.roleId))?.name ||
+                      employee.appRole?.name ||
+                      (employee.role === 'SUPERVISOR' ? 'Supervisor' : employee.role === 'ADMIN' ? 'Admin' : 'User')}
+                  </span>
+                </div>
+                {(employee?.company?.name || employee?.location?.name || job.location) && (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700">
+                    <MapPin className="size-3.5 text-slate-400" />
+                    <span>{employee?.company?.name || employee?.location?.name || job.location}</span>
                   </div>
                 )}
                 {employee.email && (
-                  <div className="flex items-center gap-1.5">
-                    <Mail className="size-3.5 text-gray-400" />
-                    <span className="truncate">{employee.email}</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700">
+                    <Mail className="size-3.5 text-slate-400" />
+                    <span className="truncate max-w-[240px]">{employee.email}</span>
                   </div>
                 )}
               </div>
@@ -663,138 +1130,254 @@ export const EmployeeDetail: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* ── Separation & Activity Restriction Notice Banner ───────────────────── */}
+      {(separation || job.employmentStatus === 'Separated' || employee.employmentStatus === 'Separated') && (
+        <div className="bg-red-50/90 border border-red-200/90 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-3.5">
+            <div className="size-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0 mt-0.5 border border-red-200/60">
+              <UserX className="size-5 text-red-600" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-red-950">Employee Account Separated & Restricted</h3>
+                {separation?.type && (
+                  <span className="text-[11px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-md border border-red-200">
+                    {separation.type}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-red-800/90 mt-1 leading-relaxed">
+                This employee has been separated. Login authentication and attendance punch/clock-in are restricted. All historical attendance logs, payroll calculations, and documents remain securely preserved.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReinstateEmployee}
+            className="shrink-0 rounded-xl border-red-300 text-red-700 bg-white hover:bg-red-50 text-xs font-semibold px-4 h-9 shadow-xs"
+          >
+            Reinstate Employee
+          </Button>
+        </div>
+      )}
+
       {/* ── Tabs Navigation ─────────────────────────────────────────────────── */}
       <Tabs defaultValue="personal" className="space-y-5">
-        <TabsList className="flex flex-wrap h-auto w-full justify-start gap-1 p-1 bg-gray-100/90 rounded-2xl border border-gray-200/60 overflow-x-auto">
-          <TabsTrigger value="personal" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Personal</TabsTrigger>
-          <TabsTrigger value="job" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Job</TabsTrigger>
-          <TabsTrigger value="documents" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Documents</TabsTrigger>
-          <TabsTrigger value="schedule" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Schedule</TabsTrigger>
-          <TabsTrigger value="payroll" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Payroll</TabsTrigger>
-          <TabsTrigger value="approvals" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Approvals</TabsTrigger>
-          <TabsTrigger value="password-separation" className="rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-all data-[state=active]:bg-white data-[state=active]:text-sky-700 data-[state=active]:shadow-2xs">Password / Separation</TabsTrigger>
-        </TabsList>
+        <div className="w-full overflow-x-auto scrollbar-none pb-1">
+          <TabsList className="inline-flex items-center flex-nowrap h-auto justify-start gap-1 sm:gap-1.5 p-1 bg-transparent border-0 min-w-full sm:min-w-0">
+            <TabsTrigger
+              value="personal"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <User className="size-3.5 sm:size-4" /> Personal
+            </TabsTrigger>
+            <TabsTrigger
+              value="job"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <Briefcase className="size-3.5 sm:size-4" /> Job
+            </TabsTrigger>
+            <TabsTrigger
+              value="documents"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <FileText className="size-3.5 sm:size-4" /> Documents
+            </TabsTrigger>
+            <TabsTrigger
+              value="schedule"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <Clock className="size-3.5 sm:size-4" /> Schedule
+            </TabsTrigger>
+            <TabsTrigger
+              value="payroll"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <CreditCard className="size-3.5 sm:size-4" /> Payroll
+            </TabsTrigger>
+            <TabsTrigger
+              value="approvals"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <Check className="size-3.5 sm:size-4" /> Approvals
+            </TabsTrigger>
+            <TabsTrigger
+              value="password-separation"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <Lock className="size-3.5 sm:size-4" /> Password / Separation
+            </TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="shrink-0 rounded-xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-[13px] font-semibold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-xs data-[state=active]:border data-[state=active]:border-slate-200/90"
+            >
+              <RotateCcw className="size-3.5 sm:size-4" /> History
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* ── PERSONAL INFORMATION ──────────────────────────────────────── */}
         <TabsContent value="personal">
-          <Card className="shadow-xs border-gray-200 rounded-2xl">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-gray-100 p-5">
+          <Card className="shadow-xs border-slate-200/80 rounded-2xl bg-white overflow-hidden">
+            <div className="flex flex-row items-center justify-between border-b border-slate-100 p-5 sm:p-6">
               <div>
-                <CardTitle className="text-base font-bold text-gray-900">Personal Information</CardTitle>
-                <p className="text-xs text-gray-500 mt-0.5">Contact details and identity information</p>
+                <h2 className="text-base font-bold text-slate-900">Personal Information</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Contact details and identity information</p>
               </div>
-              <Button
-                variant={editPersonal ? "ghost" : "outline"}
-                size="sm"
-                onClick={() => setEditPersonal(!editPersonal)}
-                className="h-9 px-3 text-xs rounded-xl border-gray-200 font-medium"
-              >
-                {editPersonal ? 'Cancel' : <><Edit className="mr-1.5 size-3.5 text-sky-600" /> Edit</>}
-              </Button>
-            </CardHeader>
-            <CardContent className="p-5 sm:p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">First Name</Label>
-                <Input
-                  value={personal.firstName}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, firstName: e.target.value })}
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Last Name</Label>
-                <Input
-                  value={personal.lastName}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, lastName: e.target.value })}
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Email</Label>
-                <Input
-                  type="email"
-                  value={personal.email}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, email: e.target.value })}
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Phone</Label>
-                <Input
-                  value={personal.phone}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, phone: e.target.value })}
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Employee ID (Code)</Label>
-                <Input
-                  value={personal.employeeId}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, employeeId: e.target.value })}
-                  placeholder="e.g. 1919"
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Biometric ID (Device ID)</Label>
-                <Input
-                  value={personal.biometricId}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, biometricId: e.target.value })}
-                  placeholder="e.g. 1001"
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Username</Label>
-                <Input
-                  value={personal.username}
-                  disabled={!editPersonal}
-                  onChange={e => setPersonal({ ...personal, username: e.target.value })}
-                  className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Role</Label>
-                {editPersonal ? (
-                  <Select
-                    value={personal.roleId || "none"}
-                    onValueChange={(val) => setPersonal({ ...personal, roleId: val === "none" ? "" : val })}
+              {!editPersonal ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditPersonal(true)}
+                  className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
+                >
+                  <Edit className="size-3.5 text-blue-600" /> Edit
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditPersonal(false)}
+                    className="rounded-xl border-slate-200 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold px-4 h-9"
                   >
-                    <SelectTrigger className="mt-1.5 h-10 rounded-xl border-gray-200 bg-white text-gray-800 font-medium text-sm">
-                      <SelectValue placeholder="Select Role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No Role Assigned</SelectItem>
-                      {rolesList.map((r: any) => (
-                        <SelectItem key={r.id} value={String(r.id)}>
-                          {r.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    value={
-                      rolesList.find((r: any) => String(r.id) === String(personal.roleId))?.name ||
-                      employee.appRole?.name ||
-                      (employee.role === "SUPERVISOR" ? "Supervisor" : employee.role === "ADMIN" ? "Admin" : "User")
-                    }
-                    disabled
-                    className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm"
-                  />
-                )}
-              </div>
-              {editPersonal && (
-                <div className="col-span-full flex justify-end pt-2">
-                  <Button onClick={handleSavePersonal} className="bg-sky-600 hover:bg-sky-700 text-white rounded-xl h-10 px-5 text-xs font-semibold shadow-xs">
-                    <Save className="mr-2 size-3.5" /> Save Changes
+                    Cancel
                   </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSavePersonal}
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 h-9 shadow-xs flex items-center gap-1.5"
+                  >
+                    <Save className="size-3.5" /> Save Changes
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <CardContent className="p-5 sm:p-6">
+              {!editPersonal ? (
+                /* ── View Mode: 4 columns ── */
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-6 gap-x-6">
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">First name</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.firstName || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Last name</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.lastName || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Email</p>
+                    <p className="text-sm font-bold text-slate-900 truncate">{personal.email || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Phone</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.phone || '—'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Employee ID</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.employeeId || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Biometric ID</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.biometricId || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Username</p>
+                    <p className="text-sm font-bold text-slate-900">{personal.username || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Role</p>
+                    <p className="text-sm font-bold text-slate-900">
+                      {rolesList.find((r: any) => String(r.id) === String(personal.roleId))?.name ||
+                        employee.appRole?.name ||
+                        (employee.role === 'SUPERVISOR' ? 'Supervisor' : employee.role === 'ADMIN' ? 'Admin' : 'User')}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* ── Edit Mode: 3 columns ── */
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">First Name</Label>
+                    <Input
+                      value={personal.firstName}
+                      onChange={(e) => setPersonal({ ...personal, firstName: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Last Name</Label>
+                    <Input
+                      value={personal.lastName}
+                      onChange={(e) => setPersonal({ ...personal, lastName: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Email</Label>
+                    <Input
+                      type="email"
+                      value={personal.email}
+                      onChange={(e) => setPersonal({ ...personal, email: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Phone</Label>
+                    <Input
+                      value={personal.phone}
+                      onChange={(e) => setPersonal({ ...personal, phone: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Employee ID (Code)</Label>
+                    <Input
+                      value={personal.employeeId}
+                      onChange={(e) => setPersonal({ ...personal, employeeId: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Biometric ID</Label>
+                    <Input
+                      value={personal.biometricId}
+                      onChange={(e) => setPersonal({ ...personal, biometricId: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Username</Label>
+                    <Input
+                      value={personal.username}
+                      onChange={(e) => setPersonal({ ...personal, username: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Role</Label>
+                    <Select
+                      value={personal.roleId || 'none'}
+                      onValueChange={(val) => setPersonal({ ...personal, roleId: val === 'none' ? '' : val })}
+                    >
+                      <SelectTrigger className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500">
+                        <SelectValue placeholder="No Role Assigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Role Assigned</SelectItem>
+                        {rolesList.map((r: any) => (
+                          <SelectItem key={r.id} value={String(r.id)}>
+                            {r.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -803,223 +1386,312 @@ export const EmployeeDetail: React.FC = () => {
 
         {/* ── JOB INFORMATION ───────────────────────────────────────────── */}
         <TabsContent value="job">
-          <Card className="shadow-xs border-gray-200 rounded-2xl">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-gray-100 p-5">
+          <Card className="shadow-xs border-slate-200/80 rounded-2xl bg-white overflow-hidden">
+            <div className="flex flex-row items-center justify-between border-b border-slate-100 p-5 sm:p-6">
               <div>
-                <CardTitle className="text-base font-bold text-gray-900">Job Information</CardTitle>
-                <p className="text-xs text-gray-500 mt-0.5">Role assignment, department, and employment details</p>
+                <h2 className="text-base font-bold text-slate-900">Job Information</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Location, department, supervisor and employment details</p>
               </div>
-              <Button
-                variant={editJob ? "ghost" : "outline"}
-                size="sm"
-                onClick={() => setEditJob(!editJob)}
-                className="h-9 px-3 text-xs rounded-xl border-gray-200 font-medium"
-              >
-                {editJob ? 'Cancel' : <><Edit className="mr-1.5 size-3.5 text-sky-600" /> Edit</>}
-              </Button>
-            </CardHeader>
-            <CardContent className="p-5 sm:p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Location</Label>
-                {editJob ? (
-                  <SearchableSelect
-                    className="w-full mt-1.5"
-                    placeholder="Select Location"
-                    searchPlaceholder="Search location..."
-                    value={job.locationId}
-                    onValueChange={(val) => {
-                      const found = locationsList.find((l) => String(l.id) === String(val));
-                      setJob({
-                        ...job,
-                        locationId: val,
-                        location: found?.name || "",
-                      });
-                    }}
-                    options={locationsList.map((l) => ({
-                      value: String(l.id),
-                      label: l.name,
-                    }))}
-                  />
-                ) : (
-                  <Input value={job.location || 'N/A'} disabled className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm" />
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Department</Label>
-                {editJob ? (
-                  <SearchableSelect
-                    className="w-full mt-1.5"
-                    placeholder="Select Department"
-                    searchPlaceholder="Search department..."
-                    value={job.departmentId}
-                    onValueChange={(val) => {
-                      const found = departmentsList.find((d) => String(d.id) === String(val));
-                      setJob({
-                        ...job,
-                        departmentId: val,
-                        department: found?.title || "",
-                      });
-                    }}
-                    options={departmentsList.map((d) => ({
-                      value: String(d.id),
-                      label: d.title,
-                    }))}
-                  />
-                ) : (
-                  <Input value={job.department || 'N/A'} disabled className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm" />
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-semibold text-gray-600">Supervisor</Label>
-                {editJob ? (
-                  <SearchableSelect
-                    className="w-full mt-1.5"
-                    placeholder="Select Supervisor"
-                    searchPlaceholder="Search supervisor..."
-                    value={job.supervisorId}
-                    onValueChange={(val) => {
-                      const found = supervisorsList.find((s) => String(s.id) === String(val));
-                      setJob({
-                        ...job,
-                        supervisorId: val,
-                        supervisor: found ? `${found.firstName} ${found.lastName}` : "",
-                      });
-                    }}
-                    options={supervisorsList.map((s) => ({
-                      value: String(s.id),
-                      label: `${s.firstName} ${s.lastName || ""}`.trim(),
-                    }))}
-                  />
-                ) : (
-                  <Input value={job.supervisor || 'N/A'} disabled className="mt-1.5 h-10 rounded-xl border-gray-200 bg-gray-50/50 text-gray-800 disabled:opacity-100 disabled:bg-gray-50/70 disabled:cursor-default font-medium text-sm" />
-                )}
-              </div>
-
-                <div>
-                  <Label>Hiring Date</Label>
-                  <Input type="date" value={job.hiringDate} disabled={!editJob} onChange={e => setJob({ ...job, hiringDate: e.target.value })} />
+              {!editJob ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditJob(true)}
+                  className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
+                >
+                  <Edit className="size-3.5 text-blue-600" /> Edit
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditJob(false)}
+                    className="rounded-xl border-slate-200 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold px-4 h-9"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveJob}
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 h-9 shadow-xs flex items-center gap-1.5"
+                  >
+                    <Save className="size-3.5" /> Save Changes
+                  </Button>
                 </div>
-                <div>
-                  <Label>Employment Status</Label>
-                  <Select disabled={!editJob} value={job.employmentStatus} onValueChange={v => setJob({ ...job, employmentStatus: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="On Leave">On Leave</SelectItem>
-                      <SelectItem value="Separated">Separated</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Work Mode</Label>
-                  <Select disabled={!editJob} value={job.workMode} onValueChange={v => setJob({ ...job, workMode: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="On-site">On-site</SelectItem>
-                      <SelectItem value="Remote">Remote</SelectItem>
-                      <SelectItem value="Hybrid">Hybrid</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {editJob && (
-                  <div className="col-span-full flex justify-end">
-                    <Button onClick={handleSaveJob}>
-                      <Save className="mr-2 h-4 w-4" /> Save Changes
-                    </Button>
+              )}
+            </div>
+
+            <CardContent className="p-5 sm:p-6">
+              {!editJob ? (
+                /* ── View Mode: 3 columns ── */
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-6 gap-x-6">
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Entity</p>
+                    <p className="text-sm font-bold text-slate-900">{job.entity || employee.company?.name || '—'}</p>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Location</p>
+                    <p className="text-sm font-bold text-slate-900">{job.location || employee?.location?.name || 'Johar Town Lahore'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Department</p>
+                    <p className="text-sm font-bold text-slate-900">{job.department || employee?.department?.title || '—'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Supervisor</p>
+                    <p className="text-sm font-bold text-slate-900">{job.supervisor || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Hiring date</p>
+                    <p className="text-sm font-bold text-slate-900">
+                      {job.hiringDate ? moment(job.hiringDate).format('DD MMM YYYY') : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Employment status</p>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#ECFDF3] text-[#027A48] border border-[#ABEFC6]">
+                      <span className="size-1.5 rounded-full bg-[#12B76A]" />
+                      {job.employmentStatus || 'Permanent'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-normal text-slate-500 mb-1">Work mode</p>
+                    <p className="text-sm font-bold text-slate-900">{job.workMode || 'On-site'}</p>
+                  </div>
+                </div>
+              ) : (
+                /* ── Edit Mode: 3 columns ── */
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Entity</Label>
+                    <Input
+                      value={job.entity}
+                      onChange={(e) => setJob({ ...job, entity: e.target.value })}
+                      placeholder="e.g. Frontpin HQ"
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Location</Label>
+                    <SearchableSelect
+                      className="w-full mt-1.5"
+                      placeholder="Select Location"
+                      searchPlaceholder="Search location..."
+                      value={job.locationId}
+                      onValueChange={(val) => {
+                        const found = locationsList.find((l) => String(l.id) === String(val));
+                        setJob({
+                          ...job,
+                          locationId: val,
+                          location: found?.name || '',
+                        });
+                      }}
+                      options={locationsList.map((l) => ({
+                        value: String(l.id),
+                        label: l.name,
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Department</Label>
+                    <SearchableSelect
+                      className="w-full mt-1.5"
+                      placeholder="Select Department"
+                      searchPlaceholder="Search department..."
+                      value={job.departmentId}
+                      onValueChange={(val) => {
+                        const found = departmentsList.find((d) => String(d.id) === String(val));
+                        setJob({
+                          ...job,
+                          departmentId: val,
+                          department: found?.title || '',
+                        });
+                      }}
+                      options={departmentsList.map((d) => ({
+                        value: String(d.id),
+                        label: d.title,
+                      }))}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Supervisor</Label>
+                    <SearchableSelect
+                      className="w-full mt-1.5"
+                      placeholder="Select Supervisor"
+                      searchPlaceholder="Search supervisor..."
+                      value={job.supervisorId}
+                      onValueChange={(val) => {
+                        const found = supervisorsList.find((s) => String(s.id) === String(val));
+                        setJob({
+                          ...job,
+                          supervisorId: val,
+                          supervisor: found ? `${found.firstName} ${found.lastName}` : '',
+                        });
+                      }}
+                      options={supervisorsList.map((s) => ({
+                        value: String(s.id),
+                        label: `${s.firstName} ${s.lastName || ''}`.trim(),
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Hiring Date</Label>
+                    <Input
+                      type="date"
+                      value={job.hiringDate}
+                      onChange={(e) => setJob({ ...job, hiringDate: e.target.value })}
+                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Employment Status</Label>
+                    <Select
+                      value={job.employmentStatus || 'Permanent'}
+                      onValueChange={(v) => setJob({ ...job, employmentStatus: v })}
+                    >
+                      <SelectTrigger className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Permanent">Permanent</SelectItem>
+                        <SelectItem value="Probation">Probation</SelectItem>
+                        <SelectItem value="Contract">Contract</SelectItem>
+                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem value="On Leave">On Leave</SelectItem>
+                        <SelectItem value="Separated">Separated</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-slate-700">Work Mode</Label>
+                    <Select value={job.workMode || 'On-site'} onValueChange={(v) => setJob({ ...job, workMode: v })}>
+                      <SelectTrigger className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="On-site">On-site</SelectItem>
+                        <SelectItem value="Remote">Remote</SelectItem>
+                        <SelectItem value="Hybrid">Hybrid</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
         {/* ── DOCUMENTS ──────────────────────────────────────────────────── */}
         <TabsContent value="documents">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Documents</CardTitle>
-                <Dialog open={showUploadDocModal} onOpenChange={setShowUploadDocModal}>
-                  <DialogTrigger asChild>
-                    <Button size="sm">
-                      <Upload className="mr-2 h-4 w-4" /> Upload Document
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Upload Document</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div>
-                        <Label>Document Type</Label>
-                        <Select value={docType} onValueChange={setDocType}>
-                          <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                          <SelectContent>
-                            {documentTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>File</Label>
-                        <Input type="file" onChange={e => setDocFile(e.target.files?.[0] || null)} />
-                      </div>
+          <Card className="rounded-2xl border-slate-200/80 shadow-xs bg-white overflow-hidden">
+            <div className="flex flex-row items-center justify-between border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Employee Documents</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Identity proofs, contracts, and certificates</p>
+              </div>
+              <Dialog open={showUploadDocModal} onOpenChange={setShowUploadDocModal}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
+                  >
+                    <Upload className="size-3.5" /> Upload Document
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="rounded-2xl sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="text-base font-bold text-slate-900">Upload Document</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-700">Document Type</Label>
+                      <Select value={docType} onValueChange={setDocType}>
+                        <SelectTrigger className="h-10 rounded-xl border-slate-200">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {documentTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowUploadDocModal(false)}>Cancel</Button>
-                      <Button onClick={handleUploadDocument}>Upload</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>File</TableHead>
-                      <TableHead>Uploaded</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-700">File</Label>
+                      <Input
+                        type="file"
+                        onChange={e => setDocFile(e.target.files?.[0] || null)}
+                        className="rounded-xl border-slate-200 h-10 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter className="gap-2 sm:gap-0">
+                    <Button variant="outline" onClick={() => setShowUploadDocModal(false)} className="rounded-xl border-slate-200 text-xs font-semibold h-9">
+                      Cancel
+                    </Button>
+                    <Button onClick={handleUploadDocument} className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold h-9">
+                      Upload
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-slate-100 bg-slate-50/50">
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3 pl-6">Type</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3">File</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3">Uploaded</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3 pr-6 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((doc: any) => (
+                    <TableRow key={doc.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                      <TableCell className="pl-6 font-semibold text-xs text-slate-800">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700">
+                          {doc.type}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs font-medium text-slate-700">{doc.fileName || doc.url?.split('/').pop()}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{moment(doc.uploadedAt).format('DD MMM YYYY')}</TableCell>
+                      <TableCell className="pr-6 text-right">
+                        <div className="flex gap-1 justify-end">
+                          <Button variant="ghost" size="icon" className="size-8 rounded-lg hover:bg-slate-100 text-slate-600">
+                            <Eye className="size-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteDocument(doc.id)} className="size-8 rounded-lg hover:bg-red-50 text-red-600">
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {documents.map((doc: any) => (
-                      <TableRow key={doc.id}>
-                        <TableCell>{doc.type}</TableCell>
-                        <TableCell>{doc.fileName || doc.url?.split('/').pop()}</TableCell>
-                        <TableCell>{moment(doc.uploadedAt).format('DD MMM YYYY')}</TableCell>
-                        <TableCell className="text-right flex gap-2 justify-end">
-                          <Button variant="ghost" size="icon">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteDocument(doc.id)}>
-                            <Trash2 className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {documents.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center text-gray-500 py-8">
-                          No documents uploaded yet
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  ))}
+                  {documents.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-slate-400 py-10 text-xs">
+                        No documents uploaded yet
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ── SCHEDULE ───────────────────────────────────────────────────── */}
         <TabsContent value="schedule">
-          <Card className="rounded-2xl border border-gray-200/80 shadow-2xs overflow-hidden bg-white">
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 bg-gray-50/50 p-5">
+          <Card className="rounded-2xl border-slate-200/80 shadow-xs overflow-hidden bg-white">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
               <div>
-                <CardTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-blue-600" />
-                  Schedule & Shift Configuration
-                </CardTitle>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Configure working days, shift hours, grace periods, overtime, and break policies.
+                <h2 className="text-base font-bold text-slate-900">Schedule & Shift Configuration</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Working days, shift hours, grace periods, overtime and breaks
                 </p>
               </div>
 
@@ -1028,9 +1700,9 @@ export const EmployeeDetail: React.FC = () => {
                   variant="outline"
                   size="sm"
                   onClick={() => setIsEditingSchedule(true)}
-                  className="rounded-xl border-gray-200 hover:bg-white text-xs font-semibold"
+                  className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
                 >
-                  <Edit className="mr-1.5 h-3.5 w-3.5" /> Edit Schedule
+                  <Edit className="size-3.5 text-blue-600" /> Edit Schedule
                 </Button>
               ) : (
                 <div className="flex items-center gap-2">
@@ -1038,330 +1710,378 @@ export const EmployeeDetail: React.FC = () => {
                     variant="outline"
                     size="sm"
                     onClick={() => setIsEditingSchedule(false)}
-                    className="rounded-xl border-gray-200 hover:bg-white text-xs font-semibold text-gray-600"
+                    className="rounded-xl border-slate-200 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold px-4 h-9"
                   >
                     Cancel
                   </Button>
                   <Button
                     size="sm"
                     onClick={handleSaveSchedule}
-                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs"
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 h-9 shadow-xs flex items-center gap-1.5"
                   >
-                    <Save className="mr-1.5 h-3.5 w-3.5" /> Save Schedule
+                    <Save className="size-3.5" /> Save Changes
                   </Button>
                 </div>
               )}
-            </CardHeader>
+            </div>
 
-            <CardContent className="p-6 space-y-6">
-              {/* ── CARD 1: DAILY SHIFT TIMINGS & WORKING DAYS ────────────────── */}
-              <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-gray-200/60 pb-3">
-                  <div>
-                    <Label className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                      <Clock className="w-4 h-4 text-blue-600" />
-                      Daily Shift Timings & Working Pattern
-                    </Label>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      {isEditingSchedule
-                        ? "Check working days and configure individual shift start and end times for each day."
-                        : "Active shift timings configured for each day of the week."}
-                    </p>
-                  </div>
+            <CardContent className="p-5 sm:p-6 space-y-6">
+              {!isEditingSchedule ? (
+                /* ── View Mode: Weekly Shift Pattern + Metric Cards (Image 1) ── */
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white p-5 space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <Clock className="size-4 text-blue-600" />
+                        <span className="font-bold text-sm text-slate-900">Weekly shift pattern</span>
+                      </div>
+                      <span className="text-xs font-medium text-slate-700">
+                        {schedule.workingDays.length} working · {7 - schedule.workingDays.length} off
+                      </span>
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold text-xs px-2.5 py-0.5">
-                      {schedule.workingDays.length} Working Days / {7 - schedule.workingDays.length} Off Days
-                    </Badge>
+                    <div className="w-full">
+                      <div className="grid grid-cols-4 py-2 border-b border-slate-100 text-[11px] font-semibold text-slate-400 tracking-wider uppercase">
+                        <div>DAY</div>
+                        <div>STATUS</div>
+                        <div>START</div>
+                        <div>END</div>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {ALL_WEEK_DAYS.map((dayKey) => {
+                          const isWorking = schedule.workingDays.includes(dayKey);
+                          const dayName = FULL_DAY_NAMES[dayKey] || dayKey;
+                          const dayTime = daySchedules[dayKey] || { startTime: schedule.shiftStart || '09:00', endTime: schedule.shiftEnd || '18:00' };
+
+                          return (
+                            <div key={dayKey} className="grid grid-cols-4 py-3.5 items-center text-sm">
+                              <div className="font-bold text-slate-900">{dayName}</div>
+                              <div>
+                                {isWorking ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#ECFDF3] text-[#027A48] border border-[#ABEFC6]">
+                                    <span className="size-1.5 rounded-full bg-[#12B76A]" />
+                                    Working
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                    <span className="size-1.5 rounded-full bg-slate-400" />
+                                    Off day
+                                  </span>
+                                )}
+                              </div>
+                              <div className={isWorking ? "text-slate-700 font-medium text-sm" : "text-slate-400 font-medium"}>
+                                {isWorking ? formatTimeTo12h(dayTime.startTime) : "—"}
+                              </div>
+                              <div className={isWorking ? "text-slate-700 font-medium text-sm" : "text-slate-400 font-medium"}>
+                                {isWorking ? formatTimeTo12h(dayTime.endTime) : "—"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Metric Cards inside / below table (Exact Image 1) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
+                      {/* 1. Early in margin */}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Early in margin</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.earlyInMargin || 15} min</p>
+                      </div>
+
+                      {/* 2. Early out margin */}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Early out margin</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.earlyOutMargin || 15} min</p>
+                      </div>
+
+                      {/* 3. Half day */}
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Half day</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.allowHalfDay ? 'Allowed' : 'Disabled'}</p>
+                      </div>
+
+                      {/* 4. Overtime (purple border/tint) */}
+                      <div className="rounded-2xl border border-purple-200 bg-[#FAFAFE] p-4">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Overtime</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.overtimeAllowed ? 'Allowed' : 'Disabled'}</p>
+                        {schedule.overtimeAllowed && (
+                          <p className="text-xs text-slate-400 mt-1">
+                            Max {schedule.overtimeMinutes || 30} min ({((schedule.overtimeMinutes || 30) / 60).toFixed(1)} h)
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 5. Breaks (Row 2, 1 column width) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Breaks</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.numBreaks ?? 2}</p>
+                        <p className="text-xs text-slate-400 mt-1">{schedule.breakMinutes ?? 15} min each</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              ) : (
+                /* ── Edit Mode: Daily Shift Timings + Edit Cards (Exact Image 2) ── */
+                <div className="space-y-6">
+                  {/* Daily Shift Timings Card */}
+                  <div className="rounded-2xl border border-slate-200/80 bg-white p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="size-4 text-blue-600" />
+                          <span className="font-bold text-sm text-slate-900">Daily shift timings</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Check working days and set start and end times for each day.
+                        </p>
+                      </div>
 
-                {/* Quick Presets in Edit Mode */}
-                {isEditingSchedule && (
-                  <div className="flex flex-wrap items-center gap-2 pb-1 border-b border-gray-200/60">
-                    <span className="text-[11px] font-semibold text-gray-500 mr-1">Quick Presets:</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] }))}
-                      className="text-[11px] h-7 rounded-lg bg-white border-gray-300 hover:bg-blue-50 hover:text-blue-700"
-                    >
-                      Mon – Fri (5 Days)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] }))}
-                      className="text-[11px] h-7 rounded-lg bg-white border-gray-300 hover:bg-blue-50 hover:text-blue-700"
-                    >
-                      Mon – Sat (6 Days)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: ALL_WEEK_DAYS }))}
-                      className="text-[11px] h-7 rounded-lg bg-white border-gray-300 hover:bg-blue-50 hover:text-blue-700"
-                    >
-                      Select All
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: [] }))}
-                      className="text-[11px] h-7 rounded-lg bg-white border-gray-300 hover:bg-red-50 hover:text-red-600"
-                    >
-                      Clear All
-                    </Button>
-                  </div>
-                )}
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        {schedule.workingDays.length} working / {7 - schedule.workingDays.length} off
+                      </span>
+                    </div>
 
-                {/* 7 Days Per-Day Schedule List */}
-                <div className="grid grid-cols-1 gap-3 pt-1">
-                  {ALL_WEEK_DAYS.map((dayKey) => {
-                    const isWorking = schedule.workingDays.includes(dayKey);
-                    const dayName = FULL_DAY_NAMES[dayKey] || dayKey;
-                    const dayTime = daySchedules[dayKey] || { startTime: schedule.shiftStart || '09:00', endTime: schedule.shiftEnd || '18:00' };
-
-                    return (
-                      <div
-                        key={dayKey}
-                        className={`p-4 rounded-2xl border transition-all ${
-                          isWorking
-                            ? 'bg-white border-gray-200 shadow-2xs hover:border-gray-300'
-                            : 'bg-gray-100/50 border-gray-200/60'
-                        }`}
+                    {/* Quick presets */}
+                    <div className="flex flex-wrap items-center gap-2 py-1">
+                      <span className="text-xs font-semibold text-slate-500 mr-1">Quick presets:</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] }))}
+                        className="h-8 px-3 rounded-lg border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
                       >
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3 pb-2.5 border-b border-gray-100">
-                          <div className="flex items-center gap-3">
-                            {isEditingSchedule ? (
+                        Mon – Fri
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] }))}
+                        className="h-8 px-3 rounded-lg border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Mon – Sat
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: [...ALL_WEEK_DAYS] }))}
+                        className="h-8 px-3 rounded-lg border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        All days
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSchedule((prev: any) => ({ ...prev, workingDays: [] }))}
+                        className="h-8 px-3 rounded-lg border-red-200 text-red-600 bg-white hover:bg-red-50 text-xs font-semibold"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+
+                    {/* 7 Days List */}
+                    <div className="space-y-2.5 pt-1">
+                      {ALL_WEEK_DAYS.map((dayKey) => {
+                        const isWorking = schedule.workingDays.includes(dayKey);
+                        const dayName = FULL_DAY_NAMES[dayKey] || dayKey;
+                        const dayTime = daySchedules[dayKey] || { startTime: schedule.shiftStart || '09:00', endTime: schedule.shiftEnd || '18:00' };
+
+                        return (
+                          <div
+                            key={dayKey}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all gap-3"
+                          >
+                            <div className="flex items-center gap-3">
                               <Checkbox
                                 checked={isWorking}
                                 onCheckedChange={() => toggleWorkingDay(dayKey)}
                                 id={`day-check-${dayKey}`}
+                                className="size-4 rounded-md"
                               />
+                              <Label htmlFor={`day-check-${dayKey}`} className="font-bold text-sm text-slate-900 cursor-pointer min-w-[90px]">
+                                {dayName}
+                              </Label>
+                            </div>
+
+                            {isWorking ? (
+                              <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-slate-400">Start</span>
+                                  <Input
+                                    type="time"
+                                    value={dayTime.startTime}
+                                    onChange={(e) => handleUpdateDayTime(dayKey, 'startTime', e.target.value)}
+                                    className="h-10 w-36 rounded-xl border-slate-200 bg-white font-semibold text-xs px-3 text-slate-800 shadow-2xs focus:border-blue-500"
+                                  />
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-slate-400">End</span>
+                                  <Input
+                                    type="time"
+                                    value={dayTime.endTime}
+                                    onChange={(e) => handleUpdateDayTime(dayKey, 'endTime', e.target.value)}
+                                    className="h-10 w-36 rounded-xl border-slate-200 bg-white font-semibold text-xs px-3 text-slate-800 shadow-2xs focus:border-blue-500"
+                                  />
+                                </div>
+
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleApplyTimeAllDays(dayKey)}
+                                  className="h-9 px-3 rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold"
+                                >
+                                  Apply to all
+                                </Button>
+                              </div>
                             ) : (
-                              <div className={`size-6 rounded-full flex items-center justify-center ${isWorking ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-400'}`}>
-                                {isWorking ? <Check className="w-3.5 h-3.5" /> : <span className="text-[10px]">✕</span>}
+                              <div className="sm:ml-auto py-1">
+                                <span className="text-xs italic text-slate-400">Off day — no shift timing</span>
                               </div>
                             )}
-
-                            <Label htmlFor={`day-check-${dayKey}`} className="font-bold text-sm text-gray-900 cursor-pointer">
-                              {dayName}
-                            </Label>
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={
-                                isWorking
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold text-[11px]'
-                                  : 'bg-gray-100 text-gray-500 border-gray-200 text-[11px]'
-                              }
-                            >
-                              {isWorking ? 'Active Working Day' : 'Off Day (Non-Working)'}
-                            </Badge>
+                  {/* Card 1: Punctuality & grace margins (Exact Image 2) */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Shield className="size-4 text-blue-600" />
+                      <h4 className="text-sm font-bold text-slate-900">Punctuality & grace margins</h4>
+                    </div>
 
-                            {isEditingSchedule && isWorking && (
-                              <button
-                                type="button"
-                                onClick={() => handleApplyTimeAllDays(dayKey)}
-                                className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline ml-2"
-                                title="Copy this timing to all days"
-                              >
-                                Apply timing to all
-                              </button>
-                            )}
-                          </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-slate-700">Early in margin (minutes)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={schedule.earlyInMargin}
+                          onChange={(e) => setSchedule({ ...schedule, earlyInMargin: Number(e.target.value) })}
+                          className="bg-white border-slate-200 rounded-xl h-10 text-sm font-semibold focus:border-blue-500"
+                        />
+                        <p className="text-xs text-slate-400">Buffer allowed before shift start time for early check-in.</p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-slate-700">Early out margin (minutes)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={schedule.earlyOutMargin}
+                          onChange={(e) => setSchedule({ ...schedule, earlyOutMargin: Number(e.target.value) })}
+                          className="bg-white border-slate-200 rounded-xl h-10 text-sm font-semibold focus:border-blue-500"
+                        />
+                        <p className="text-xs text-slate-400">Buffer allowed before shift end time without marking early departure.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Half-day & overtime rules (Exact Image 2) */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="size-4 text-amber-500" />
+                      <h4 className="text-sm font-bold text-slate-900">Half-day & overtime rules</h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+                      {/* Half day */}
+                      <div className="space-y-3 p-1">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold text-slate-800">Half day allowed</Label>
+                          <Switch
+                            checked={schedule.allowHalfDay}
+                            onCheckedChange={(val) => setSchedule({ ...schedule, allowHalfDay: val })}
+                          />
                         </div>
-
-                        {/* Shift Time Inputs for this day */}
-                        {isWorking ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs font-semibold text-gray-700">Start Time ({dayKey})</Label>
-                              <Input
-                                type="time"
-                                value={dayTime.startTime}
-                                disabled={!isEditingSchedule}
-                                onChange={(e) => handleUpdateDayTime(dayKey, 'startTime', e.target.value)}
-                                className="bg-white border-gray-300 font-semibold h-10 text-xs"
-                              />
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-xs font-semibold text-gray-700">End Time ({dayKey})</Label>
-                              <Input
-                                type="time"
-                                value={dayTime.endTime}
-                                disabled={!isEditingSchedule}
-                                onChange={(e) => handleUpdateDayTime(dayKey, 'endTime', e.target.value)}
-                                className="bg-white border-gray-300 font-semibold h-10 text-xs"
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="py-1 text-xs text-gray-400 italic">
-                            No shift timing configured (Off Day)
+                        {schedule.allowHalfDay && (
+                          <div className="space-y-1.5 pt-2">
+                            <Label className="text-xs font-medium text-slate-700">Half day threshold (minutes)</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={schedule.halfDayMinutes}
+                              onChange={(e) => setSchedule({ ...schedule, halfDayMinutes: Number(e.target.value) })}
+                              className="bg-white border-slate-200 rounded-xl h-10 text-sm font-semibold"
+                            />
+                            <p className="text-xs text-slate-400">
+                              {Math.floor(schedule.halfDayMinutes / 60)}h {schedule.halfDayMinutes % 60}m shift threshold required
+                            </p>
                           </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
 
-              {/* ── CARD 3: PUNCTUALITY & MARGINS ────────────────── */}
-              <div className="bg-white p-5 rounded-2xl border border-gray-200/80 space-y-4 shadow-2xs">
-                <h4 className="text-xs font-bold text-gray-800 flex items-center gap-1.5 border-b border-gray-100 pb-2">
-                  <Shield className="w-4 h-4 text-blue-600" />
-                  Punctuality & Grace Margins
-                </h4>
+                      {/* Overtime */}
+                      <div className="space-y-3 p-1">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold text-slate-800">Overtime allowed</Label>
+                          <Switch
+                            checked={schedule.overtimeAllowed}
+                            onCheckedChange={(val) => setSchedule({ ...schedule, overtimeAllowed: val })}
+                          />
+                        </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-700">Early In Margin (minutes)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={schedule.earlyInMargin}
-                      disabled={!isEditingSchedule}
-                      onChange={(e) => setSchedule({ ...schedule, earlyInMargin: Number(e.target.value) })}
-                      className="bg-white border-gray-300 h-10"
-                    />
-                    <p className="text-[10px] text-gray-400">Buffer allowed before shift start time for early check-in.</p>
+                        {schedule.overtimeAllowed && (
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-slate-700">Overtime allowed (minutes)</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={schedule.overtimeMinutes}
+                              onChange={(e) => setSchedule({ ...schedule, overtimeMinutes: Number(e.target.value) })}
+                              className="bg-white border-slate-200 rounded-xl h-10 text-sm font-semibold"
+                            />
+                            <p className="text-xs text-slate-400">
+                              Max {schedule.overtimeMinutes} mins ({ (schedule.overtimeMinutes / 60).toFixed(1) } hrs) extra time allowed
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-700">Early Out Margin (minutes)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={schedule.earlyOutMargin}
-                      disabled={!isEditingSchedule}
-                      onChange={(e) => setSchedule({ ...schedule, earlyOutMargin: Number(e.target.value) })}
-                      className="bg-white border-gray-300 h-10"
-                    />
-                    <p className="text-[10px] text-gray-400">Buffer allowed before shift end time without marking early departure.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── CARD 4: HALF-DAY & OVERTIME POLICIES ────────────────── */}
-              <div className="bg-white p-5 rounded-2xl border border-gray-200/80 space-y-4 shadow-2xs">
-                <h4 className="text-xs font-bold text-gray-800 flex items-center gap-1.5 border-b border-gray-100 pb-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600" />
-                  Half-Day & Overtime Rules
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  {/* Half Day */}
-                  <div className="space-y-3 p-4 rounded-xl bg-gray-50/70 border border-gray-200/80">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-bold text-gray-800">Half Day Allowed</Label>
-                      {isEditingSchedule ? (
-                        <Switch
-                          checked={schedule.allowHalfDay}
-                          onCheckedChange={(val) => setSchedule({ ...schedule, allowHalfDay: val })}
-                        />
-                      ) : (
-                        <Badge variant={schedule.allowHalfDay ? "default" : "outline"} className={schedule.allowHalfDay ? "bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]" : "text-gray-500 text-[10px]"}>
-                          {schedule.allowHalfDay ? "Allowed" : "Disabled"}
-                        </Badge>
-                      )}
+                  {/* Card 3: Breaks policy (Exact Image 2) */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-4 text-emerald-600" />
+                      <h4 className="text-sm font-bold text-slate-900">Breaks policy</h4>
                     </div>
 
-                    {schedule.allowHalfDay && (
-                      <div className="space-y-1.5 pt-2 border-t border-gray-200/60">
-                        <Label className="text-xs font-semibold text-gray-700">Half Day Threshold Margin (minutes)</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-slate-700">Number of breaks</Label>
                         <Input
                           type="number"
                           min={0}
-                          value={schedule.halfDayMinutes}
-                          disabled={!isEditingSchedule}
-                          onChange={(e) => setSchedule({ ...schedule, halfDayMinutes: Number(e.target.value) })}
-                          className="bg-white border-gray-300 h-9 text-xs"
+                          value={schedule.numBreaks}
+                          onChange={(e) => setSchedule({ ...schedule, numBreaks: Number(e.target.value) })}
+                          className="bg-white border-slate-200 rounded-xl h-10 font-semibold text-sm focus:border-blue-500"
                         />
-                        <p className="text-[10px] text-gray-500 font-mono">
-                          {Math.floor(schedule.halfDayMinutes / 60)}h {schedule.halfDayMinutes % 60}m shift threshold required
-                        </p>
                       </div>
-                    )}
-                  </div>
 
-                  {/* Overtime */}
-                  <div className="space-y-3 p-4 rounded-xl bg-gray-50/70 border border-gray-200/80">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-bold text-gray-800">Overtime Allowed</Label>
-                      {isEditingSchedule ? (
-                        <Switch
-                          checked={schedule.overtimeAllowed}
-                          onCheckedChange={(val) => setSchedule({ ...schedule, overtimeAllowed: val })}
-                        />
-                      ) : (
-                        <Badge variant={schedule.overtimeAllowed ? "default" : "outline"} className={schedule.overtimeAllowed ? "bg-purple-100 text-purple-800 border-purple-200 text-[10px]" : "text-gray-500 text-[10px]"}>
-                          {schedule.overtimeAllowed ? "Allowed" : "Disabled"}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {schedule.overtimeAllowed && (
-                      <div className="space-y-1.5 pt-2 border-t border-gray-200/60">
-                        <Label className="text-xs font-semibold text-gray-700">Overtime Allowed (minutes)</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium text-slate-700">Break duration (minutes per break)</Label>
                         <Input
                           type="number"
                           min={0}
-                          value={schedule.overtimeMinutes}
-                          disabled={!isEditingSchedule}
-                          onChange={(e) => setSchedule({ ...schedule, overtimeMinutes: Number(e.target.value) })}
-                          className="bg-white border-gray-300 h-9 text-xs"
+                          value={schedule.breakMinutes}
+                          onChange={(e) => setSchedule({ ...schedule, breakMinutes: Number(e.target.value) })}
+                          className="bg-white border-slate-200 rounded-xl h-10 font-semibold text-sm focus:border-blue-500"
                         />
-                        <p className="text-[10px] text-gray-500 font-mono">
-                          Max {schedule.overtimeMinutes} mins ({ (schedule.overtimeMinutes / 60).toFixed(1) } hrs) extra time allowed
-                        </p>
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              {/* ── CARD 5: BREAKS ────────────────── */}
-              <div className="bg-white p-5 rounded-2xl border border-gray-200/80 space-y-4 shadow-2xs">
-                <h4 className="text-xs font-bold text-gray-800 flex items-center gap-1.5 border-b border-gray-100 pb-2">
-                  <Clock className="w-4 h-4 text-emerald-600" />
-                  Breaks Policy
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-700">Number of Breaks</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={schedule.numBreaks}
-                      disabled={!isEditingSchedule}
-                      onChange={(e) => setSchedule({ ...schedule, numBreaks: Number(e.target.value) })}
-                      className="bg-white border-gray-300 h-10"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-700">Break Duration (minutes per break)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={schedule.breakMinutes}
-                      disabled={!isEditingSchedule}
-                      onChange={(e) => setSchedule({ ...schedule, breakMinutes: Number(e.target.value) })}
-                      className="bg-white border-gray-300 h-10"
-                    />
-                  </div>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1775,19 +2495,22 @@ export const EmployeeDetail: React.FC = () => {
 
         {/* ── APPROVALS ──────────────────────────────────────────────────── */}
         <TabsContent value="approvals">
-          <Card>
-            <CardHeader>
-              <CardTitle>Leave & Approval Requests</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Card className="rounded-2xl border-slate-200/80 shadow-xs bg-white overflow-hidden">
+            <div className="flex flex-row items-center justify-between border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Leave & Approval Requests</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Leave applications and overtime authorization history</p>
+              </div>
+            </div>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Apply Date</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Policy</TableHead>
-                    <TableHead>Status</TableHead>
+                  <TableRow className="border-b border-slate-100 bg-slate-50/50">
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3 pl-6">Employee</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3">Apply Date</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3">Duration</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3">Policy</TableHead>
+                    <TableHead className="font-semibold text-xs text-slate-500 py-3 pr-6 text-right">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1826,7 +2549,7 @@ export const EmployeeDetail: React.FC = () => {
                     if (realApprovals.length === 0) {
                       return (
                         <TableRow>
-                          <TableCell colSpan={5} className="py-8 text-center text-gray-500">
+                          <TableCell colSpan={5} className="py-10 text-center text-slate-400 text-xs">
                             No leave or overtime approval requests found for this employee.
                           </TableCell>
                         </TableRow>
@@ -1834,27 +2557,36 @@ export const EmployeeDetail: React.FC = () => {
                     }
 
                     return realApprovals.map((req) => (
-                      <TableRow key={req.id}>
-                        <TableCell className="font-semibold">{req.employeeName}</TableCell>
-                        <TableCell className="font-mono text-xs">{req.applyDate}</TableCell>
-                        <TableCell>{req.duration}</TableCell>
+                      <TableRow key={req.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <TableCell className="pl-6 font-bold text-xs text-slate-800">{req.employeeName}</TableCell>
+                        <TableCell className="font-mono text-xs text-slate-500">{req.applyDate}</TableCell>
+                        <TableCell className="text-xs font-medium text-slate-700">{req.duration}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-xs">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-700">
                             {req.policy}
-                          </Badge>
+                          </span>
                         </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
+                        <TableCell className="pr-6 text-right">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                               req.rawStatus === "APPROVED"
-                                ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                                 : req.rawStatus === "REJECTED"
-                                ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
-                                : "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300"
-                            }
+                                ? "bg-red-50 text-red-700 border border-red-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                            }`}
                           >
+                            <span
+                              className={`size-1.5 rounded-full ${
+                                req.rawStatus === "APPROVED"
+                                  ? "bg-emerald-500"
+                                  : req.rawStatus === "REJECTED"
+                                  ? "bg-red-500"
+                                  : "bg-amber-500"
+                              }`}
+                            />
                             {req.status}
-                          </Badge>
+                          </span>
                         </TableCell>
                       </TableRow>
                     ));
@@ -1869,94 +2601,506 @@ export const EmployeeDetail: React.FC = () => {
         <TabsContent value="password-separation">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Change Password */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Change Password</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label>New Password</Label>
-                  <Input type="password" placeholder="••••••••" />
+            <Card className="rounded-2xl border-slate-200/80 shadow-xs bg-white overflow-hidden">
+              <div className="border-b border-slate-100 p-5 sm:p-6">
+                <h2 className="text-base font-bold text-slate-900">Change Password</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Reset authentication credentials for this user</p>
+              </div>
+              <CardContent className="p-5 sm:p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-700">New Password</Label>
+                  <Input type="password" placeholder="••••••••" className="rounded-xl border-slate-200 h-10" />
                 </div>
-                <div>
-                  <Label>Confirm Password</Label>
-                  <Input type="password" placeholder="••••••••" />
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-700">Confirm Password</Label>
+                  <Input type="password" placeholder="••••••••" className="rounded-xl border-slate-200 h-10" />
                 </div>
-                <Button className="w-full">
-                  <Lock className="mr-2 h-4 w-4" /> Update Password
+                <Button className="w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-10 shadow-xs">
+                  <Lock className="mr-2 size-4" /> Update Password
                 </Button>
               </CardContent>
             </Card>
 
             {/* Separation */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Separation</CardTitle>
+            <Card className="rounded-2xl border-slate-200/80 shadow-xs bg-white overflow-hidden">
+              <div className="flex flex-row items-center justify-between border-b border-slate-100 p-5 sm:p-6">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Employment separation</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Record resignation, termination or end of contract</p>
+                </div>
                 {!separation ? (
-                  <Button variant="destructive" size="sm" onClick={() => setShowSeparationModal(true)}>
-                    <UserX className="mr-2 h-4 w-4" /> Mark Separation
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!separationDate) {
+                        setSeparationDate(new Date().toISOString().split('T')[0]);
+                      }
+                      setShowSeparationModal(true);
+                    }}
+                    className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
+                  >
+                    <UserX className="size-3.5" /> Mark Separation
                   </Button>
                 ) : (
-                  <Badge variant="destructive">Separated</Badge>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                      <span className="size-1.5 rounded-full bg-red-500" /> Separated
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReinstateEmployee}
+                      className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold px-3 h-8"
+                    >
+                      Reinstate
+                    </Button>
+                  </div>
                 )}
-              </CardHeader>
-              <CardContent>
+              </div>
+              <CardContent className="p-5 sm:p-6">
                 {separation ? (
-                  <div className="space-y-2">
-                    <p><strong>Type:</strong> {separation.type}</p>
-                    <p><strong>Reason:</strong> {separation.reason}</p>
-                    <p><strong>Date:</strong> {separation.date}</p>
-                    <p><strong>Clearance Date:</strong> {separation.clearanceDate || 'N/A'}</p>
-                    <p><strong>Comments:</strong> {separation.comments || 'None'}</p>
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50/70 border border-red-200 text-xs text-red-900 font-medium">
+                      <AlertCircle className="size-4 text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="font-bold text-red-950">Employee Activities Restricted:</strong>
+                        <p className="text-red-800 mt-0.5 leading-relaxed">
+                          This employee account is marked as separated. System login, biometric punch/clock-in, and all active duties are restricted. All historical data, attendance logs, and past payroll records remain preserved.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Separation Type</p>
+                        <p className="text-sm font-bold text-slate-900 mt-0.5">{separation.type}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Reason</p>
+                        <p className="text-sm font-bold text-slate-900 mt-0.5">{separation.reason}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Separation Date</p>
+                        <p className="text-sm font-bold text-slate-900 mt-0.5">{separation.date ? moment(separation.date).format('DD MMM YYYY') : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Clearance Date</p>
+                        <p className="text-sm font-bold text-slate-900 mt-0.5">{separation.clearanceDate ? moment(separation.clearanceDate).format('DD MMM YYYY') : 'N/A'}</p>
+                      </div>
+                    </div>
+
+                    {separation.comments && (
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                        <span className="font-semibold text-slate-700">Comments / Clearance Notes:</span>
+                        <p className="text-slate-600 mt-1 whitespace-pre-wrap">{separation.comments}</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-gray-500">Employee is currently active.</p>
+                  <div className="flex items-center gap-2.5 p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-xs sm:text-sm font-medium text-emerald-800">
+                    <Check className="size-4 text-emerald-600 shrink-0" />
+                    <span>Employee is currently active.</span>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Separation Modal */}
+          {/* Separation Modal matching Image */}
           <Dialog open={showSeparationModal} onOpenChange={setShowSeparationModal}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Mark Employee Separation</DialogTitle>
+            <DialogContent className="rounded-2xl sm:max-w-lg p-6 bg-white shadow-2xl border-slate-200/90">
+              <DialogHeader className="space-y-0 text-left">
+                <div className="flex items-start gap-3 pb-2">
+                  <div className="size-11 rounded-full bg-red-50 text-red-500 flex items-center justify-center shrink-0 border border-red-100">
+                    <UserX className="size-5 text-red-500" />
+                  </div>
+                  <div className="flex-1 pr-6">
+                    <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                      Mark employee separation
+                    </DialogTitle>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {employee?.firstName} {employee?.lastName}
+                    </p>
+                  </div>
+                </div>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div>
-                  <Label>Separation Type *</Label>
-                  <Select value={separationType} onValueChange={setSeparationType}>
-                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                    <SelectContent>
-                      {separationTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+
+              <div className="space-y-4 py-2">
+                {/* Row 1: Separation type & Reason */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-slate-700">Separation type *</Label>
+                    <Select value={separationType} onValueChange={setSeparationType}>
+                      <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-xs sm:text-sm font-medium">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {separationTypes.map((t) => (
+                          <SelectItem key={t} value={t} className="text-xs sm:text-sm">
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-slate-700">Reason *</Label>
+                    <Select value={separationReason} onValueChange={setSeparationReason}>
+                      <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-xs sm:text-sm font-medium">
+                        <SelectValue placeholder="Select reason" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {separationReasons.map((r) => (
+                          <SelectItem key={r} value={r} className="text-xs sm:text-sm">
+                            {r}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div>
-                  <Label>Reason *</Label>
-                  <Select value={separationReason} onValueChange={setSeparationReason}>
-                    <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
-                    <SelectContent>
-                      {separationReasons.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+
+                {/* Row 2: Separation date & Clearance date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-slate-700">Separation date *</Label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-blue-500 pointer-events-none" />
+                      <Input
+                        type="date"
+                        value={separationDate}
+                        onChange={(e) => setSeparationDate(e.target.value)}
+                        className="pl-9 h-10 rounded-xl border-slate-200 bg-white text-xs sm:text-sm font-medium"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-slate-700">Clearance date</Label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-blue-500 pointer-events-none" />
+                      <Input
+                        type="date"
+                        value={clearanceDate}
+                        onChange={(e) => setClearanceDate(e.target.value)}
+                        className="pl-9 h-10 rounded-xl border-slate-200 bg-white text-xs sm:text-sm font-medium"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <Label>Separation Date *</Label>
-                  <Input type="date" value={separationDate} onChange={(e) => setSeparationDate(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Clearance Date</Label>
-                  <Input type="date" value={clearanceDate} onChange={(e) => setClearanceDate(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Comments</Label>
-                  <Textarea value={separationComments} onChange={(e) => setSeparationComments(e.target.value)} />
+
+                {/* Row 3: Comments */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-700">Comments</Label>
+                  <Textarea
+                    value={separationComments}
+                    onChange={(e) => setSeparationComments(e.target.value)}
+                    placeholder=""
+                    className="rounded-xl border-slate-200 bg-white min-h-[90px] text-xs sm:text-sm resize-none"
+                  />
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setShowSeparationModal(false)}>Cancel</Button>
-                <Button variant="destructive" onClick={handleMarkSeparation}>Confirm Separation</Button>
+
+              <DialogFooter className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowSeparationModal(false)}
+                  className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold px-4 h-10"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleConfirmSeparation}
+                  className="rounded-xl bg-[#DC2626] hover:bg-red-700 text-white text-xs font-semibold px-5 h-10 shadow-xs"
+                >
+                  Confirm Separation
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ── HISTORY & AUDIT LOG ────────────────────────────────────────── */}
+        <TabsContent value="history">
+          <Card className="rounded-2xl border-slate-200/80 shadow-xs bg-white overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-base font-bold text-slate-900">Activity & Transfer History</h2>
+                  <Badge variant="outline" className="rounded-full bg-blue-50 text-blue-700 border-blue-200 font-semibold px-2.5 py-0.5 text-xs">
+                    {auditLogs.length} {auditLogs.length === 1 ? 'Record' : 'Records'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Chronological audit trail of department transfers (e.g. Tech to Sales / GMB), location moves, role updates, schedule modifications, and salary increments.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddLogModal(true)}
+                  className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
+                >
+                  <Plus className="size-3.5 text-blue-600" /> Record Transfer / Note
+                </Button>
+              </div>
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="px-5 sm:px-6 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-2 shrink-0 flex items-center gap-1">
+                <Filter className="size-3" /> Filter:
+              </span>
+              {[
+                { id: 'all', label: 'All Activity', count: auditLogs.length },
+                { id: 'transfers', label: 'Transfers', count: auditLogs.filter(l => l.category === 'Transfers' || l.type === 'TRANSFER' || l.type === 'LOCATION').length },
+                { id: 'job', label: 'Job & Role', count: auditLogs.filter(l => l.category === 'Job & Role' || l.type === 'ROLE' || l.type === 'STATUS' || l.type === 'SUPERVISOR').length },
+                { id: 'schedule', label: 'Schedule', count: auditLogs.filter(l => l.category === 'Schedule' || l.type === 'SCHEDULE').length },
+                { id: 'payroll', label: 'Payroll & Increments', count: auditLogs.filter(l => l.category === 'Payroll' || l.type === 'PAYROLL' || l.type === 'INCREMENT').length },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setHistoryFilter(tab.id)}
+                  className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    historyFilter === tab.id
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    historyFilter === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-slate-200/70 text-slate-600'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <CardContent className="p-5 sm:p-6">
+              {(() => {
+                const filtered = auditLogs.filter((log) => {
+                  if (historyFilter === 'all') return true;
+                  if (historyFilter === 'transfers') return log.category === 'Transfers' || log.type === 'TRANSFER' || log.type === 'LOCATION';
+                  if (historyFilter === 'job') return log.category === 'Job & Role' || log.type === 'ROLE' || log.type === 'STATUS' || log.type === 'SUPERVISOR';
+                  if (historyFilter === 'schedule') return log.category === 'Schedule' || log.type === 'SCHEDULE';
+                  if (historyFilter === 'payroll') return log.category === 'Payroll' || log.type === 'PAYROLL' || log.type === 'INCREMENT';
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-12 text-center">
+                      <div className="size-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                        <RotateCcw className="size-6" />
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-800">No activity logs in this category</h3>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                        Any department transfers, supervisor updates, schedule changes, or salary increments will be automatically logged here.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                    {filtered.map((log) => {
+                      const isTransfer = log.type === 'TRANSFER' || log.type === 'LOCATION';
+                      const isSchedule = log.type === 'SCHEDULE';
+                      const isPayroll = log.type === 'PAYROLL' || log.type === 'INCREMENT';
+                      const isSeparation = log.type === 'SEPARATION';
+                      const isRole = log.type === 'ROLE' || log.type === 'SUPERVISOR' || log.type === 'STATUS';
+
+                      let dotBg = 'bg-blue-600';
+                      let badgeColor = 'bg-blue-50 text-blue-700 border-blue-200';
+                      let IconComponent = UserCheck;
+
+                      if (isTransfer) {
+                        dotBg = 'bg-indigo-600';
+                        badgeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                        IconComponent = ArrowRightLeft;
+                      } else if (isSchedule) {
+                        dotBg = 'bg-amber-500';
+                        badgeColor = 'bg-amber-50 text-amber-700 border-amber-200';
+                        IconComponent = Clock;
+                      } else if (isPayroll) {
+                        dotBg = 'bg-emerald-600';
+                        badgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                        IconComponent = TrendingUp;
+                      } else if (isSeparation) {
+                        dotBg = 'bg-red-600';
+                        badgeColor = 'bg-red-50 text-red-700 border-red-200';
+                        IconComponent = UserX;
+                      } else if (isRole) {
+                        dotBg = 'bg-purple-600';
+                        badgeColor = 'bg-purple-50 text-purple-700 border-purple-200';
+                        IconComponent = ShieldCheck;
+                      }
+
+                      return (
+                        <div key={log.id} className="relative group">
+                          {/* Dot on timeline */}
+                          <div className={`absolute -left-6 sm:-left-8 top-1.5 size-4 rounded-full ${dotBg} border-4 border-white shadow-xs`} />
+                          
+                          <div className="bg-slate-50/70 hover:bg-slate-50/90 transition-all rounded-2xl p-4 sm:p-5 border border-slate-200/70 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${badgeColor}`}>
+                                  <IconComponent className="size-3.5" />
+                                  {log.type === 'TRANSFER' ? 'Department Transfer' : log.type === 'LOCATION' ? 'Location Transfer' : log.category}
+                                </span>
+                                <span className="font-bold text-sm text-slate-900">{log.title}</span>
+                              </div>
+                              <span className="text-[11px] font-medium text-slate-400">
+                                {log.date ? moment(log.date).format('DD MMM YYYY, hh:mm A') : 'Recently'}
+                              </span>
+                            </div>
+
+                            {/* Visual From -> To transfer pill */}
+                            {log.fromValue && log.toValue && (
+                              <div className="flex items-center gap-2 flex-wrap text-xs bg-white p-2.5 rounded-xl border border-slate-200/70">
+                                <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider">Change:</span>
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                                  {log.fromValue}
+                                </span>
+                                <ArrowRight className="size-3.5 text-slate-400" />
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold border border-blue-200">
+                                  {log.toValue}
+                                </span>
+                              </div>
+                            )}
+
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              {log.description}
+                            </p>
+
+                            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                              <span>Logged by: <strong className="text-slate-600 font-semibold">{log.actor || 'System / Admin'}</strong></span>
+                              <span className="text-slate-400 flex items-center gap-1">
+                                <Check className="size-3 text-emerald-500" /> Recorded
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Record Transfer / Note Modal */}
+          <Dialog open={showAddLogModal} onOpenChange={setShowAddLogModal}>
+            <DialogContent className="rounded-2xl sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <ArrowRightLeft className="size-4 text-blue-600" /> Record Department / Field Transfer
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-700">Transfer Type *</Label>
+                  <Select value={manualLogType} onValueChange={setManualLogType}>
+                    <SelectTrigger className="h-10 rounded-xl border-slate-200">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="TRANSFER">Department Transfer (e.g. Tech → Sales / GMB)</SelectItem>
+                      <SelectItem value="LOCATION">Branch / Location Transfer</SelectItem>
+                      <SelectItem value="ROLE">Role / Designation Change</SelectItem>
+                      <SelectItem value="SCHEDULE">Schedule / Shift Timing Note</SelectItem>
+                      <SelectItem value="NOTE">General Note / Milestone</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700">From (Previous) *</Label>
+                    <Input
+                      placeholder="e.g. Tech"
+                      value={manualLogFrom}
+                      onChange={(e) => setManualLogFrom(e.target.value)}
+                      className="rounded-xl border-slate-200 h-10"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700">To (New Field) *</Label>
+                    <Input
+                      placeholder="e.g. Sales / GMB"
+                      value={manualLogTo}
+                      onChange={(e) => setManualLogTo(e.target.value)}
+                      className="rounded-xl border-slate-200 h-10"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-700">Effective Date</Label>
+                  <Input
+                    type="date"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                    id="manual-log-date"
+                    className="rounded-xl border-slate-200 h-10"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-700">Remarks / Description</Label>
+                  <Textarea
+                    placeholder="e.g. Transferred to GMB team following internal restructuring."
+                    value={manualLogNote}
+                    onChange={(e) => setManualLogNote(e.target.value)}
+                    className="rounded-xl border-slate-200 min-h-[75px]"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setShowAddLogModal(false)} className="rounded-xl border-slate-200 text-xs font-semibold h-9">
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!manualLogFrom && !manualLogTo && !manualLogNote) {
+                      toast.error('Please enter transfer details');
+                      return;
+                    }
+                    const dateVal = (document.getElementById('manual-log-date') as HTMLInputElement)?.value;
+                    const typeTitle = manualLogType === 'TRANSFER'
+                      ? `Department Transfer: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
+                      : manualLogType === 'LOCATION'
+                      ? `Location Transfer: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
+                      : manualLogType === 'ROLE'
+                      ? `Role Change: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
+                      : 'Employment Milestone Recorded';
+
+                    appendAuditLog({
+                      type: manualLogType as any,
+                      category: manualLogType === 'TRANSFER' || manualLogType === 'LOCATION' ? 'Transfers' : 'Job & Role',
+                      title: typeTitle,
+                      fromValue: manualLogFrom || undefined,
+                      toValue: manualLogTo || undefined,
+                      description: manualLogNote || `Transferred from ${manualLogFrom || 'previous department'} to ${manualLogTo || 'new department'}.`,
+                      date: dateVal ? new Date(dateVal).toISOString() : new Date().toISOString(),
+                      actor: 'HR Admin',
+                    });
+                    toast.success('Transfer log recorded successfully');
+                    setShowAddLogModal(false);
+                    setManualLogFrom('');
+                    setManualLogTo('');
+                    setManualLogNote('');
+                  }}
+                  className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold h-9"
+                >
+                  Save Transfer Log
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

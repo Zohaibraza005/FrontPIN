@@ -1516,6 +1516,7 @@ const getStatsDetails = async (req, res) => {
         },
         department: { select: { id: true, title: true } },
         jobInfo: true,
+        Schedule: true,
         Attendance: {
           where: {
             OR: [
@@ -1529,6 +1530,16 @@ const getStatsDetails = async (req, res) => {
                 checkInTime: {
                   gte: searchStartUTC,
                   lte: searchEndUTC,
+                },
+              },
+              {
+                punches: {
+                  some: {
+                    punchTime: {
+                      gte: searchStartUTC,
+                      lte: searchEndUTC,
+                    },
+                  },
                 },
               },
             ],
@@ -1574,7 +1585,11 @@ const getStatsDetails = async (req, res) => {
         } else if (att.checkInTime) {
           attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
-        return attDateStr === targetDateStr;
+        if (attDateStr === targetDateStr) return true;
+        if (att.punches?.some((p) => moment(p.punchTime).tz(empTz).format("YYYY-MM-DD") === targetDateStr)) {
+          return true;
+        }
+        return false;
       });
 
       const att =
@@ -1625,10 +1640,95 @@ const getStatsDetails = async (req, res) => {
         }
       }
 
+      // Collect all raw biometric punches for this date
+      let dayPunches = matchedRecords.flatMap((r) => r.punches || []);
+      dayPunches = dayPunches.filter((p) => {
+        if (!p.punchTime) return false;
+        return moment(p.punchTime).tz(empTz).format("YYYY-MM-DD") === targetDateStr;
+      });
+      const uniquePunches = [];
+      const seenPunchIds = new Set();
+      for (const p of dayPunches) {
+        if (!seenPunchIds.has(p.id)) {
+          seenPunchIds.add(p.id);
+          uniquePunches.push(p);
+        }
+      }
+      uniquePunches.sort(
+        (a, b) => new Date(a.punchTime).getTime() - new Date(b.punchTime).getTime()
+      );
+
+      // Fallback: If no raw biometric punches exist, but check-in / check-out times are present, generate punch items
+      if (uniquePunches.length === 0 && (effectiveCheckIn || effectiveCheckOut)) {
+        if (effectiveCheckIn) {
+          uniquePunches.push({
+            id: `cin-${att?.id || emp.id}`,
+            type: "CHECK_IN",
+            punchTime: effectiveCheckIn,
+            device: att?.checkInDevice || "Biometric Terminal",
+            method: att?.checkInMethod || "Biometric",
+            ip: att?.checkInIP || null,
+          });
+        }
+        if (effectiveCheckOut) {
+          uniquePunches.push({
+            id: `cout-${att?.id || emp.id}`,
+            type: "CHECK_OUT",
+            punchTime: effectiveCheckOut,
+            device: att?.checkInDevice || "Biometric Terminal",
+            method: "Biometric",
+            ip: null,
+          });
+        }
+      }
+
+      // Collect all activities
+      let dayActivities = matchedRecords.flatMap((r) => r.activities || []);
+      const uniqueActivities = [];
+      const seenActIds = new Set();
+      for (const a of dayActivities) {
+        if (!seenActIds.has(a.id)) {
+          seenActIds.add(a.id);
+          uniqueActivities.push(a);
+        }
+      }
+      uniqueActivities.sort(
+        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+      );
+
+      // Calculate worked minutes
+      let workedMins = att?.totalWorkedMinutes ?? 0;
+      if (effectiveCheckIn && effectiveCheckOut && (!workedMins || workedMins === 0)) {
+        const inMs = new Date(effectiveCheckIn).getTime();
+        const outMs = new Date(effectiveCheckOut).getTime();
+        if (outMs > inMs) {
+          workedMins = Math.max(0, Math.min(660, Math.floor((outMs - inMs) / 60000) - (att?.totalBreakMinutes || 0)));
+        }
+      } else if (effectiveCheckIn && !effectiveCheckOut && targetDateStr === moment().tz(empTz).format("YYYY-MM-DD")) {
+        const inMs = new Date(effectiveCheckIn).getTime();
+        const nowMs = Date.now();
+        if (nowMs > inMs) {
+          const diffMins = Math.floor((nowMs - inMs) / 60000);
+          workedMins = Math.max(0, Math.min(diffMins, 660) - (att?.totalBreakMinutes || 0));
+        }
+      }
+
+      const otHours = Number(att?.overtimeHours) || 0;
+      const otMins = att?.overtimeMinutes ? Number(att?.overtimeMinutes) : Math.round(otHours * 60);
+
+      const empSched = Array.isArray(emp.Schedule) ? emp.Schedule[0] : emp.Schedule;
+      const shiftStartTime = att?.shiftStartTime || empSched?.startTime || "09:00";
+      const shiftEndTime = att?.shiftEndTime || empSched?.endTime || "18:00";
+      const empCode = emp.employeeId || emp.empCode || (emp.id ? `US-${emp.id}` : "");
+
       return {
         id: emp.id,
+        employeeId: empCode,
+        empCode: empCode,
         attendanceId: att?.id,
         name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
+        firstName: emp.firstName,
+        lastName: emp.lastName || "",
         email: emp.email || "N/A",
         department: emp.department?.title || "N/A",
         departmentId: emp.departmentId || emp.department?.id,
@@ -1636,10 +1736,17 @@ const getStatsDetails = async (req, res) => {
         status,
         clockIn,
         clockOut,
+        checkInTime: effectiveCheckIn || null,
+        checkOutTime: effectiveCheckOut || null,
         isLate,
         lateMinutes,
         late: isLate ? `${lateMinutes} min tardy` : "On time",
-        activities: att?.activities || [],
+        totalWorkedMinutes: workedMins,
+        overtimeMinutes: otMins,
+        shiftStartTime,
+        shiftEndTime,
+        activities: uniqueActivities,
+        punches: uniquePunches,
         jobInfo: emp.jobInfo || {},
         leaveType: leave?.leaveType?.name,
         leaveDates: leave

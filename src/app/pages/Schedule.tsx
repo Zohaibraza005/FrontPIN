@@ -700,6 +700,44 @@ export const Schedule: React.FC = () => {
     setEditModalOpen(true);
   };
 
+  const appendScheduleAuditLog = (empId: number | string, schedData: any, isNew: boolean = false) => {
+    try {
+      const key = `frontpin_audit_logs_${empId}`;
+      const raw = localStorage.getItem(key);
+      const logs = raw ? JSON.parse(raw) : [];
+      const daysStr = Array.isArray(schedData.days)
+        ? schedData.days.map((d: any) => typeof d === 'string' ? d : (d.day || d.name || d.dayFull)).join(', ')
+        : 'Mon - Fri';
+      const sStart = schedData.startTime || '09:00';
+      const sEnd = schedData.endTime || '18:00';
+
+      const format12h = (timeStr?: string) => {
+        if (!timeStr) return "09:00 AM";
+        const [h, m] = timeStr.split(":").map(Number);
+        if (isNaN(h)) return timeStr;
+        const period = h >= 12 ? "PM" : "AM";
+        const hour12 = h % 12 || 12;
+        return `${hour12}:${String(m || 0).padStart(2, "0")} ${period}`;
+      };
+
+      const logEntry = {
+        id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        type: 'SCHEDULE',
+        category: 'Schedule',
+        title: isNew ? 'Shift Schedule Assigned' : 'Shift Schedule & Timings Updated',
+        fromValue: schedData.prevShift || 'Previous Schedule',
+        toValue: `${daysStr} (${format12h(sStart)} - ${format12h(sEnd)})`,
+        description: `Schedule configuration saved: Shift hours ${format12h(sStart)} - ${format12h(sEnd)} for days [${daysStr}]. Overtime: ${schedData.overtimeAllowed ? `${schedData.overtimeMinutes}m` : 'No'}, Grace early-in: ${schedData.earlyInMinutes || 0}m, early-out: ${schedData.earlyOutMinutes || 0}m.`,
+        date: new Date().toISOString(),
+        actor: 'HR Admin',
+      };
+      logs.unshift(logEntry);
+      localStorage.setItem(key, JSON.stringify(logs));
+    } catch (err) {
+      console.error("Audit log error:", err);
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (!editingSchedule) return;
     if (!editDays.length) {
@@ -748,6 +786,22 @@ export const Schedule: React.FC = () => {
       };
 
       await scheduleAPI.updateSchedule(editingSchedule.id, payload);
+
+      if (editingSchedule.employeeId) {
+        const prevDays = Array.isArray(editingSchedule.days) 
+          ? editingSchedule.days.map((d: any) => typeof d === 'string' ? d : (d.day || d.name || d.dayFull)).join(', ') 
+          : 'Mon - Fri';
+        appendScheduleAuditLog(editingSchedule.employeeId, {
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          days: payload.days,
+          earlyInMinutes: payload.earlyInMinutes,
+          earlyOutMinutes: payload.earlyOutMinutes,
+          overtimeAllowed: payload.overtimeAllowed,
+          overtimeMinutes: payload.overtimeMinutes,
+          prevShift: `${prevDays} (${editingSchedule.startTime || '09:00'} - ${editingSchedule.endTime || '18:00'})`,
+        }, false);
+      }
 
       toast.success("Schedule updated successfully!");
 
@@ -1448,6 +1502,12 @@ export const Schedule: React.FC = () => {
 
                       if (res && res.data) {
                         const newItems = Array.isArray(res.data) ? res.data : [res.data];
+                        newItems.forEach((item: any) => {
+                          const targetEmpId = item.employeeId || item.employee?.id;
+                          if (targetEmpId) {
+                            appendScheduleAuditLog(targetEmpId, item, true);
+                          }
+                        });
                         setSchedules((prev) => {
                           const newEmpIds = new Set(newItems.map((n: any) => n.employeeId || n.employee?.id));
                           return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
@@ -1565,11 +1625,19 @@ export const Schedule: React.FC = () => {
 
                     if (res && res.data) {
                       const newItems = Array.isArray(res.data) ? res.data : [res.data];
+                      newItems.forEach((item: any) => {
+                        const targetEmpId = item.employeeId || item.employee?.id;
+                        if (targetEmpId) {
+                          appendScheduleAuditLog(targetEmpId, item, false);
+                        }
+                      });
                       setSchedules((prev) => {
                         const newEmpIds = new Set(newItems.map((n: any) => n.employeeId || n.employee?.id));
                         return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
                       });
                     }
+                    window.dispatchEvent(new CustomEvent('schedule-updated'));
+                    window.dispatchEvent(new CustomEvent('employee-updated'));
                     fetchSchedules();
                   } catch {
                     toast.error("Failed to overwrite schedules");
