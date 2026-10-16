@@ -79,6 +79,13 @@ function isOffDay(schedules, date, timezone = null) {
 async function findEmployee(biometricId, employeeName) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
 
+  // Permanently removed biometric IDs should never match or restore
+  const BLOCKED_BIO_IDS = ["1919", "001", "2385"];
+  if (bioIdStr && BLOCKED_BIO_IDS.includes(bioIdStr)) {
+    console.log(`[Biometric Punch] Skipped blocked/removed biometric ID: ${bioIdStr}`);
+    return null;
+  }
+
   // 1. Primary match by biometricId or employeeId
   if (bioIdStr) {
     const employee = await prisma.employee.findFirst({
@@ -188,13 +195,6 @@ async function findEmployee(biometricId, employeeName) {
     }
   } catch (err) {
     console.error("[Biometric Punch] Error checking deleted employees:", err.message);
-  }
-
-  // Permanently removed biometric IDs should never auto-provision
-  const BLOCKED_BIO_IDS = ["1919", "001"];
-  if (bioIdStr && BLOCKED_BIO_IDS.includes(bioIdStr)) {
-    console.log(`[Biometric Punch] Skipped blocked/removed biometric ID: ${bioIdStr}`);
-    return null;
   }
 
   // 4. Auto-provision new employee if completely new user punches on machine
