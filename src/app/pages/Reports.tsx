@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { scheduleOn } from "../utils/scheduleVersions";
 import {
   format,
   startOfMonth,
@@ -10,7 +11,12 @@ import {
   eachDayOfInterval,
   isAfter,
   startOfDay,
+  parse,
+  differenceInCalendarDays,
 } from "date-fns";
+
+const MAX_RANGE_DAYS = 400; // same limit as the attendance report API
+const ymd = (s: string) => parse(s, "yyyy-MM-dd", new Date());
 import {
   Card,
   CardContent,
@@ -62,7 +68,8 @@ import { to12h } from "../utils/time";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export const Reports: React.FC = () => {
-  const [dateRange, setDateRange] = useState("all");
+  // "thisMonth" | "custom"
+  const [dateRange, setDateRange] = useState("thisMonth");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [departmentId, setDepartmentId] = useState("all");
@@ -121,9 +128,8 @@ export const Reports: React.FC = () => {
       return { start, end, view: "yearly" };
     }
     if (dateRange === "custom" && startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      return { start, end, view: "custom" };
+      // parsed as local dates (new Date("yyyy-MM-dd") is UTC and can shift a day)
+      return { start: ymd(startDate), end: ymd(endDate), view: "custom" };
     }
     // Default or "all"
     const start = startOfMonth(now);
@@ -131,12 +137,30 @@ export const Reports: React.FC = () => {
     return { start, end, view: "monthly" };
   };
 
+  const customRangeDays =
+    dateRange === "custom" && startDate && endDate ? differenceInCalendarDays(ymd(endDate), ymd(startDate)) + 1 : 0;
+  const customRangeIncomplete = dateRange === "custom" && (!startDate || !endDate);
+  const customRangeTooLong = customRangeDays > MAX_RANGE_DAYS;
+
   useEffect(() => {
-    if (dateRange === "custom" && (!startDate || !endDate)) {
+    // custom range: load only once both ends are picked (same report logic as the month view)
+    if (customRangeIncomplete) return;
+    if (customRangeTooLong) {
+      toast.error(`Please pick a range of ${MAX_RANGE_DAYS} days or less`);
       return;
     }
     loadReports();
   }, [dateRange, startDate, endDate, departmentId, locationId, employeeId]);
+
+  const handleDateRangeChange = (value: string) => {
+    if (value === "custom" && (!startDate || !endDate)) {
+      // start from this month so data shows right away; the admin narrows/extends it
+      const now = new Date();
+      setStartDate(format(startOfMonth(now), "yyyy-MM-dd"));
+      setEndDate(format(now, "yyyy-MM-dd"));
+    }
+    setDateRange(value);
+  };
 
   const loadFilters = async () => {
     const [dep, loc] = await Promise.all([departmentAPI.getDepartments(), locationAPI.getLocations()]);
@@ -359,7 +383,7 @@ export const Reports: React.FC = () => {
 
         let isEmpDayOff = false;
         if (emp?.Schedule) {
-          const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
+          const scheduleList = scheduleOn(emp, dayStr);
           const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
           if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
             const dStr = format(cellDate, "EEE").toLowerCase();
@@ -495,7 +519,9 @@ export const Reports: React.FC = () => {
     const selectedEmpObj = employees.find((e) => String(e.id) === employeeId);
     const selectedEmpName = selectedEmpObj ? `${selectedEmpObj.firstName} ${selectedEmpObj.lastName || ""}`.trim() : "All Employees";
     const selectedLocName = locations.find((l) => String(l.id) === locationId)?.name || "All Locations";
-    const dateLabel = dateRange === "custom" ? `${startDate} to ${endDate}` : dateRange.toUpperCase();
+    const dateLabel = dateRange === "custom"
+      ? `${format(ymd(startDate), "dd MMM yyyy")} to ${format(ymd(endDate), "dd MMM yyyy")}`
+      : `This Month (${format(new Date(), "MMMM yyyy")})`;
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
@@ -687,16 +713,13 @@ export const Reports: React.FC = () => {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
-                <Select value={dateRange} onValueChange={setDateRange}>
+                <Select value={dateRange} onValueChange={handleDateRangeChange}>
                   <SelectTrigger className="w-[140px] h-9 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Time</SelectItem>
-                    <SelectItem value="thisWeek">This Week</SelectItem>
                     <SelectItem value="thisMonth">This Month</SelectItem>
-                    <SelectItem value="thisYear">This Year</SelectItem>
-                    <SelectItem value="custom">Custom Date</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -713,7 +736,8 @@ export const Reports: React.FC = () => {
                     setDate={(range: RangeType | undefined) => {
                       if (range?.from) {
                         setStartDate(format(range.from, "yyyy-MM-dd"));
-                        setEndDate(range.to ? format(range.to, "yyyy-MM-dd") : format(range.from, "yyyy-MM-dd"));
+                        // wait for the second click before loading
+                        setEndDate(range.to ? format(range.to, "yyyy-MM-dd") : "");
                       } else {
                         setStartDate("");
                         setEndDate("");
@@ -776,7 +800,13 @@ export const Reports: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className={`p-2 sm:p-3 transition-opacity ${loadingReport ? "opacity-50 pointer-events-none" : ""}`}>
-              {loadingReport && monthlyReportEmployees.length === 0 ? (
+              {customRangeIncomplete || customRangeTooLong ? (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  {customRangeTooLong
+                    ? `The selected range is ${customRangeDays} days. Please pick ${MAX_RANGE_DAYS} days or less.`
+                    : "Select the start and end date to load the report."}
+                </div>
+              ) : loadingReport && monthlyReportEmployees.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">Loading attendance...</div>
               ) : monthlyReportEmployees.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">
@@ -848,7 +878,7 @@ export const Reports: React.FC = () => {
 
                               let isEmpDayOff = false;
                               if (emp?.Schedule) {
-                                const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
+                                const scheduleList = scheduleOn(emp, dayStr);
                                 const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
                                 if (activeSched && Array.isArray(activeSched.days) && activeSched.days.length > 0) {
                                   const dStr = format(cellDate, "EEE").toLowerCase();

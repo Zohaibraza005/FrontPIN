@@ -2,6 +2,7 @@ const cron = require("node-cron");
 const prisma = require("../config/prisma");
 const { syncAllActiveDevices, processBiometricPunch } = require("../modules/devices/device.controller");
 const { autoCheckoutOverdueAttendances } = require("../modules/attendance/attendance.controller");
+const { applyDueScheduleVersions } = require("../modules/schedule/scheduleVersion.service");
 
 let machineSyncTask = null;
 let autoCheckoutTask = null;
@@ -49,8 +50,12 @@ function initAutoCheckoutCron() {
 
   console.log("[Cron] Scheduling automatic shift checkout every 2 minutes (cron: '*/2 * * * *')...");
 
+  // schedule changes dated for today become the live schedule (also right away on startup)
+  applyDueScheduleVersions().catch((err) => console.error("[Cron Schedule Versions Error]:", err.message));
+
   autoCheckoutTask = cron.schedule("*/2 * * * *", async () => {
     try {
+      await applyDueScheduleVersions().catch((err) => console.error("[Cron Schedule Versions Error]:", err.message));
       await autoCheckoutOverdueAttendances();
     } catch (err) {
       console.error("[Cron Auto-Checkout Error]:", err.message);

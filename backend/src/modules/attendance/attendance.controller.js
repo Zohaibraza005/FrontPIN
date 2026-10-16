@@ -2,6 +2,7 @@
 
 const prisma = require("../../config/prisma");
 const { notSeparatedBefore } = require("../users/separation.util");
+const { loadVersionMap, scheduleForDate, schedulesOnDate } = require("../schedule/scheduleVersion.service");
 const moment = require("moment-timezone");
 const {
   getDayOverrides,
@@ -130,6 +131,12 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
   }
 
   return { startTime, endTime };
+}
+
+// Local "YYYY-MM-DD" of an attendance date value ("YYYY-MM-DD" or a stored/ISO date)
+function localDateOf(dateValue, tz = "Asia/Karachi") {
+  if (typeof dateValue === "string" && dateValue.length === 10) return dateValue;
+  return moment(dateValue).tz(tz).format("YYYY-MM-DD");
 }
 
 // Manual edits must stay inside the employee's shift: from shift start (minus early-in margin)
@@ -1456,6 +1463,9 @@ exports.getAttendanceReport = async (req, res) => {
       }
     });
 
+    // Schedule history: each date is judged with the schedule that applied on that date
+    const scheduleVersionMap = await loadVersionMap(employees.map((e) => e.id));
+
     /* 🔥 Approved Overtimes */
     const approvedOvertimes = await prisma.overtime.findMany({
       where: {
@@ -1591,6 +1601,8 @@ exports.getAttendanceReport = async (req, res) => {
 
       const empTodayStr = moment().tz(empTz).format("YYYY-MM-DD");
       const serverTodayStr = moment().format("YYYY-MM-DD");
+      const empVersions = scheduleVersionMap.get(emp.id);
+      const currentSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
 
       const fullAttendance = allDates.map(dateStr => {
 
@@ -1605,7 +1617,8 @@ exports.getAttendanceReport = async (req, res) => {
 
         // Resolve Day Override for this employee on this date
         const dayOverride = resolveOverrideForEmployee(emp, dateStr, dayOverrides);
-        const isDayOff = isOffDay(emp.Schedule, dateStr, empTz, dayOverride);
+        const schedOfDay = scheduleForDate(currentSched, empVersions, dateStr);
+        const isDayOff = isOffDay(schedOfDay ? [schedOfDay] : emp.Schedule, dateStr, empTz, dayOverride);
 
         /* 🟡 If Leave Exists */
         if (leave) {
@@ -1644,7 +1657,7 @@ exports.getAttendanceReport = async (req, res) => {
           // shift start only matters for today
           let shiftHasNotStarted = false;
           if (isToday) {
-            const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+            const activeSched = schedOfDay;
             const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
             const sTime = dayShift?.startTime || activeSched?.startTime || "09:00";
             const shiftStartMoment = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
@@ -1680,7 +1693,7 @@ exports.getAttendanceReport = async (req, res) => {
 
         /* 🟢 Attendance Exists */
 
-        const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+        const activeSched = schedOfDay;
         const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
         const sTime = dayShift.startTime || activeSched?.startTime || "09:00";
         const eTime = dayShift.endTime || activeSched?.endTime || "18:00";
@@ -1971,6 +1984,7 @@ exports.getAttendanceReport = async (req, res) => {
             ? { designation: emp.jobInfo.designation, employmentStatus: emp.jobInfo.employmentStatus }
             : null,
           Schedule: (emp.Schedule || []).map((s) => ({ id: s.id, days: s.days, deletedAt: s.deletedAt })),
+          scheduleVersions: (empVersions || []).map((v) => ({ effectiveFrom: v.effectiveFrom, days: v.days, startTime: v.startTime, endTime: v.endTime, allowEarlyIn: v.allowEarlyIn, earlyInMinutes: v.earlyInMinutes, allowEarlyOut: v.allowEarlyOut, earlyOutMinutes: v.earlyOutMinutes, overtimeAllowed: v.overtimeAllowed, overtimeMinutes: v.overtimeMinutes })),
           attendance: fullAttendance.map((d) => ({ date: d.date, status: d.status })),
         };
       }
@@ -1979,6 +1993,7 @@ exports.getAttendanceReport = async (req, res) => {
       const { password, pin, Attendance, ...safeEmp } = emp;
       return {
         ...safeEmp,
+        scheduleVersions: (empVersions || []).map((v) => ({ effectiveFrom: v.effectiveFrom, days: v.days, startTime: v.startTime, endTime: v.endTime, allowEarlyIn: v.allowEarlyIn, earlyInMinutes: v.earlyInMinutes, allowEarlyOut: v.allowEarlyOut, earlyOutMinutes: v.earlyOutMinutes, overtimeAllowed: v.overtimeAllowed, overtimeMinutes: v.overtimeMinutes })),
         attendance: fullAttendance
       };
     });
@@ -2021,6 +2036,10 @@ exports.getAttendanceReport = async (req, res) => {
           company: true,
         }
       });
+      // judge this day with the schedule that applied on it
+      if (employee) {
+        employee.Schedule = await schedulesOnDate(employee, localDateOf(date, employee.company?.timezone || "Asia/Karachi"));
+      }
 
       if (employee && isOffDay(employee.Schedule, attendanceDate)) {
         if (status !== "OFF_DAY" && status !== "OFF") {
@@ -2244,6 +2263,10 @@ exports.getAttendanceReport = async (req, res) => {
           company: true,
         }
       });
+      // judge this day with the schedule that applied on it
+      if (employee) {
+        employee.Schedule = await schedulesOnDate(employee, localDateOf(date || targetDate, employee.company?.timezone || "Asia/Karachi"));
+      }
 
       if (employee && isOffDay(employee.Schedule, targetDate)) {
         if (status !== "OFF_DAY" && status !== "OFF") {
@@ -2745,8 +2768,12 @@ exports.exportAttendanceExcel = async (req, res) => {
       }
     }
 
+    const exportVersionMap = await loadVersionMap(employees.map((e) => e.id));
+
     // 3. Employee Data Rows - ONE CLEAN ROW PER EMPLOYEE
     employees.forEach((emp, empIdx) => {
+      const exportVersions = exportVersionMap.get(emp.id);
+      const exportCurrentSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
       const rowIndex = 3 + empIdx;
       const row = worksheet.getRow(rowIndex);
 
@@ -2788,7 +2815,8 @@ exports.exportAttendanceExcel = async (req, res) => {
         const leaveKey = `${emp.id}_${dateStr}`;
         const leave = leaveMap[leaveKey];
 
-        const dayOff = isOffDay(emp.Schedule, dateStr);
+        const schedOfDay = scheduleForDate(exportCurrentSched, exportVersions, dateStr);
+        const dayOff = isOffDay(schedOfDay ? [schedOfDay] : emp.Schedule, dateStr);
         const isFutureDay = moment(dateStr, "YYYY-MM-DD").isAfter(moment().startOf("day"));
 
         if (!dayOff) {
@@ -2816,7 +2844,7 @@ exports.exportAttendanceExcel = async (req, res) => {
 
         let st = (existing.status || "").toUpperCase();
         if (existing.checkInTime && st !== "LEAVE" && st !== "OFF_DAY") {
-          const activeSched = emp.Schedule?.find(s => !s.deletedAt) || emp.Schedule?.[0];
+          const activeSched = schedOfDay;
           const empTz = emp.company?.timezone || "Asia/Karachi";
           const dayShift = getScheduleShiftForDay(activeSched, dateStr, empTz);
           const sTime = dayShift.startTime || activeSched?.startTime || "09:00";

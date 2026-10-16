@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const { loadSnapshot, logSnapshotChanges } = require("./employeeLog.service");
+const { recordScheduleChange } = require("../schedule/scheduleVersion.service");
 const bcrypt = require("bcrypt");
 
 //////////////////////////////////////////////////////
@@ -332,27 +333,33 @@ exports.createEmployee = async (req, res) => {
     try {
       const maxHours = parsedPayroll.maxExtraHours ? parseInt(parsedPayroll.maxExtraHours) : (parsedPayroll.allowExtraHours ? 2 : 0);
       const isOtAllowed = Boolean(parsedPayroll.allowExtraHours || maxHours > 0);
-      await prisma.schedule.create({
-        data: {
-          employeeId: employee.id,
-          companyId: employee.companyId || null,
-          startTime: "09:00",
-          endTime: "18:00",
-          days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-          overtimeAllowed: isOtAllowed,
-          overtimeMinutes: maxHours > 0 ? maxHours * 60 : 120,
-          allowEarlyIn: true,
-          earlyInMargin: 15,
-          allowEarlyOut: true,
-          earlyOutMargin: 15,
-          allowHalfDay: false,
-          halfDayMinutes: 240,
-          breaksAllowed: true,
-          breakDurations: [15, 15],
-        },
-      });
+      const hasSchedule = await prisma.schedule.findFirst({ where: { employeeId: employee.id, deletedAt: null } });
+      if (!hasSchedule) {
+        const initialSchedule = await prisma.schedule.create({
+          data: {
+            employeeId: employee.id,
+            companyId: employee.companyId || null,
+            startTime: "09:00",
+            endTime: "18:00",
+            days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+            overtimeAllowed: isOtAllowed,
+            overtimeMinutes: maxHours > 0 ? maxHours * 60 : 120,
+            allowEarlyIn: true,
+            earlyInMinutes: 15,
+            allowEarlyOut: true,
+            earlyOutMinutes: 15,
+            allowHalfDay: false,
+            halfDayMinutes: 240,
+            breaksAllowed: true,
+            breakDurations: [15, 15],
+          },
+        });
+        // first schedule = baseline of the employee's schedule history
+        await recordScheduleChange({ employeeId: employee.id, before: null, after: initialSchedule, actorUser: req.user })
+          .catch((err) => console.warn("Initial schedule history note:", err.message));
+      }
     } catch (schedErr) {
-      console.warn("Initial schedule creation note:", schedErr.message);
+      console.error("Initial schedule creation failed:", schedErr.message);
     }
 
     return res.status(201).json({
@@ -560,13 +567,16 @@ exports.updateEmployee = async (req, res) => {
         const isOtAllowed = allowExtraHours !== undefined ? allowExtraHours : (finalMaxHours !== null ? finalMaxHours > 0 : false);
 
         if (activeSched) {
-          await prisma.schedule.update({
+          const updatedSched = await prisma.schedule.update({
             where: { id: activeSched.id },
             data: {
               overtimeAllowed: isOtAllowed,
               overtimeMinutes: finalMaxHours !== null ? finalMaxHours * 60 : activeSched.overtimeMinutes,
             },
           });
+          // overtime limit is part of the schedule history (applies from today)
+          await recordScheduleChange({ employeeId: activeSched.employeeId, before: activeSched, after: updatedSched, actorUser: req.user })
+            .catch((err) => console.warn("Schedule history note:", err.message));
         }
       } catch (schedErr) {
         console.warn("Schedule overtime sync error:", schedErr.message);

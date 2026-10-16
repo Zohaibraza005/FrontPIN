@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const { notSeparatedBefore } = require("../users/separation.util");
+const { loadVersionMap, scheduleForDate } = require("../schedule/scheduleVersion.service");
 const moment = require("moment-timezone");
 const { DateTime } = require("luxon"); // or import { DateTime } from 'luxon';
 /* ---------------------------------- */
@@ -1407,7 +1408,7 @@ const getAdminDashboardGraphs = async (req, res) => {
 const getStatsDetails = async (req, res) => {
   try {
     const { category } = req.params;
-    const { date: queryDate, location: queryLocation, department: queryDepartment } = req.query;
+    const { date: queryDate, location: queryLocation, department: queryDepartment, entity: queryEntity } = req.query;
     const user = req.user;
     const userId = user.id;
     const organizationId = user.orgId;
@@ -1445,6 +1446,14 @@ const getStatsDetails = async (req, res) => {
     // Department filter (departmentId)
     const isDeptFiltered = queryDepartment && String(queryDepartment).toUpperCase() !== "ALL" && !isNaN(Number(queryDepartment));
     const departmentFilter = isDeptFiltered ? { departmentId: Number(queryDepartment) } : {};
+
+    // Entity filter (entityId); "none" = employees without an entity
+    const entityFilter =
+      queryEntity && String(queryEntity).toLowerCase() === "none"
+        ? { entityId: null }
+        : queryEntity && String(queryEntity).toLowerCase() !== "all" && !isNaN(Number(queryEntity))
+        ? { entityId: Number(queryEntity) }
+        : {};
 
     let list = [];
 
@@ -1486,12 +1495,15 @@ const getStatsDetails = async (req, res) => {
         ...(role === "USER" ? { id: userId } : {}),
         ...locationFilter,
         ...departmentFilter,
+        ...entityFilter,
       },
       include: {
         company: {
           select: { timezone: true, name: true },
         },
         department: { select: { id: true, title: true } },
+        entity: { select: { id: true, name: true } },
+        Schedule: { where: { deletedAt: null } },
         jobInfo: true,
         Attendance: {
           where: {
@@ -1540,6 +1552,7 @@ const getStatsDetails = async (req, res) => {
     });
 
     const leaveMap = new Map(approvedLeaves.map((l) => [l.employeeId, l]));
+    const statsVersionMap = await loadVersionMap(empIds);
 
     // Construct full unified employee attendance status list
     const unifiedEmployeeList = allEmployees.map((emp) => {
@@ -1602,9 +1615,34 @@ const getStatsDetails = async (req, res) => {
         }
       }
 
+      // shift of that day (schedule history) + worked / overtime, as on the Attendance page
+      const currentSched = emp.Schedule?.find((sc) => !sc.deletedAt) || emp.Schedule?.[0];
+      const daySched = scheduleForDate(currentSched, statsVersionMap.get(emp.id), targetDateStr);
+      let workedMinutes = Number(att?.totalWorkedMinutes) || 0;
+      if (!workedMinutes && effectiveCheckIn) {
+        const endT = effectiveCheckOut ? new Date(effectiveCheckOut).getTime() : (targetDateStr === DateTime.now().setZone(empTz).toFormat("yyyy-MM-dd") ? Date.now() : 0);
+        if (endT > new Date(effectiveCheckIn).getTime()) {
+          workedMinutes = Math.max(0, Math.floor((endT - new Date(effectiveCheckIn).getTime()) / 60000) - (Number(att?.totalBreakMinutes) || 0));
+        }
+      }
+
       return {
         id: emp.id,
         attendanceId: att?.id,
+        employeeCode: emp.employeeId || null,
+        firstName: emp.firstName,
+        lastName: emp.lastName || "",
+        entityId: emp.entityId || emp.entity?.id || null,
+        entity: emp.entity?.name || null,
+        companyId: emp.companyId || null,
+        location: emp.company?.name || null,
+        checkInTime: leave ? null : effectiveCheckIn || null,
+        checkOutTime: leave ? null : effectiveCheckOut || null,
+        workedMinutes: leave ? 0 : workedMinutes,
+        overtimeMinutes: leave ? 0 : Number(att?.overtimeMinutes) || 0,
+        shiftStartTime: att?.shiftStartTime || daySched?.startTime || null,
+        shiftEndTime: att?.shiftEndTime || daySched?.endTime || null,
+        punches: att?.punches || [],
         name: `${emp.firstName} ${emp.lastName || ""}`.trim(),
         email: emp.email || "N/A",
         department: emp.department?.title || "N/A",
@@ -1680,6 +1718,7 @@ const getStatsDetails = async (req, res) => {
             ...(role === "USER" ? { id: userId } : {}),
             ...locationFilter,
             ...departmentFilter,
+            ...entityFilter,
           },
         };
 
@@ -1694,6 +1733,10 @@ const getStatsDetails = async (req, res) => {
                 email: true,
                 departmentId: true,
                 department: { select: { id: true, title: true } },
+                employeeId: true,
+                entityId: true,
+                entity: { select: { name: true } },
+                company: { select: { name: true } },
               },
             },
           },
@@ -1703,7 +1746,13 @@ const getStatsDetails = async (req, res) => {
         list = overtimes.map((o) => ({
           id: o.id,
           employeeId: o.employeeId,
-          name: `${o.employee.firstName} ${o.employee.lastName}`,
+          name: `${o.employee.firstName} ${o.employee.lastName || ""}`.trim(),
+          firstName: o.employee.firstName,
+          lastName: o.employee.lastName || "",
+          employeeCode: o.employee.employeeId || null,
+          entityId: o.employee.entityId || null,
+          entity: o.employee.entity?.name || null,
+          location: o.employee.company?.name || null,
           email: o.employee.email || "N/A",
           department: o.employee.department?.title || "N/A",
           departmentId: o.employee.departmentId || o.employee.department?.id,

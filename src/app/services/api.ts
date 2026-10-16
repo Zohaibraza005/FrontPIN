@@ -1384,10 +1384,13 @@ export const dashboardAPI = {
   },
 
 // Update in your api service (dashboardAPI)
-getStatsDetails: async (category: string, date: string, location: string, department?: string) => {
+getStatsDetails: async (category: string, date: string, location: string, department?: string, entity?: string) => {
   let url = `/dashboard/stats/${category}?date=${date}&location=${location}`;
   if (department && department.toLowerCase() !== "all") {
     url += `&department=${department}`;
+  }
+  if (entity && entity.toLowerCase() !== "all") {
+    url += `&entity=${entity}`;
   }
   return apiCall(url);
 },

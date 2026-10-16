@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { getEditWindow, timeOnRecordDate, isInsideWindow, windowLabel } from '../utils/shiftWindow';
+import { scheduleOn } from '../utils/scheduleVersions';
 import { mockAttendance, mockEmployees, mockSchedules } from '../services/mockData';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -399,7 +400,7 @@ export const getEmployeeScheduleForDate = (schedules: any, date: Date | string, 
 export const getEmployeeDailyStatus = (emp: any, date: Date | string): string => {
   const targetDateStr = getFormattedDateStr(date);
   const record = findAttendanceRecord(emp?.Attendance || emp?.attendance, targetDateStr);
-  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, date, record?.overrideType);
+  const isEmpDayOff = isScheduleOffDay(scheduleOn(emp, date), date, record?.overrideType);
   const isFutureDate = isAfter(startOfDay(new Date(date)), startOfDay(new Date()));
 
   const prevDateStr = format(subDays(new Date(date), 1), "yyyy-MM-dd");
@@ -416,7 +417,7 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
   );
 
   const isToday = isSameDay(date, new Date());
-  const sched = getEmployeeScheduleForDate(emp?.Schedule, date, record);
+  const sched = getEmployeeScheduleForDate(scheduleOn(emp, date), date, record);
   const sTime = sched?.startTime || "09:00";
   const [sh, sm] = sTime.split(":").map(Number);
   const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
@@ -434,7 +435,7 @@ export const getEmployeeDailyStatus = (emp: any, date: Date | string): string =>
   if (rawStatus === "LATE") rawStatus = "TARDY";
 
   if (record?.checkInTime && !isEmpDayOff && rawStatus !== "LEAVE") {
-    const sched = getEmployeeScheduleForDate(emp?.Schedule, date, record);
+    const sched = getEmployeeScheduleForDate(scheduleOn(emp, date), date, record);
     const graceMinutes = sched?.allowEarlyIn ? (Number(sched.earlyInMinutes) || 0) : 0;
     const sTime = sched?.startTime || "09:00";
     const [sh, sm] = sTime.split(":").map(Number);
@@ -780,14 +781,16 @@ export const Attendance: React.FC = () => {
     setViewRecord({
       ...record,
       employee: matchedEmp || record?.employee,
-      schedule: record?.schedule || matchedEmp?.Schedule,
+      schedule: record?.schedule || (matchedEmp ? scheduleOn(matchedEmp, record?.date) : undefined),
     });
     setViewPanelOpen(true);
   };
 
   const getRecordWindow = (rec: any) => {
     if (!rec) return null;
-    const sched = rec.schedule || rec.employee?.Schedule || report.find((e: any) => e.id === rec.employeeId)?.Schedule;
+    // the schedule that applied on the record's day (schedule history)
+    const empOfRec = rec.employee || report.find((e: any) => e.id === rec.employeeId);
+    const sched = rec.schedule || (empOfRec ? scheduleOn(empOfRec, rec.date) : undefined);
     return getEditWindow(sched, rec.date);
   };
 
@@ -861,7 +864,7 @@ export const Attendance: React.FC = () => {
     const cellDate = cellDateStr ? new Date(`${cellDateStr}T00:00:00`) : (day ? new Date(day) : new Date());
     const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
 
-    const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate, record?.overrideType);
+    const isEmpDayOff = isScheduleOffDay(scheduleOn(emp, cellDate), cellDate, record?.overrideType);
 
     const prevCellDateStr = format(subDays(cellDate, 1), "yyyy-MM-dd");
     const nextCellDateStr = format(addDays(cellDate, 1), "yyyy-MM-dd");
@@ -893,7 +896,7 @@ export const Attendance: React.FC = () => {
     );
 
     const isToday = isSameDay(day, new Date());
-    const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, day, record);
+    const daySchedule = getEmployeeScheduleForDate(scheduleOn(emp, day), day, record);
     const sTime = daySchedule?.startTime || "09:00";
     const [sh, sm] = sTime.split(":").map(Number);
     const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
@@ -911,7 +914,7 @@ export const Attendance: React.FC = () => {
     if (rawStatus === "LATE") rawStatus = "TARDY";
 
     if (effCellCheckIn && !isEmpDayOff && rawStatus !== "LEAVE") {
-      const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, day, record);
+      const daySchedule = getEmployeeScheduleForDate(scheduleOn(emp, day), day, record);
       const graceMinutes = daySchedule?.allowEarlyIn ? (Number(daySchedule.earlyInMinutes) || 0) : 0;
       const sTime = daySchedule?.startTime || "09:00";
       const [sh, sm] = sTime.split(":").map(Number);
@@ -1401,7 +1404,7 @@ export const Attendance: React.FC = () => {
       if (st === "LATE") st = "TARDY";
 
       if (rec?.checkInTime && st !== "LEAVE" && st !== "OFF_DAY") {
-        const daySched = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, rec);
+        const daySched = getEmployeeScheduleForDate(scheduleOn(emp, selectedDate), selectedDate, rec);
         const graceMins = daySched?.allowEarlyIn ? (Number(daySched.earlyInMinutes) || 0) : 0;
         const sTime = daySched?.startTime || "09:00";
         const [sh, sm] = sTime.split(":").map(Number);
@@ -1416,7 +1419,7 @@ export const Attendance: React.FC = () => {
       } else if (!st) {
         st = "ABSENT";
       }
-      const isOff = isScheduleOffDay(emp?.Schedule, selectedDate, rec?.overrideType) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
+      const isOff = isScheduleOffDay(scheduleOn(emp, selectedDate), selectedDate, rec?.overrideType) && st !== "PRESENT" && st !== "LATE" && st !== "TARDY" && st !== "LEAVE";
 
       if (st === "PRESENT") present++;
       else if (st === "LATE" || st === "TARDY") tardy++;
@@ -1494,7 +1497,7 @@ export const Attendance: React.FC = () => {
 
         const cellDate = new Date(`${dayStr}T00:00:00`);
         const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
-        const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
+        const isEmpDayOff = isScheduleOffDay(scheduleOn(emp, cellDate), cellDate);
         const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
         const isCheckInOnShift = checkInDateStr === dayStr || (checkInDateStr === format(subDays(cellDate, 1), "yyyy-MM-dd") && !isEmpDayOff);
         const hasActualCheckInOnThisDate = Boolean(
@@ -1638,7 +1641,7 @@ export const Attendance: React.FC = () => {
 
                   const cellDate = new Date(`${dayStr}T00:00:00`);
                   const isFutureDay = isAfter(startOfDay(cellDate), startOfDay(new Date()));
-                  const isEmpDayOff = isScheduleOffDay(emp?.Schedule, cellDate);
+                  const isEmpDayOff = isScheduleOffDay(scheduleOn(emp, cellDate), cellDate);
                   const checkInDateStr = record?.checkInTime ? getFormattedDateStr(record.checkInTime) : null;
                   const isCheckInOnShift = checkInDateStr === dayStr || (checkInDateStr === format(subDays(cellDate, 1), "yyyy-MM-dd") && !isEmpDayOff);
                   const hasActualCheckInOnThisDate = Boolean(
@@ -2170,7 +2173,7 @@ export const Attendance: React.FC = () => {
                       const otHours = Number(record?.overtimeHours) || 0;
                       const otMins = record?.overtimeMinutes ? Number(record?.overtimeMinutes) : Math.round(otHours * 60);
 
-                      const isEmpDayOff = isScheduleOffDay(emp?.Schedule, selectedDate, record?.overrideType);
+                      const isEmpDayOff = isScheduleOffDay(scheduleOn(emp, selectedDate), selectedDate, record?.overrideType);
                       const isFutureDate = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
 
                       const prevDateStr = format(subDays(selectedDate, 1), "yyyy-MM-dd");
@@ -2203,7 +2206,7 @@ export const Attendance: React.FC = () => {
                       );
 
                       const isToday = isSameDay(selectedDate, new Date());
-                      const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
+                      const daySchedule = getEmployeeScheduleForDate(scheduleOn(emp, selectedDate), selectedDate, record);
                       const sTime = daySchedule?.startTime || "09:00";
                       const [sh, sm] = sTime.split(":").map(Number);
                       const shiftStartTotalMins = (!isNaN(sh) ? sh : 9) * 60 + (!isNaN(sm) ? sm : 0);
@@ -2221,7 +2224,7 @@ export const Attendance: React.FC = () => {
                       if (rawStatus === "LATE") rawStatus = "TARDY";
 
                       if (effCheckIn && !isEmpDayOff && rawStatus !== "LEAVE") {
-                        const daySchedule = getEmployeeScheduleForDate(emp?.Schedule, selectedDate, record);
+                        const daySchedule = getEmployeeScheduleForDate(scheduleOn(emp, selectedDate), selectedDate, record);
                         const graceMinutes = daySchedule?.allowEarlyIn ? (Number(daySchedule.earlyInMinutes) || 0) : 0;
                         const sTime = daySchedule?.startTime || "09:00";
                         const [sh, sm] = sTime.split(":").map(Number);
@@ -2273,9 +2276,9 @@ export const Attendance: React.FC = () => {
                         totalBreakMinutes: record?.totalBreakMinutes ?? 0,
                         employeeId: record?.employeeId ?? emp.id,
                         employee: emp,
-                        schedule: emp?.Schedule,
-                        shiftStartTime: record?.shiftStartTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.startTime : emp?.Schedule?.startTime),
-                        shiftEndTime: record?.shiftEndTime || (Array.isArray(emp?.Schedule) ? emp.Schedule[0]?.endTime : emp?.Schedule?.endTime),
+                        schedule: scheduleOn(emp, selectedDate),
+                        shiftStartTime: record?.shiftStartTime || scheduleOn(emp, selectedDate)[0]?.startTime,
+                        shiftEndTime: record?.shiftEndTime || scheduleOn(emp, selectedDate)[0]?.endTime,
                         status: isOffDayRow ? "OFF_DAY" : (rawStatus === "LATE" ? "TARDY" : rawStatus),
                         overtimeHours: otHours,
                         overtimeMinutes: otMins,
@@ -2818,7 +2821,7 @@ export const Attendance: React.FC = () => {
         <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl p-0 gap-0 shadow-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
           {viewRecord && (() => {
             const targetEmp = viewRecord.employee || report.find((e) => e.id === viewRecord.employeeId) || employees.find((e) => e.id === viewRecord.employeeId);
-            const empSched = viewRecord.schedule || targetEmp?.Schedule;
+            const empSched = viewRecord.schedule || (targetEmp ? scheduleOn(targetEmp, viewRecord.date) : undefined);
             const daySchedule = getEmployeeScheduleForDate(empSched, viewRecord.date, viewRecord);
             const companyObj = targetEmp?.company || locations.find((l) => String(l.id) === String(targetEmp?.companyId || (Array.isArray(empSched) ? empSched[0]?.companyId : empSched?.companyId)));
             const locName = companyObj?.name || companyObj?.title || "";

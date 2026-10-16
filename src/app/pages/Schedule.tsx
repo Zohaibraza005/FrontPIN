@@ -74,6 +74,21 @@ import { employeeAPI, departmentAPI, locationAPI, scheduleAPI } from "../service
 import { useAuth } from "../contexts/AuthContext";
 
 import { timeRange12h } from "../utils/time";
+import { DatePicker } from "../components/ui/date-picker";
+import { format as formatDate } from "date-fns";
+
+const todayStr = () => formatDate(new Date(), "yyyy-MM-dd");
+
+// "Effective from" picker: past days keep the old schedule, the new one applies from this date
+const EffectiveFromField = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+  <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/30 p-3 space-y-1.5">
+    <Label className="text-xs font-semibold text-gray-700 dark:text-gray-300">Effective from</Label>
+    <DatePicker value={value} onChange={(e) => onChange(e.target.value || todayStr())} className="h-10 w-full bg-white dark:bg-gray-950" />
+    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+      Attendance before this date keeps the old schedule. Pick a later date to schedule the change in advance.
+    </p>
+  </div>
+);
 type ShiftType = "day" | "evening" | "night";
 
 const SHIFT_TYPES: {
@@ -232,6 +247,7 @@ export const Schedule: React.FC = () => {
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [overwriteIds, setOverwriteIds] = useState<number[]>([]);
   const [showOverwriteModal, setShowOverwriteModal] = useState(false);
+  const [overwriteEffectiveFrom, setOverwriteEffectiveFrom] = useState(todayStr());
 
   // ── View Details Modal State ────────────────────────────────────────
   const [viewModalOpen, setViewModalOpen] = useState(false);
@@ -239,6 +255,7 @@ export const Schedule: React.FC = () => {
 
   // ── Edit Schedule Modal State ────────────────────────────────────────
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editEffectiveFrom, setEditEffectiveFrom] = useState(todayStr());
   const [editingSchedule, setEditingSchedule] = useState<any>(null);
   const [editDays, setEditDays] = useState<string[]>([]);
   const [editShiftType, setEditShiftType] = useState<ShiftType>("day");
@@ -700,6 +717,7 @@ export const Schedule: React.FC = () => {
     setEditNumBreaks(durs.length);
     setEditBreakDurations(durs);
 
+    setEditEffectiveFrom(todayStr());
     setEditModalOpen(true);
   };
 
@@ -748,9 +766,19 @@ export const Schedule: React.FC = () => {
         half_day_minutes: editAllowHalfDay ? editHalfDayMinutes : null,
         breaksAllowed: editBreaksAllowed,
         breakDurations: editBreaksAllowed ? editBreakDurations : [],
+        effectiveFrom: editEffectiveFrom,
       };
 
-      await scheduleAPI.updateSchedule(editingSchedule.id, payload);
+      const updateRes = await scheduleAPI.updateSchedule(editingSchedule.id, payload);
+
+      if (updateRes?.scheduled) {
+        // future-dated: today's schedule stays as it is until that date
+        toast.success(updateRes.message || "Schedule change saved for a later date");
+        setEditModalOpen(false);
+        setEditingSchedule(null);
+        window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: editingSchedule.employeeId } }));
+        return;
+      }
 
       toast.success("Schedule updated successfully!");
 
@@ -1462,6 +1490,7 @@ export const Schedule: React.FC = () => {
                     } catch (err: any) {
                       if (err.status === 409) {
                         setConflicts(err.data.conflictingEmployees);
+                        setOverwriteEffectiveFrom(todayStr());
                         setShowOverwriteModal(true);
                       } else {
                         toast.error(err?.data?.message || "Failed to create schedule");
@@ -1490,6 +1519,7 @@ export const Schedule: React.FC = () => {
             <p className="text-sm text-gray-600">
               The following employees already have schedules assigned. Select which ones to overwrite:
             </p>
+            <EffectiveFromField value={overwriteEffectiveFrom} onChange={setOverwriteEffectiveFrom} />
             <div className="flex justify-end">
               <Button
                 variant="outline"
@@ -1558,11 +1588,12 @@ export const Schedule: React.FC = () => {
                       breaksAllowed,
                       breakDurations,
                       overwriteEmployeeIds: overwriteIds,
+                      effectiveFrom: overwriteEffectiveFrom,
                     };
 
                     const res = await scheduleAPI.createSchedule(payload);
 
-                    toast.success("Schedules overwritten successfully!");
+                    toast.success(res?.message && res.message !== "Schedule created successfully" ? res.message : "Schedules overwritten successfully!");
                     setShowOverwriteModal(false);
                     setNewScheduleOpen(false);
 
@@ -2160,6 +2191,8 @@ export const Schedule: React.FC = () => {
                   </Badge>
                 )}
               </div>
+
+              <EffectiveFromField value={editEffectiveFrom} onChange={setEditEffectiveFrom} />
 
               {/* Working Schedule Section */}
               <div className="space-y-5">

@@ -71,6 +71,8 @@ export const EmployeeDetail: React.FC = () => {
   const [isEditingJob, setIsEditingJob] = useState(false);
   const [isEditingPayroll, setIsEditingPayroll] = useState(false);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
+  // schedule changes apply from this date; earlier attendance keeps the old schedule
+  const [scheduleEffectiveFrom, setScheduleEffectiveFrom] = useState(moment().format("YYYY-MM-DD"));
   const [showIncrementModal, setShowIncrementModal] = useState(false);
   const [showSeparationModal, setShowSeparationModal] = useState(false);
   
@@ -532,6 +534,7 @@ export const EmployeeDetail: React.FC = () => {
       });
       toast.success('Payroll information updated successfully');
       setIsEditingPayroll(false);
+      fetchLogs();
       window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
       window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { employeeId: id } }));
       fetchEmployee();
@@ -542,6 +545,7 @@ export const EmployeeDetail: React.FC = () => {
   };
 
   const handleSaveSchedule = async () => {
+    let scheduleRes: any = null;
     try {
       if (schedule.id) {
         const daysPayload = schedule.workingDays.map((dayName: string) => {
@@ -559,7 +563,7 @@ export const EmployeeDetail: React.FC = () => {
           ? daySchedules[schedule.workingDays[0]]
           : { startTime: schedule.shiftStart, endTime: schedule.shiftEnd };
 
-        await scheduleAPI.updateSchedule(schedule.id, {
+        scheduleRes = await scheduleAPI.updateSchedule(schedule.id, {
           days: daysPayload,
           startTime: firstWorkingDayTime.startTime || schedule.shiftStart,
           endTime: firstWorkingDayTime.endTime || schedule.shiftEnd,
@@ -573,10 +577,12 @@ export const EmployeeDetail: React.FC = () => {
           halfDayMinutes: schedule.allowHalfDay ? schedule.halfDayMinutes : null,
           breaksAllowed: schedule.numBreaks > 0,
           breakDurations: schedule.numBreaks > 0 ? [schedule.breakMinutes] : [],
+          effectiveFrom: scheduleEffectiveFrom,
         });
       }
-      toast.success('Schedule updated successfully');
+      toast.success(scheduleRes?.scheduled ? (scheduleRes.message || 'Schedule change saved for a later date') : 'Schedule updated successfully');
       setIsEditingSchedule(false);
+      fetchLogs();
       window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { scheduleId: schedule.id, employeeId: id } }));
       window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
       fetchEmployee();
@@ -698,6 +704,7 @@ export const EmployeeDetail: React.FC = () => {
     supervisor: 'Supervisor',
     designation: 'Designation',
     separation: 'Separation',
+    schedule: 'Schedule',
   };
   const rateSuffix = payroll.rateType === 'hourly' ? '/ hr' : payroll.rateType === 'daily' ? '/ day' : '/ mo';
 
@@ -1139,13 +1146,24 @@ export const EmployeeDetail: React.FC = () => {
                   <Button size="sm" onClick={handleSaveSchedule} className={saveBtnCls}><Save className="size-3.5" /> Save Schedule</Button>
                 </div>
               ) : (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingSchedule(true)} className={editBtnCls}>
+                <Button variant="outline" size="sm" onClick={() => { setScheduleEffectiveFrom(moment().format("YYYY-MM-DD")); setIsEditingSchedule(true); }} className={editBtnCls}>
                   <Edit className="size-3.5" /> Edit Schedule
                 </Button>
               )}
             </CardHeader>
 
             <CardContent className="p-5 sm:p-6 space-y-5">
+              {isEditingSchedule && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/30 p-4 grid sm:grid-cols-[220px_1fr] gap-3 items-center">
+                  <div>
+                    <Label className={fieldLabel}>Effective from</Label>
+                    <DatePicker value={scheduleEffectiveFrom} onChange={(e) => setScheduleEffectiveFrom(e.target.value || moment().format("YYYY-MM-DD"))} className={fieldInput} />
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    The new timing applies from this date. Attendance before it keeps the old schedule. Pick a later date to schedule the change in advance.
+                  </p>
+                </div>
+              )}
               {!isEditingSchedule ? (
                 <>
                   {/* View: weekly table */}
@@ -1784,7 +1802,7 @@ export const EmployeeDetail: React.FC = () => {
             <CardHeader className={cardHeaderCls}>
               <div>
                 <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Change History</CardTitle>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Status, entity, department, location, supervisor and separation changes</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Status, entity, department, location, supervisor, schedule and separation changes</p>
               </div>
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums">{logs.length} {logs.length === 1 ? 'entry' : 'entries'}</span>
             </CardHeader>

@@ -199,6 +199,7 @@ model Employee {
   deletedAt            DateTime?
   RefreshToken         RefreshToken[]
   changeLogs           EmployeeChangeLog[]
+  scheduleVersions     ScheduleVersion[]
   Project              Project[]
   ProjectLog           ProjectLog[]
   Task                 Task[]
@@ -367,6 +368,35 @@ model EmployeeChangeLog {
 
   @@index([employeeId])
   @@map("employeechangelog")
+}
+
+// Schedule history: each version applies from effectiveFrom ("YYYY-MM-DD", local date) until the next one
+model ScheduleVersion {
+  id              Int      @id @default(autoincrement())
+  employeeId      Int
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  effectiveFrom   String   @db.VarChar(10)
+  days            Json
+  startTime       String
+  endTime         String
+  companyId       Int?
+  allowEarlyIn    Boolean  @default(false)
+  earlyInMinutes  Int?
+  allowEarlyOut   Boolean  @default(false)
+  earlyOutMinutes Int?
+  overtimeAllowed Boolean  @default(false)
+  overtimeMinutes Int?
+  allowHalfDay    Boolean  @default(false)
+  halfDayMinutes  Int?
+  breaksAllowed   Boolean  @default(false)
+  breakDurations  Json?
+  appliedAt       DateTime?
+  changedById     Int?
+  changedByName   String?
+  createdAt       DateTime @default(now())
+
+  @@unique([employeeId, effectiveFrom])
+  @@map("scheduleversion")
 }
 
 model EmployeePayroll {

@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
+const { recordScheduleChange, parseEffectiveFrom, todayLocal } = require("./scheduleVersion.service");
 
 function getScheduleShiftForDay(schedule, date, timezone = null) {
   let startTime = schedule?.startTime || "09:00";
@@ -40,7 +41,8 @@ function getScheduleShiftForDay(schedule, date, timezone = null) {
   return { startTime, endTime };
 }
 
-async function syncEmployeeRecentAttendances(employeeId, updatedSchedule) {
+// fromDateStr: only days on/after this local date are re-evaluated (earlier days keep their old schedule)
+async function syncEmployeeRecentAttendances(employeeId, updatedSchedule, fromDateStr = null) {
   try {
     const employee = await prisma.employee.findUnique({
       where: { id: Number(employeeId) },
@@ -61,6 +63,7 @@ async function syncEmployeeRecentAttendances(employeeId, updatedSchedule) {
 
     for (const att of attendances) {
       const attDateStr = moment(att.checkInTime || att.date).tz(timezone).format("YYYY-MM-DD");
+      if (fromDateStr && attDateStr < fromDateStr) continue;
       const dayShift = getScheduleShiftForDay(updatedSchedule, attDateStr, timezone);
       const sTime = dayShift.startTime || updatedSchedule.startTime || "09:00";
       const eTime = dayShift.endTime || updatedSchedule.endTime || "18:00";
@@ -145,8 +148,11 @@ exports.createSchedule = async (req, res) => {
         half_day_minutes,
         breaksAllowed,
         breakDurations,
-        overwriteEmployeeIds = [] // 👈 NEW
+        overwriteEmployeeIds = [], // 👈 NEW
+        effectiveFrom
       } = req.body;
+      const effDate = parseEffectiveFrom(effectiveFrom);
+      const isFutureChange = effDate > todayLocal();
 
       const isHalfDay = Boolean(allowHalfDay || allow_half_day || halfDayAllowed || half_day_allowed);
       const halfDayMins = isHalfDay ? (halfDayMinutes || half_day_minutes || 240) : null;
@@ -259,10 +265,48 @@ exports.createSchedule = async (req, res) => {
         });
       }
 
+      const previousByEmp = new Map();
+      for (const sc of existingSchedules) {
+        const prev = previousByEmp.get(sc.employeeId);
+        if (!prev || sc.id > prev.id) previousByEmp.set(sc.employeeId, sc);
+      }
+      const newValuesFor = (emp) => ({
+        days,
+        startTime,
+        endTime,
+        companyId: companyId ? Number(companyId) : (scopeType === 'location' && selectedIds?.[0] ? Number(selectedIds[0]) : (emp.companyId || null)),
+        allowEarlyIn: allowEarlyIn || false,
+        earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
+        allowEarlyOut: allowEarlyOut || false,
+        earlyOutMinutes: allowEarlyOut ? earlyOutMinutes : null,
+        overtimeAllowed: overtimeAllowed || false,
+        overtimeMinutes: overtimeAllowed ? overtimeMinutes : null,
+        allowHalfDay: isHalfDay,
+        halfDayMinutes: halfDayMins,
+        breaksAllowed: breaksAllowed || false,
+        breakDurations: breaksAllowed ? breakDurations : []
+      });
+
+      // A change dated in the future only stores the new version; today's schedule stays as it is
+      const deferred = isFutureChange ? targetEmployees.filter(emp => previousByEmp.has(emp.id)) : [];
+      for (const emp of deferred) {
+        await recordScheduleChange({ employeeId: emp.id, before: previousByEmp.get(emp.id), after: newValuesFor(emp), effectiveFrom: effDate, actorUser: req.user });
+      }
+      const immediateTargets = targetEmployees.filter(emp => !deferred.includes(emp));
+      if (!immediateTargets.length) {
+        return res.json({
+          success: true,
+          scheduled: true,
+          effectiveFrom: effDate,
+          message: `Schedule change saved, it applies from ${moment(effDate).format("DD MMM YYYY")}`,
+          data: []
+        });
+      }
+
       // Soft-delete any existing active schedules for target employees so each employee has strictly ONE active schedule
       await prisma.schedule.updateMany({
         where: {
-          employeeId: { in: targetEmployees.map(e => e.id) },
+          employeeId: { in: immediateTargets.map(e => e.id) },
           deletedAt: null
         },
         data: {
@@ -275,24 +319,11 @@ exports.createSchedule = async (req, res) => {
       //////////////////////////////////////////////////
   
       const schedules = await prisma.$transaction(
-        targetEmployees.map(emp =>
+        immediateTargets.map(emp =>
           prisma.schedule.create({
             data: {
               employeeId: emp.id,
-              days,
-              startTime,
-              endTime,
-              companyId: companyId ? Number(companyId) : (scopeType === 'location' && selectedIds?.[0] ? Number(selectedIds[0]) : (emp.companyId || null)),
-              allowEarlyIn: allowEarlyIn || false,
-              earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
-              allowEarlyOut: allowEarlyOut || false,
-              earlyOutMinutes: allowEarlyOut ? earlyOutMinutes : null,
-              overtimeAllowed: overtimeAllowed || false,
-              overtimeMinutes: overtimeAllowed ? overtimeMinutes : null,
-              allowHalfDay: isHalfDay,
-              halfDayMinutes: halfDayMins,
-              breaksAllowed: breaksAllowed || false,
-              breakDurations: breaksAllowed ? breakDurations : []
+              ...newValuesFor(emp)
             },
             include: {
               employee: {
@@ -318,16 +349,21 @@ exports.createSchedule = async (req, res) => {
         )
       );
   
-      // Recalculate attendance for affected employees in real-time
+      // History + recalculation only for the days the new schedule applies to
       for (const s of schedules) {
-        if (s.employeeId) {
-          syncEmployeeRecentAttendances(s.employeeId, s).catch(() => {});
-        }
+        if (!s.employeeId) continue;
+        const prev = previousByEmp.get(s.employeeId) || null;
+        const { effectiveFrom: from } = await recordScheduleChange({
+          employeeId: s.employeeId, before: prev, after: s, effectiveFrom: effDate, actorUser: req.user
+        }).catch((err) => { console.error("[Schedule history]", err.message); return {}; });
+        syncEmployeeRecentAttendances(s.employeeId, s, prev ? (from || effDate) : null).catch(() => {});
       }
 
       return res.json({
         success: true,
-        message: "Schedule created successfully",
+        message: deferred.length
+          ? `Schedule created; ${deferred.length} existing schedule(s) change from ${moment(effDate).format("DD MMM YYYY")}`
+          : "Schedule created successfully",
         data: schedules
       });
   
@@ -456,30 +492,53 @@ exports.updateSchedule = async (req, res) => {
       halfDayMinutes,
       half_day_minutes,
       breaksAllowed,
-      breakDurations
+      breakDurations,
+      effectiveFrom
     } = req.body;
 
     const isHalfDayEdit = Boolean(allowHalfDay || allow_half_day || halfDayAllowed || half_day_allowed);
     const halfDayMinsEdit = isHalfDayEdit ? (halfDayMinutes || half_day_minutes || 240) : null;
 
+    const before = await prisma.schedule.findUnique({ where: { id: Number(id) } });
+    if (!before) {
+      return res.status(404).json({ success: false, message: "Schedule not found" });
+    }
+    const newValues = {
+      days,
+      startTime,
+      endTime,
+      companyId: companyId !== undefined ? (companyId ? Number(companyId) : null) : undefined,
+      allowEarlyIn,
+      earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
+      allowEarlyOut,
+      earlyOutMinutes: allowEarlyOut ? earlyOutMinutes : null,
+      overtimeAllowed,
+      overtimeMinutes: overtimeAllowed ? overtimeMinutes : null,
+      allowHalfDay: isHalfDayEdit,
+      halfDayMinutes: halfDayMinsEdit,
+      breaksAllowed,
+      breakDurations: breaksAllowed ? breakDurations : []
+    };
+    // fields not sent keep their current value
+    const afterValues = { ...before };
+    for (const [k, v] of Object.entries(newValues)) if (v !== undefined) afterValues[k] = v;
+
+    const effDate = parseEffectiveFrom(effectiveFrom);
+    if (effDate > todayLocal()) {
+      // Future-dated: keep the current schedule until that date
+      await recordScheduleChange({ employeeId: before.employeeId, before, after: afterValues, effectiveFrom: effDate, actorUser: req.user });
+      return res.json({
+        success: true,
+        scheduled: true,
+        effectiveFrom: effDate,
+        message: `Schedule change saved, it applies from ${moment(effDate).format("DD MMM YYYY")}`,
+        data: before
+      });
+    }
+
     const updated = await prisma.schedule.update({
       where: { id: Number(id) },
-      data: {
-        days,
-        startTime,
-        endTime,
-        companyId: companyId !== undefined ? (companyId ? Number(companyId) : null) : undefined,
-        allowEarlyIn,
-        earlyInMinutes: allowEarlyIn ? earlyInMinutes : null,
-        allowEarlyOut,
-        earlyOutMinutes: allowEarlyOut ? earlyOutMinutes : null,
-        overtimeAllowed,
-        overtimeMinutes: overtimeAllowed ? overtimeMinutes : null,
-        allowHalfDay: isHalfDayEdit,
-        halfDayMinutes: halfDayMinsEdit,
-        breaksAllowed,
-        breakDurations: breaksAllowed ? breakDurations : []
-      },
+      data: newValues,
       include: {
         employee: {
           select: {
@@ -503,7 +562,9 @@ exports.updateSchedule = async (req, res) => {
     });
 
     if (updated.employeeId) {
-      await syncEmployeeRecentAttendances(updated.employeeId, updated);
+      await recordScheduleChange({ employeeId: updated.employeeId, before, after: updated, effectiveFrom: effDate, actorUser: req.user })
+        .catch((err) => console.error("[Schedule history]", err.message));
+      await syncEmployeeRecentAttendances(updated.employeeId, updated, effDate);
     }
 
     res.json({

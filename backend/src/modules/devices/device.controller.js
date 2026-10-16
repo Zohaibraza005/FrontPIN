@@ -2,6 +2,7 @@ const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
 const { parseHikvisionEvent, startHikvisionStream } = require("./hikvision.service");
 const { fetchZkTecoLogs, testZkTecoConnection } = require("./zkteco.service");
+const { loadVersionMap, scheduleForDate } = require("../schedule/scheduleVersion.service");
 
 function getScheduleShiftForDay(schedule, date, timezone = null) {
   let startTime = schedule?.startTime || "09:00";
@@ -357,7 +358,23 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
  * 3. Store EVERY punch in AttendancePunch (deduplicating identical timestamps within 1 min).
  * 4. Calculate complete shift time from Check-In to Check-Out (up to 15 hours).
  */
-async function processBiometricPunch({ biometricId, punchTime, brand, deviceName, method, employeeName, direction }) {
+// Several bridge agents (one per admin PC) can relay the same device punch at the same moment.
+// Each check-then-insert below must therefore run one at a time per employee, otherwise both
+// requests see "no punch yet" and both insert it. Calls for the same person are queued here.
+const punchQueues = new Map();
+function processBiometricPunch(args) {
+  const key = String(args?.biometricId || args?.employeeName || "").trim().toLowerCase() || "_unknown";
+  const prev = punchQueues.get(key) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => processBiometricPunchUnlocked(args));
+  const tail = run.catch(() => {});
+  punchQueues.set(key, tail);
+  tail.then(() => {
+    if (punchQueues.get(key) === tail) punchQueues.delete(key);
+  });
+  return run;
+}
+
+async function processBiometricPunchUnlocked({ biometricId, punchTime, brand, deviceName, method, employeeName, direction }) {
   if (!biometricId && !employeeName) {
     console.warn(`[Biometric Punch] Skipped - No biometricId or employeeName provided`);
     return { success: false, reason: "No identifier provided" };
@@ -393,14 +410,18 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
   const todayDateString = pTime.format("YYYY-MM-DD");
 
-  const rawSchedule = employee.Schedule?.find((s) => !s.deletedAt) || { startTime: "09:00", endTime: "18:00" };
+  const currentSchedule = employee.Schedule?.find((s) => !s.deletedAt) || { startTime: "09:00", endTime: "18:00" };
+  // Schedule history: a punch is judged with the schedule that applied on its shift date
+  const empScheduleVersions = (await loadVersionMap([employee.id])).get(employee.id);
+  const scheduleOn = (dateStr) => scheduleForDate(currentSchedule, empScheduleVersions, dateStr) || currentSchedule;
+  let rawSchedule = currentSchedule;
 
   const yesterdayMoment = pTime.clone().subtract(1, "day");
   const yesterdayDateString = yesterdayMoment.format("YYYY-MM-DD");
 
   // Resolve shifts for yesterday and today
-  const yesterdayShift = getScheduleShiftForDay(rawSchedule, yesterdayDateString, timezone);
-  const todayShift = getScheduleShiftForDay(rawSchedule, todayDateString, timezone);
+  const yesterdayShift = getScheduleShiftForDay(scheduleOn(yesterdayDateString), yesterdayDateString, timezone);
+  const todayShift = getScheduleShiftForDay(scheduleOn(todayDateString), todayDateString, timezone);
 
   // Today's shift start time in employee's timezone
   const todayShiftStartTime = todayShift.startTime || rawSchedule.startTime || "09:00";
@@ -424,7 +445,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   // belong to yesterday's shift if the employee is on an afternoon/night shift OR has an active
   // afternoon/night shift attendance from yesterday (even if they re-enter via a CHECK_IN gate after midnight).
   let shiftDateMoment = pTime.clone();
-  const yesterdayWasOff = isOffDay(employee.Schedule, yesterdayDateString, timezone);
+  const yesterdayWasOff = isOffDay([scheduleOn(yesterdayDateString)], yesterdayDateString, timezone);
   if (pTime.isBefore(todayEarliestCheckInLocal) && pTime.hour() < 11) {
     const yesterdayAtt = await prisma.attendance.findFirst({
       where: {
@@ -472,6 +493,9 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const shiftStartUtc = shiftDateMoment.clone().startOf("day").utc().toDate();
   const shiftEndUtc = shiftDateMoment.clone().endOf("day").utc().toDate();
 
+  // from here on everything uses the schedule of the shift date
+  rawSchedule = scheduleOn(shiftDateString);
+  employee.Schedule = [rawSchedule];
   const dayShift = getScheduleShiftForDay(rawSchedule, shiftDateString, timezone);
   const schedule = {
     ...rawSchedule,
