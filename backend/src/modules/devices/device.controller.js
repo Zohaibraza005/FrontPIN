@@ -601,28 +601,19 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   };
 
   const recordPunch = async (attendanceId, type, time) => {
-    // Deduplicate against any punch for this employee within 1 minute
+    // Deduplicate against the exact same punch for this employee on the same device within 15 seconds
     const existing = await prisma.attendancePunch.findFirst({
       where: {
         employeeId: employee.id,
+        device: deviceTag,
+        type,
         punchTime: {
-          gte: moment(time).subtract(1, "minutes").toDate(),
-          lte: moment(time).add(1, "minutes").toDate(),
+          gte: moment(time).subtract(15, "seconds").toDate(),
+          lte: moment(time).add(15, "seconds").toDate(),
         },
       },
     });
     if (existing) {
-      if (deviceDir && existing.type !== deviceDir) {
-        await prisma.attendancePunch.update({
-          where: { id: existing.id },
-          data: {
-            type: deviceDir,
-            device: deviceTag,
-            method: punchMethod,
-            attendanceId: attendanceId || existing.attendanceId,
-          },
-        });
-      }
       return existing;
     }
     return await prisma.attendancePunch.create({
@@ -840,6 +831,16 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     // Attendance already exists
     // Real physical punch is ALWAYS stored in AttendancePunch
     await recordPunch(attendance.id, "CHECK_OUT", punchDate);
+
+    // If the employee checked in less than 2 minutes ago, treat as accidental exit swipe (store punch log but do not close shift)
+    if (attendance?.checkInTime) {
+      const inTimeMoment = moment(attendance.checkInTime);
+      const diffMinutesFromIn = pTime.diff(inTimeMoment, "minutes", true);
+      if (diffMinutesFromIn < 2) {
+        console.log(`[Biometric Punch] [${deviceTag}] Stored immediate CHECK-OUT punch within ${Math.round(diffMinutesFromIn * 60)}s of check-in, shift kept open for ${employee.firstName} ${employee.lastName}`);
+        return { success: true, type: "IMMEDIATE_CHECK_OUT_IGNORED", employee, attendance };
+      }
+    }
 
     // Update checkOutTime with latest exit punch (capped at cutoff if past cutoff)
     const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;

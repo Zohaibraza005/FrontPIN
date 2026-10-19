@@ -173,6 +173,12 @@ const getAdminDashboard = async (req, res) => {
         const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
         if (lastOut) effectiveCheckOut = lastOut.punchTime;
       }
+      if (effectiveCheckIn && effectiveCheckOut) {
+        const diffMins = moment(effectiveCheckOut).diff(moment(effectiveCheckIn), "minutes", true);
+        if (diffMins < 2) {
+          effectiveCheckOut = null;
+        }
+      }
 
       let status = "ABSENT";
       let isLate = false;
@@ -717,6 +723,12 @@ const getSupervisorDashboard = async (req, res) => {
       if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
         const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
         if (lastOut) effectiveCheckOut = lastOut.punchTime;
+      }
+      if (effectiveCheckIn && effectiveCheckOut) {
+        const diffMins = moment(effectiveCheckOut).diff(moment(effectiveCheckIn), "minutes", true);
+        if (diffMins < 2) {
+          effectiveCheckOut = null;
+        }
       }
 
       let status = "ABSENT";
@@ -1532,16 +1544,6 @@ const getStatsDetails = async (req, res) => {
                   lte: searchEndUTC,
                 },
               },
-              {
-                punches: {
-                  some: {
-                    punchTime: {
-                      gte: searchStartUTC,
-                      lte: searchEndUTC,
-                    },
-                  },
-                },
-              },
             ],
           },
           orderBy: { createdAt: "desc" },
@@ -1585,11 +1587,7 @@ const getStatsDetails = async (req, res) => {
         } else if (att.checkInTime) {
           attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
         }
-        if (attDateStr === targetDateStr) return true;
-        if (att.punches?.some((p) => moment(p.punchTime).tz(empTz).format("YYYY-MM-DD") === targetDateStr)) {
-          return true;
-        }
-        return false;
+        return attDateStr === targetDateStr;
       });
 
       const att =
@@ -1610,6 +1608,12 @@ const getStatsDetails = async (req, res) => {
       if (att && !effectiveCheckOut && att.punches?.length > 0) {
         const lastOut = [...att.punches].reverse().find((p) => p.type === "CHECK_OUT");
         if (lastOut) effectiveCheckOut = lastOut.punchTime;
+      }
+      if (effectiveCheckIn && effectiveCheckOut) {
+        const diffMins = moment(effectiveCheckOut).diff(moment(effectiveCheckIn), "minutes", true);
+        if (diffMins < 2) {
+          effectiveCheckOut = null;
+        }
       }
 
       let status = "absent";
@@ -1716,9 +1720,52 @@ const getStatsDetails = async (req, res) => {
       const otHours = Number(att?.overtimeHours) || 0;
       const otMins = att?.overtimeMinutes ? Number(att?.overtimeMinutes) : Math.round(otHours * 60);
 
-      const empSched = Array.isArray(emp.Schedule) ? emp.Schedule[0] : emp.Schedule;
-      const shiftStartTime = att?.shiftStartTime || empSched?.startTime || "09:00";
-      const shiftEndTime = att?.shiftEndTime || empSched?.endTime || "18:00";
+      const targetDayShort = moment(targetDateStr).format("ddd").toLowerCase();
+      const targetDayFull = moment(targetDateStr).format("dddd").toLowerCase();
+
+      let empSched = null;
+      if (Array.isArray(emp.Schedule)) {
+        empSched = emp.Schedule.find((s) => {
+          if (!s || s.deletedAt) return false;
+          let daysArr = s.days;
+          if (typeof daysArr === "string") {
+            try { daysArr = JSON.parse(daysArr); } catch {}
+          }
+          if (!Array.isArray(daysArr)) return false;
+          return daysArr.some((d) => {
+            const name = String(typeof d === "object" && d !== null ? (d.day || d.name || d.short || "") : d).trim().toLowerCase();
+            return name === targetDayShort || name === targetDayFull;
+          });
+        }) || emp.Schedule.find((s) => !s?.deletedAt) || emp.Schedule[0];
+      } else {
+        empSched = emp.Schedule;
+      }
+
+      let schedStart = empSched?.startTime || "09:00";
+      let schedEnd = empSched?.endTime || "18:00";
+
+      if (empSched?.days) {
+        let daysArr = empSched.days;
+        if (typeof daysArr === "string") {
+          try { daysArr = JSON.parse(daysArr); } catch {}
+        }
+        if (Array.isArray(daysArr)) {
+          const matchedDay = daysArr.find((d) => {
+            if (typeof d === "object" && d !== null) {
+              const name = String(d.day || d.name || d.short || "").trim().toLowerCase();
+              return name === targetDayShort || name === targetDayFull;
+            }
+            return false;
+          });
+          if (matchedDay) {
+            if (matchedDay.startTime) schedStart = matchedDay.startTime;
+            if (matchedDay.endTime) schedEnd = matchedDay.endTime;
+          }
+        }
+      }
+
+      const shiftStartTime = att?.shiftStartTime || schedStart;
+      const shiftEndTime = att?.shiftEndTime || schedEnd;
       const empCode = emp.employeeId || emp.empCode || (emp.id ? `US-${emp.id}` : "");
 
       return {

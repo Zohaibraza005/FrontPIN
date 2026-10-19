@@ -862,11 +862,11 @@ export const StatsDetails: React.FC = () => {
                               Present
                             </span>
                           );
-                        } else if (st === "late") {
+                        } else if (st === "tardy" || st === "late" || selectedEmployee.isLate) {
                           return (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
                               <span className="size-1.5 rounded-full bg-amber-500" />
-                              {selectedEmployee.late || "Late"}
+                              {selectedEmployee.late || "Tardy"}
                             </span>
                           );
                         } else if (st === "break") {
@@ -900,6 +900,13 @@ export const StatsDetails: React.FC = () => {
                       </span>
                       <span>•</span>
                       <span className="inline-flex items-center gap-1">
+                        <Clock className="size-3.5 text-indigo-500" />
+                        <span className="font-semibold text-indigo-700">
+                          {convertTo12Hour(selectedEmployee.shiftStartTime || "09:00")} – {convertTo12Hour(selectedEmployee.shiftEndTime || "18:00")}
+                        </span>
+                      </span>
+                      <span>•</span>
+                      <span className="inline-flex items-center gap-1">
                         <CalendarIcon className="size-3.5 text-gray-400" />
                         <span>{selectedDate}</span>
                       </span>
@@ -913,8 +920,21 @@ export const StatsDetails: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 3 Metric Cards */}
-                <div className="grid grid-cols-3 gap-3 mt-5">
+                {/* Metric Cards (Schedule, Clock In, Clock Out, Status) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+                  {/* Today's Schedule */}
+                  <div className="bg-indigo-50/70 border border-indigo-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-bold text-indigo-800 uppercase tracking-wider">Schedule</span>
+                      <div className="size-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                        <Clock className="size-3.5" />
+                      </div>
+                    </div>
+                    <p className="text-xs sm:text-sm font-bold font-mono text-gray-900 truncate" title={`${convertTo12Hour(selectedEmployee.shiftStartTime || "09:00")} – ${convertTo12Hour(selectedEmployee.shiftEndTime || "18:00")}`}>
+                      {convertTo12Hour(selectedEmployee.shiftStartTime || "09:00")} – {convertTo12Hour(selectedEmployee.shiftEndTime || "18:00")}
+                    </p>
+                  </div>
+
                   {/* Clock In */}
                   <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3 flex flex-col justify-between shadow-2xs">
                     <div className="flex items-center justify-between mb-1.5">
@@ -937,7 +957,13 @@ export const StatsDetails: React.FC = () => {
                       </div>
                     </div>
                     <p className="text-xs sm:text-sm font-bold font-mono text-gray-900 truncate">
-                      {selectedEmployee.clockOut || "—"}
+                      {selectedEmployee.clockOut && selectedEmployee.clockOut !== "—" ? (
+                        selectedEmployee.clockOut
+                      ) : selectedEmployee.clockIn && selectedEmployee.clockIn !== "—" && (selectedEmployee.status || "").toLowerCase() !== "absent" ? (
+                        <span className="text-emerald-600 font-sans font-semibold text-xs">On shift</span>
+                      ) : (
+                        "—"
+                      )}
                     </p>
                   </div>
 
