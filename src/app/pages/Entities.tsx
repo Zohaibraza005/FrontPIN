@@ -8,7 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Search, Plus, Edit, Trash2, Building2, RefreshCw } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Building2, RefreshCw, Shuffle, Users } from "lucide-react";
+import { Link } from "react-router";
+import { MoveEmployeesDialog } from "../components/entities/MoveEmployeesDialog";
 import { toast } from "sonner";
 import { entityAPI, locationAPI } from "../services/api";
 
@@ -27,6 +29,8 @@ interface Entity {
   _count?: {
     employees: number;
   };
+  /** not deleted, not admin, not separated */
+  activeEmployees?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +47,7 @@ export const Entities: React.FC = () => {
 
   // Modal State
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
 
   // Form Fields
@@ -209,6 +214,10 @@ export const Entities: React.FC = () => {
             <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
+          <Button variant="outline" onClick={() => setMoveOpen(true)} disabled={entities.length < 2}>
+            <Shuffle className="mr-2 size-4" />
+            Move Employees
+          </Button>
           <Button onClick={openAddDialog}>
             <Plus className="mr-2 size-4" />
             Add Entity
@@ -262,6 +271,7 @@ export const Entities: React.FC = () => {
                   <TableHead>Entity Name</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Location / Branch</TableHead>
+                  <TableHead>Active Employees</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -269,13 +279,13 @@ export const Entities: React.FC = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                       Loading entities...
                     </TableCell>
                   </TableRow>
                 ) : filteredEntities.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-12 text-gray-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Building2 className="size-10 text-gray-300" />
                         <p className="font-medium text-gray-600">No entities found</p>
@@ -303,6 +313,16 @@ export const Entities: React.FC = () => {
                       </TableCell>
                       <TableCell className="text-gray-600 text-sm">
                         {item.company?.name || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/entities/${item.id}/employees`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold tabular-nums bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-900"
+                          title="View active employees"
+                        >
+                          <Users className="size-3.5" />
+                          {item.activeEmployees ?? 0}
+                        </Link>
                       </TableCell>
                       <TableCell>{getStatusBadge(item.status)}</TableCell>
                       <TableCell className="text-right">
@@ -333,6 +353,13 @@ export const Entities: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      <MoveEmployeesDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        entities={entities}
+        onMoved={fetchEntities}
+      />
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

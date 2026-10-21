@@ -1,4 +1,13 @@
 const prisma = require("../../config/prisma");
+const { loadSnapshot, logSnapshotChanges } = require("../users/employeeLog.service");
+
+// Active = not deleted, not admin, not separated
+const activeEmployeeWhere = (orgId) => ({
+  organizationId: orgId,
+  deletedAt: null,
+  NOT: { role: "ADMIN" },
+  AND: [{ NOT: { jobInfo: { is: { employmentStatus: "Separated" } } } }],
+});
 
 // GET all entities for organization
 exports.getEntities = async (req, res) => {
@@ -26,7 +35,16 @@ exports.getEntities = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({ success: true, data: entities });
+    // active headcount per entity (separated employees are not counted)
+    const counts = await prisma.employee.groupBy({
+      by: ["entityId"],
+      where: { ...activeEmployeeWhere(orgId), entityId: { not: null } },
+      _count: { _all: true },
+    });
+    const countMap = new Map(counts.map((c) => [c.entityId, c._count._all]));
+    const data = entities.map((en) => ({ ...en, activeEmployees: countMap.get(en.id) || 0 }));
+
+    res.json({ success: true, data });
   } catch (error) {
     console.error("Error fetching entities:", error);
     res.status(500).json({ success: false, message: "Error fetching entities" });
@@ -303,5 +321,94 @@ exports.deleteEntity = async (req, res) => {
   } catch (error) {
     console.error("Error deleting entity:", error);
     res.status(500).json({ success: false, message: "Error deleting entity" });
+  }
+};
+
+// GET /entities/:id/employees – active employees of one entity
+exports.getEntityEmployees = async (req, res) => {
+  try {
+    const orgId = req.user.orgId;
+    const entityId = Number(req.params.id);
+    const entity = await prisma.entity.findFirst({
+      where: { id: entityId, organizationId: orgId, deletedAt: null },
+      select: { id: true, name: true, code: true, description: true, company: { select: { id: true, name: true } } },
+    });
+    if (!entity) return res.status(404).json({ success: false, message: "Entity not found" });
+
+    const employees = await prisma.employee.findMany({
+      where: { ...activeEmployeeWhere(orgId), entityId },
+      select: {
+        id: true,
+        employeeId: true,
+        biometricId: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+        canLogin: true,
+        profileImage: true,
+        entityId: true,
+        companyId: true,
+        departmentId: true,
+        department: { select: { id: true, title: true } },
+        company: { select: { id: true, name: true } },
+        jobInfo: { select: { designation: true, hiringDate: true, employmentStatus: true } },
+      },
+      orderBy: { firstName: "asc" },
+    });
+
+    res.json({ success: true, data: { entity, employees } });
+  } catch (error) {
+    console.error("Error fetching entity employees:", error);
+    res.status(500).json({ success: false, message: "Error fetching entity employees" });
+  }
+};
+
+// POST /entities/move-employees  { employeeIds: number[], toEntityId: number }
+// Employee ID / biometric ID stay the same; each move is written to the employee's History.
+exports.moveEmployees = async (req, res) => {
+  try {
+    if (!["ADMIN", "SUPERVISOR"].includes(req.user?.role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+    const orgId = req.user.orgId;
+    const toEntityId = Number(req.body?.toEntityId);
+    const ids = [...new Set((req.body?.employeeIds || []).map(Number).filter(Boolean))];
+    if (!toEntityId || !ids.length) {
+      return res.status(400).json({ success: false, message: "Select employees and a target entity" });
+    }
+
+    const target = await prisma.entity.findFirst({ where: { id: toEntityId, organizationId: orgId, deletedAt: null } });
+    if (!target) return res.status(404).json({ success: false, message: "Target entity not found" });
+
+    const employees = await prisma.employee.findMany({
+      where: { id: { in: ids }, organizationId: orgId, deletedAt: null },
+      select: { id: true, entityId: true },
+    });
+
+    let moved = 0;
+    let unchanged = 0;
+    for (const emp of employees) {
+      if (emp.entityId === toEntityId) {
+        unchanged++;
+        continue;
+      }
+      const before = await loadSnapshot(emp.id).catch(() => null);
+      await prisma.employee.update({ where: { id: emp.id }, data: { entityId: toEntityId } });
+      const after = await loadSnapshot(emp.id).catch(() => null);
+      await logSnapshotChanges(emp.id, before, after, req.user);
+      moved++;
+    }
+
+    return res.json({
+      success: true,
+      moved,
+      unchanged,
+      notFound: ids.length - employees.length,
+      message: `${moved} employee${moved === 1 ? "" : "s"} moved to ${target.name}`,
+    });
+  } catch (error) {
+    console.error("Error moving employees:", error);
+    res.status(500).json({ success: false, message: "Error moving employees" });
   }
 };

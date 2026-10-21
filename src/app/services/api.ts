@@ -334,6 +334,14 @@ export const entityAPI = {
     });
   },
 
+  getEntityEmployees: async (id: number | string) => {
+    return apiCall(`/entities/${id}/employees`);
+  },
+
+  moveEmployees: async (data: { employeeIds: number[]; toEntityId: number }) => {
+    return apiCall("/entities/move-employees", { method: "POST", body: JSON.stringify(data) });
+  },
+
   getNextEmployeeCode: async (id: number | string) => {
     return apiCall(`/entities/${id}/next-employee-code`);
   },
