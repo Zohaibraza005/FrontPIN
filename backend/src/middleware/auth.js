@@ -61,6 +61,10 @@ exports.protect = async (req, res, next) => {
 
     next();
   } catch (error) {
+    // the app renews an expired access token silently with its refresh token
+    if (error?.name === "TokenExpiredError") {
+      return res.status(401).json({ success: false, code: "TOKEN_EXPIRED", message: "Token expired" });
+    }
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token",

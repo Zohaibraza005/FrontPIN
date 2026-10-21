@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { authAPI, getCurrentUser, setAuthToken, setCurrentUser } from '../services/api';
+import { authAPI, getCurrentUser, setAuthToken, setCurrentUser, setRefreshToken } from '../services/api';
 
 interface User {
   id: string;
@@ -50,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response: any = await authAPI.login(email, password);
       if (response.success) {
         setAuthToken(response.data.accessToken);
+        setRefreshToken(response.data.refreshToken || null);
         setCurrentUser(response.data.user);
         setUser(response.data.user);
         navigate('/');
@@ -63,6 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setAuthToken(null);
+    setRefreshToken(null);
     setCurrentUser(null);
     setUser(null);
     navigate('/login');

@@ -106,11 +106,48 @@ export const setCurrentUser = (user: any) => {
 
 export const getCurrentUser = () => currentUser;
 
+// ── Session renewal ──────────────────────────────────────────────────────
+// The access token is short-lived. When it expires the app swaps the refresh token for a new
+// pair and repeats the request, so people stay signed in until they log out themselves.
+const REFRESH_KEY = 'refreshToken';
+export const setRefreshToken = (token: string | null) => {
+  if (token) localStorage.setItem(REFRESH_KEY, token);
+  else localStorage.removeItem(REFRESH_KEY);
+};
+
+let refreshInFlight: Promise<'ok' | 'expired'> | null = null;
+
+/** 'ok' = new tokens stored, 'expired' = must log in again. Throws on network errors (keep the session). */
+export function refreshSession(): Promise<'ok' | 'expired'> {
+  if (refreshInFlight) return refreshInFlight; // many requests may expire at once: refresh only once
+  refreshInFlight = (async () => {
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+    });
+    if (res.status === 401 || res.status === 403) return 'expired';
+    if (!res.ok) throw new Error('Could not renew the session');
+    const json = await res.json();
+    const data = json?.data || json;
+    if (!data?.accessToken) return 'expired';
+    setAuthToken(data.accessToken);
+    if (data.refreshToken) setRefreshToken(data.refreshToken);
+    return 'ok';
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
 // Generic API call function
 
 export async function apiCall(
   endpoint: string,
   options: RequestInit = {},
+  _isRetry = false,
 ): Promise<any> {
   const isFormData = options.body instanceof FormData;
 
@@ -172,10 +209,19 @@ export async function apiCall(
         errorData.code === 'AUTH_TOKEN_EXPIRED'
       );
 
-    if (isTokenExpired) {
+    if (isTokenExpired && !_isRetry && !endpoint.startsWith('/auth/')) {
+      let outcome: 'ok' | 'expired';
+      try {
+        outcome = await refreshSession();
+      } catch {
+        // offline / server unreachable: keep the session, just fail this request
+        const err: any = new Error('Connection problem, please try again');
+        err.status = 0;
+        throw err;
+      }
+      if (outcome === 'ok') return apiCall(endpoint, options, true);
       handleUnauthorized();
-      // You can also throw if the caller wants to show a message
-      throw new Error('Access token expired');
+      throw new Error('Session expired');
     }
 
     // Normal 401 (forbidden, not logged in, etc.) or other errors
@@ -202,6 +248,7 @@ function handleUnauthorized() {
   // Clear everything
   localStorage.removeItem('authToken');
   localStorage.removeItem('currentUser');
+  localStorage.removeItem(REFRESH_KEY);
   setAuthToken(null);
   setCurrentUser(null);
 
@@ -465,12 +512,16 @@ getAdminDashboard: async (companyId?: number | string) => {
       });
     }
     const query = new URLSearchParams(cleanParams).toString();
-    const token = localStorage.getItem("authToken");
-    const response = await fetch(`${API_BASE_URL}/attendance/export-excel?${query}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const doFetch = () =>
+      fetch(`${API_BASE_URL}/attendance/export-excel?${query}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+    let response = await doFetch();
+    if (response.status === 401 && (await refreshSession().catch(() => 'expired')) === 'ok') {
+      response = await doFetch();
+    }
 
     if (!response.ok) {
       throw new Error("Failed to export Excel file");

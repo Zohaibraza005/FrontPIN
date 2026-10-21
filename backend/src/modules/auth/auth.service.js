@@ -242,5 +242,35 @@ async function getMe(userId) {
   };
 }
 
-module.exports = { login, checkIdentifier, getMe };
+// Exchange a valid refresh token for a fresh pair (sliding session: every refresh extends it).
+// The user must still exist and be allowed to log in, so deleted / blocked accounts are signed out.
+async function refresh(refreshToken) {
+  const unauthorized = (msg) => {
+    const err = new Error(msg);
+    err.statusCode = 401;
+    return err;
+  };
+  if (!refreshToken) throw unauthorized("Session expired, please log in again");
+
+  let decoded;
+  try {
+    decoded = jwt.verify(refreshToken, env.jwtRefreshSecret);
+  } catch {
+    throw unauthorized("Session expired, please log in again");
+  }
+
+  const user = await prisma.employee.findFirst({
+    where: { id: Number(decoded.sub), deletedAt: null },
+    select: { id: true, role: true, organizationId: true, companyId: true, canLogin: true },
+  });
+  if (!user) throw unauthorized("Session expired, please log in again");
+  if (user.canLogin === false) throw unauthorized("Login is disabled for this employee");
+
+  return {
+    accessToken: signAccessToken({ sub: user.id, role: user.role, orgId: user.organizationId, companyId: user.companyId }),
+    refreshToken: signRefreshToken({ sub: user.id, orgId: user.organizationId }),
+  };
+}
+
+module.exports = { login, checkIdentifier, getMe, refresh };
 

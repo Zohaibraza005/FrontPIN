@@ -171,44 +171,26 @@ exports.createSchedule = async (req, res) => {
       //////////////////////////////////////////////////
   
       let employees = [];
-  
-      if (scopeType === "individual") {
+
+      // Everyone in scope except admins, deleted and separated employees
+      const ids = (selectedIds || []).map(Number).filter((n) => !isNaN(n));
+      const scopeField = { individual: "id", department: "departmentId", location: "companyId", entity: "entityId" }[scopeType];
+      if (scopeField) {
         employees = await prisma.employee.findMany({
           where: {
-            id: { in: selectedIds },
+            [scopeField]: { in: ids },
             organizationId: orgId,
             deletedAt: null,
-            NOT: { role: "ADMIN" }
+            NOT: { role: "ADMIN" },
+            AND: [{ NOT: { jobInfo: { is: { employmentStatus: "Separated" } } } }]
           }
         });
       }
-  
-      if (scopeType === "department") {
-        employees = await prisma.employee.findMany({
-          where: {
-            departmentId: { in: selectedIds },
-            organizationId: orgId,
-            deletedAt: null,
-            NOT: { role: "ADMIN" }
-          }
-        });
-      }
-  
-      if (scopeType === "location") {
-        employees = await prisma.employee.findMany({
-          where: {
-            companyId: { in: selectedIds },
-            organizationId: orgId,
-            deletedAt: null,
-            NOT: { role: "ADMIN" }
-          }
-        });
-      }
-  
+
       if (!employees.length) {
         return res.status(400).json({
           success: false,
-          message: "No valid employee targets found. Schedules cannot be created for Super Admin accounts."
+          message: "No valid employees found for this selection (admins and separated employees are excluded)."
         });
       }
   
@@ -385,11 +367,13 @@ exports.getSchedules = async (req, res) => {
     const userId = req.user.id;
 
     // Build where clause based on role
+    // separated employees are no longer scheduled, so they are left out of the list
     const whereClause = {
       deletedAt: null,
       employee: {
         organizationId: orgId,
-        NOT: { role: "ADMIN" }
+        NOT: { role: "ADMIN" },
+        AND: [{ NOT: { jobInfo: { is: { employmentStatus: "Separated" } } } }]
       }
     };
 
@@ -401,6 +385,7 @@ exports.getSchedules = async (req, res) => {
         organizationId: orgId,
         deletedAt: null,
         NOT: { role: "ADMIN" },
+        AND: [{ NOT: { jobInfo: { is: { employmentStatus: "Separated" } } } }],
         OR: [
           { id: userId },
           { supervisorId: userId }
@@ -420,6 +405,8 @@ exports.getSchedules = async (req, res) => {
             lastName: true,
             role: true,
             companyId: true,
+            entityId: true,
+            entity: { select: { id: true, name: true } },
             company: {
               select: {
                 id: true,

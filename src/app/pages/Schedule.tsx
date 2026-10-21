@@ -50,6 +50,7 @@ import {
   Search,
   Building2,
   MapPin,
+  Globe,
   User,
   RefreshCw,
   AlertTriangle,
@@ -70,7 +71,15 @@ import {
   TooltipTrigger,
 } from "../components/ui/tooltip";
 import { toast } from "sonner";
-import { employeeAPI, departmentAPI, locationAPI, scheduleAPI } from "../services/api";
+import { employeeAPI, departmentAPI, locationAPI, scheduleAPI, entityAPI } from "../services/api";
+import { isSeparated } from "../utils/employmentStatus";
+
+const SCOPE_LABELS: Record<string, string> = {
+  individual: "Employees",
+  location: "Locations",
+  department: "Departments",
+  entity: "Entities",
+};
 import { useAuth } from "../contexts/AuthContext";
 
 import { timeRange12h } from "../utils/time";
@@ -206,7 +215,7 @@ export const Schedule: React.FC = () => {
 
   // ── Create Schedule Form State ─────────────────────────────────────
   const [scopeType, setScopeType] = useState<
-    "individual" | "location" | "department"
+    "individual" | "location" | "department" | "entity"
   >("individual");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [scopeSearchQuery, setScopeSearchQuery] = useState("");
@@ -242,6 +251,8 @@ export const Schedule: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [entities, setEntities] = useState<any[]>([]);
+  const [filterEntity, setFilterEntity] = useState("all");
   const [loadingScope, setLoadingScope] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [conflicts, setConflicts] = useState<any[]>([]);
@@ -317,7 +328,9 @@ export const Schedule: React.FC = () => {
   const fetchEmployees = async () => {
     try {
       const res = await employeeAPI.getActiveEmployees();
-      const nonAdminEmps = (res.data || []).filter((e: any) => e.role !== 'ADMIN' && e.role !== 'admin');
+      const nonAdminEmps = (res.data || []).filter(
+        (e: any) => e.role !== 'ADMIN' && e.role !== 'admin' && !isSeparated(e.jobInfo?.employmentStatus)
+      );
       setEmployees(nonAdminEmps);
     } catch {
       // ignore
@@ -328,6 +341,16 @@ export const Schedule: React.FC = () => {
     try {
       const res = await departmentAPI.getDepartments();
       setDepartments(res.data || []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const fetchEntities = async () => {
+    try {
+      const res = await entityAPI.getEntities();
+      const list = res?.data ?? res;
+      setEntities(Array.isArray(list) ? list : []);
     } catch {
       // ignore
     }
@@ -352,6 +375,8 @@ export const Schedule: React.FC = () => {
           await fetchDepartments();
         } else if (scopeType === "location") {
           await fetchLocations();
+        } else if (scopeType === "entity") {
+          await fetchEntities();
         }
       } catch (err) {
         toast.error("Failed to load options");
@@ -366,6 +391,7 @@ export const Schedule: React.FC = () => {
   useEffect(() => {
     fetchSchedules();
     fetchLocations();
+    fetchEntities();
 
     const handleRealTimeSync = () => {
       fetchSchedules();
@@ -398,6 +424,7 @@ export const Schedule: React.FC = () => {
     if (scopeType === "individual") return employees;
     if (scopeType === "department") return departments;
     if (scopeType === "location") return locations;
+    if (scopeType === "entity") return entities;
     return [];
   };
 
@@ -601,9 +628,15 @@ export const Schedule: React.FC = () => {
         String(schedule.employee?.company?.id) === String(filterLocation) ||
         String(schedule.employee?.locationId) === String(filterLocation);
 
-      return matchesSearch && matchesLocation;
+      const empEntityId = String(schedule.employee?.entityId ?? schedule.employee?.entity?.id ?? "");
+      const matchesEntity =
+        isAgent ||
+        filterEntity === "all" ||
+        (filterEntity === "none" ? !empEntityId : empEntityId === filterEntity);
+
+      return matchesSearch && matchesLocation && matchesEntity;
     });
-  }, [schedules, isAgent, user?.id, locations, searchQuery, filterLocation]);
+  }, [schedules, isAgent, user?.id, locations, searchQuery, filterLocation, filterEntity]);
 
   // Pagination calculations
   const totalSchedules = filteredSchedules?.length || 0;
@@ -897,6 +930,7 @@ export const Schedule: React.FC = () => {
                       </SelectItem>
                       <SelectItem value="location">Locations</SelectItem>
                       <SelectItem value="department">Departments</SelectItem>
+                      <SelectItem value="entity">Entities</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -904,12 +938,7 @@ export const Schedule: React.FC = () => {
                 {/* Searchable Multi-Select Dropdown */}
                 <div className="space-y-2">
                   <Label className="font-semibold text-gray-800">
-                    Select{" "}
-                    {scopeType === "individual"
-                      ? "Employees"
-                      : scopeType === "location"
-                      ? "Locations"
-                      : "Departments"}
+                    Select {SCOPE_LABELS[scopeType]}
                   </Label>
 
                   <Popover open={scopePopoverOpen} onOpenChange={setScopePopoverOpen}>
@@ -917,7 +946,7 @@ export const Schedule: React.FC = () => {
                       <div className="min-h-11 border border-gray-200 rounded-xl bg-white p-2 flex items-center justify-between gap-2 cursor-pointer hover:border-gray-300 transition-colors shadow-2xs">
                         {selectedItems.length === 0 ? (
                           <span className="text-sm text-gray-400 pl-1 font-normal">
-                            Select {scopeType === "individual" ? "Employees" : scopeType === "location" ? "Locations" : "Departments"}...
+                            Select {SCOPE_LABELS[scopeType]}...
                           </span>
                         ) : (
                           <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pl-1 pr-1">
@@ -962,7 +991,7 @@ export const Schedule: React.FC = () => {
                         <div className="relative">
                           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" />
                           <Input
-                            placeholder={`Search ${scopeType === "individual" ? "employees" : scopeType === "location" ? "locations" : "departments"}...`}
+                            placeholder={`Search ${SCOPE_LABELS[scopeType].toLowerCase()}...`}
                             value={scopeSearchQuery}
                             onChange={(e) => setScopeSearchQuery(e.target.value)}
                             className="pl-8 h-8 text-xs bg-gray-50/70 border-gray-200"
@@ -1668,6 +1697,22 @@ export const Schedule: React.FC = () => {
                 />
               )}
 
+              {!isAgent && entities.length > 0 && (
+                <SearchableSelect
+                  className="w-[170px] h-9 rounded-xl"
+                  icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                  placeholder="All Entities"
+                  searchPlaceholder="Search entity..."
+                  value={filterEntity}
+                  onValueChange={setFilterEntity}
+                  options={[
+                    { value: "all", label: "All Entities" },
+                    ...entities.map((en) => ({ value: String(en.id), label: en.name })),
+                    { value: "none", label: "No Entity" },
+                  ]}
+                />
+              )}
+
               <Button
                 variant="outline"
                 size="icon"
@@ -1712,7 +1757,7 @@ export const Schedule: React.FC = () => {
                         <CalendarIcon className="size-8 text-gray-300 mb-1" />
                         <p className="text-sm font-medium text-gray-700">No work schedules found</p>
                         <p className="text-xs text-gray-400">
-                          {searchQuery || filterLocation !== "all"
+                          {searchQuery || filterLocation !== "all" || filterEntity !== "all"
                             ? "Try adjusting your search filters."
                             : "Click 'Create Schedule' to add a new schedule."}
                         </p>

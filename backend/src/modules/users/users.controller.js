@@ -422,6 +422,9 @@ exports.updateEmployee = async (req, res) => {
     const joiningDate = parsedJobRaw.joiningDate || req.body.joiningDate;
     const employmentStatus = parsedJobRaw.employmentStatus || req.body.employmentStatus;
     const workMode = parsedJobRaw.workMode || req.body.workMode;
+    // designation: only a non-empty value is saved (an empty field never wipes it)
+    const designationRaw = parsedJobRaw.designation !== undefined ? parsedJobRaw.designation : req.body.designation;
+    const designation = typeof designationRaw === "string" && designationRaw.trim() ? designationRaw.trim().slice(0, 191) : undefined;
 
     const updateData = {};
 
@@ -489,8 +492,9 @@ exports.updateEmployee = async (req, res) => {
       ? Boolean(rawPayroll.allowExtraHours)
       : (rawJob.allowExtraHours !== undefined ? Boolean(rawJob.allowExtraHours) : (maxExtraHours !== undefined ? maxExtraHours > 0 : undefined));
 
-    if (hiringDate || joiningDate || employmentStatus || workMode || maxExtraHours !== undefined || allowExtraHours !== undefined) {
+    if (hiringDate || joiningDate || employmentStatus || workMode || designation || maxExtraHours !== undefined || allowExtraHours !== undefined) {
       const jobData = {
+        ...(designation && { designation }),
         ...(hiringDate && { hiringDate: new Date(hiringDate) }),
         ...(joiningDate && { joiningDate: new Date(joiningDate) }),
         ...(employmentStatus && { employmentStatus }),
@@ -752,6 +756,8 @@ exports.deleteEmployee = async (req, res) => {
           firstName: true,
           lastName: true,
           employeeId: true,
+          entityId: true,
+          jobInfo: { select: { employmentStatus: true } },
           payroll: {
             select: {
               rate: true,

@@ -7,8 +7,7 @@ router.post("/check-identifier", authController.checkIdentifier);
 router.get("/me", protect, authController.getMe);
 
 
-// next step:
-// router.post("/refresh", authController.refresh);
+router.post("/refresh", authController.refresh);
 // router.post("/logout", authController.logout);
 
 module.exports = router;

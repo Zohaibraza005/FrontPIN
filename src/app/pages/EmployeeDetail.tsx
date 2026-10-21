@@ -122,6 +122,7 @@ export const EmployeeDetail: React.FC = () => {
     hiringDate: '',
     employmentStatus: 'Permanent',
     workMode: 'On-site',
+    designation: '',
   });
 
   const [payroll, setPayroll] = useState({
@@ -260,6 +261,7 @@ export const EmployeeDetail: React.FC = () => {
         hiringDate: emp.hiringDate ? emp.hiringDate.split('T')[0] : (emp.jobInfo?.hiringDate ? emp.jobInfo.hiringDate.split('T')[0] : ''),
         employmentStatus: normalizeStatus(emp.jobInfo?.employmentStatus || emp.employmentStatus) || 'Permanent',
         workMode: emp.workMode || emp.jobInfo?.workMode || 'On-site',
+        designation: emp.jobInfo?.designation || emp.designation || '',
       });
 
       const ji = emp.jobInfo;
@@ -501,6 +503,7 @@ export const EmployeeDetail: React.FC = () => {
       // Separated is only set/cleared through the Separation section
       if (job.employmentStatus && !isSeparated(job.employmentStatus)) payload.employmentStatus = job.employmentStatus;
       if (job.workMode) payload.workMode = job.workMode;
+      if (job.designation?.trim()) payload.designation = job.designation.trim();
 
       await employeeAPI.updateEmployee(Number(id), payload);
       toast.success('Job information updated');
@@ -905,7 +908,7 @@ export const EmployeeDetail: React.FC = () => {
             <CardHeader className={cardHeaderCls}>
               <div>
                 <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Job Information</CardTitle>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Location, department, supervisor and employment details</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Designation, entity, location, department, supervisor and employment details</p>
               </div>
               {editJob ? (
                 <div className="flex items-center gap-2">
@@ -921,6 +924,16 @@ export const EmployeeDetail: React.FC = () => {
 
             {editJob ? (
               <CardContent className="p-5 sm:p-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div>
+                  <Label className={fieldLabel}>Designation</Label>
+                  <Input
+                    value={job.designation}
+                    onChange={(e) => setJob({ ...job, designation: e.target.value })}
+                    placeholder="e.g. Customer Support Agent"
+                    maxLength={191}
+                    className={fieldInput}
+                  />
+                </div>
                 <div>
                   <Label className={fieldLabel}>Entity</Label>
                   <SearchableSelect
@@ -1014,6 +1027,7 @@ export const EmployeeDetail: React.FC = () => {
             ) : (
               <CardContent className="p-5 sm:p-6">
                 <dl className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-5">
+                  <ViewItem label="Designation" value={job.designation} />
                   <ViewItem label="Entity" value={job.entity} />
                   <ViewItem label="Location" value={job.location} />
                   <ViewItem label="Department" value={job.department} />

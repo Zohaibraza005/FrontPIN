@@ -15,17 +15,28 @@ exports.login = asyncHandler(async (req, res) => {
   }
 
   const { user, accessToken, refreshToken } = await authService.login(parsed.data);
+  setRefreshCookie(res, refreshToken);
 
-  // Web app case: set refresh token in httpOnly cookie (best)
+  // refreshToken is also returned so the app can renew its session silently
+  return ok(res, { user, accessToken, refreshToken }, "Logged in");
+});
+
+function setRefreshCookie(res, refreshToken) {
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
     secure: env.cookieSecure,
     sameSite: "lax",
     path: "/api/auth/refresh",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: 365 * 24 * 60 * 60 * 1000,
   });
+}
 
-  return ok(res, { user, accessToken }, "Logged in");
+// POST /api/auth/refresh  { refreshToken }  (or the httpOnly cookie)
+exports.refresh = asyncHandler(async (req, res) => {
+  const token = req.body?.refreshToken || req.cookies?.refreshToken;
+  const { accessToken, refreshToken } = await authService.refresh(token);
+  setRefreshCookie(res, refreshToken);
+  return ok(res, { accessToken, refreshToken }, "Session refreshed");
 });
 exports.checkIdentifier = asyncHandler(async (req, res) => {
   const { identifier } = req.body;
