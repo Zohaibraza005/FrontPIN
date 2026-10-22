@@ -24,7 +24,9 @@ import { TourProvider } from "./contexts/TourContext";
 import { DetailProject } from "./pages/DetailProject";
 import { EmployeeDetail } from "./pages/EmployeeDetail";
 import { Departments } from "./pages/Departments";
+import { DepartmentEmployees } from "./pages/DepartmentEmployees";
 import { Entities } from "./pages/Entities";
+import { EntityEmployees } from "./pages/EntityEmployees";
 import CreateInvoice from "./pages/CreateInvoice";
 import { InvoiceView } from "./pages/InvoiceView";
 import EditInvoice from "./pages/EditInvoice";
@@ -115,10 +117,12 @@ export const router = createBrowserRouter([
       { path: "employees/:id", Component: EmployeeDetail },
       { path: "roles", Component: Roles },
       { path: "departments", Component: Departments },
+      { path: "departments/:id/employees", Component: DepartmentEmployees },
       { path: "payroll", Component: Payroll },
       { path: "payroll/view/:id", Component: PayrollDetail},
       { path: "locations", Component: Locations },
       { path: "entities", Component: Entities },
+      { path: "entities/:id/employees", Component: EntityEmployees },
       { path: "applicants", Component: Applicants },
       { path: "jobs/add", Component: PostJob },
     { path: "jobs/:jobId/applicants", Component: JobApplicants },

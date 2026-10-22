@@ -8,7 +8,7 @@ const bcrypt = require("bcrypt");
 exports.getEmployees = async (req, res) => {
   try {
     const orgId = req.user.orgId;
-    const { companyId, departmentId, role } = req.query;
+    const { companyId, departmentId, role, entityId } = req.query;
 
     let supervisorFilter = {};
     if (req.user.role === "SUPERVISOR") {
@@ -36,6 +36,11 @@ exports.getEmployees = async (req, res) => {
         ...supervisorFilter,
         ...(companyId && companyId !== "all" && companyId !== "ALL" && !isNaN(parseInt(companyId)) && { companyId: parseInt(companyId) }),
         ...(departmentId && departmentId !== "all" && departmentId !== "ALL" && !isNaN(parseInt(departmentId)) && { departmentId: parseInt(departmentId) }),
+        ...(entityId === "no_entity" || entityId === "none"
+          ? { entityId: null }
+          : entityId && entityId !== "all" && entityId !== "ALL" && !isNaN(parseInt(entityId))
+          ? { entityId: parseInt(entityId) }
+          : {}),
         ...(role ? { role: role.toUpperCase() } : { NOT: { role: "ADMIN" } }),
       },
 

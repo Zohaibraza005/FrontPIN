@@ -259,6 +259,10 @@ export const departmentAPI = {
       method: "DELETE",
     });
   },
+
+  getDepartmentEmployees: async (id: number | string) => {
+    return apiCall(`/departments/${id}/employees`);
+  },
 };
 
 // Entity API
@@ -289,6 +293,14 @@ export const entityAPI = {
 
   getNextEmployeeCode: async (id: number | string) => {
     return apiCall(`/entities/${id}/next-employee-code`);
+  },
+
+  getEntityEmployees: async (id: number | string) => {
+    return apiCall(`/entities/${id}/employees`);
+  },
+
+  moveEmployees: async (data: { employeeIds: number[]; toEntityId: number }) => {
+    return apiCall("/entities/move-employees", { method: "POST", body: JSON.stringify(data) });
   },
 };
 

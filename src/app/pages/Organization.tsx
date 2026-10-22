@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2, ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2, ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Briefcase } from "lucide-react";
 import { locationAPI, organizationAPI, leaveAPI, invoiceCompanyAPI, API_URL } from "../services/api";
 import { deviceService, BiometricDevice } from "../services/device.service";
 import ReactSelect from 'react-select';
@@ -504,41 +504,57 @@ export default function Organization() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto py-10 space-y-8">
+    <div className="space-y-6 max-w-[1600px] mx-auto p-1 sm:p-2">
 
-      <h2 className="text-2xl font-bold">Organization Settings</h2>
+      <div className="min-w-0">
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Organization Settings</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Organization profile, leave types, device integrations and invoice companies</p>
+      </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs defaultValue="profile" className="space-y-5">
 
-        <TabsList>
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="leave-types">Leave Types</TabsTrigger>
-          <TabsTrigger value="pricing">Pricing</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
-          <TabsTrigger value="companies">Companies</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto">
+          <TabsList className="inline-flex h-auto w-max gap-1 p-1 bg-gray-100/80 dark:bg-gray-900 rounded-xl">
+            {[
+              ["profile", "Profile", Building2],
+              ["leave-types", "Leave Types", CalendarDays],
+              ["integrations", "Integrations", Cpu],
+              ["companies", "Companies", Briefcase],
+            ].map(([value, label, Icon]: any) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold gap-1.5 text-gray-600 dark:text-gray-400 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-950 data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-100 data-[state=active]:shadow-sm transition-all"
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         {/* ================= PROFILE TAB ================= */}
         <TabsContent value="profile">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Organization Profile</CardTitle>
+          <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
+              <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Organization Profile</CardTitle>
 
               {!editMode && (
-                <Button variant="outline" size="sm" onClick={() => setEditMode(true)}>
-                  <Pencil className="h-4 w-4 mr-2" />
+                <Button variant="outline" size="sm" onClick={() => setEditMode(true)} className="h-9 px-3.5 text-xs font-semibold gap-1.5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300">
+                  <Pencil className="h-3.5 w-3.5" />
                   Edit
                 </Button>
               )}
             </CardHeader>
 
-            <CardContent className="space-y-6">
+            <CardContent className="p-5 sm:p-6 space-y-6">
 
               <div className="grid grid-cols-2 gap-6">
 
                 <div className="space-y-2">
-                  <Label>Organization Title</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Organization Title</Label>
                   <Input
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -546,8 +562,9 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Phone Number</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Phone Number</Label>
                   <Input
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -555,8 +572,9 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Email</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Email</Label>
                   <Input
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -564,8 +582,9 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Emergency Contact</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Emergency Contact</Label>
                   <Input
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.emergencyContact}
                     onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })}
@@ -573,8 +592,9 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2 col-span-2">
-                  <Label>Address</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Address</Label>
                   <Input
+                    className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.address}
                     onChange={(e) => setForm({ ...form, address: e.target.value })}
@@ -582,7 +602,7 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>No. of Employees</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">No. of Employees</Label>
                   <Input
                     type="number"
                     disabled={!editMode}
@@ -593,7 +613,7 @@ export default function Organization() {
 
 
                 <div className="space-y-2">
-                  <Label>Category</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Category</Label>
                   <ReactSelect
                     isSearchable
                     isClearable
@@ -671,7 +691,7 @@ export default function Organization() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Timezone {form.orgTimeZone ? `(${form.orgTimeZone})` : ""}</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Timezone {form.orgTimeZone ? `(${form.orgTimeZone})` : ""}</Label>
                   <ReactSelect
                     isSearchable
                     isClearable
@@ -769,73 +789,16 @@ export default function Organization() {
           </Card>
         </TabsContent>
 
-        {/* ================= PRICING TAB ================= */}
-        <TabsContent value="pricing">
-
-          <div className="grid md:grid-cols-3 gap-6">
-
-            {/* Basic Plan */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Basic Plan</CardTitle>
-                <p className="text-2xl font-bold mt-2">$19 / month</p>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p>✔ 10 Employees</p>
-                <p>✔ Basic HRMS</p>
-                <p>✔ Attendance</p>
-                <p>✖ Payroll</p>
-              </CardContent>
-            </Card>
-
-            {/* PRO PLAN (Highlighted) */}
-            <Card className="border-2 border-blue-600 shadow-lg relative">
-              <Badge className="absolute top-4 right-4 bg-blue-600 text-white">
-                Most Popular
-              </Badge>
-
-              <CardHeader>
-                <CardTitle>Pro Plan</CardTitle>
-                <p className="text-3xl font-bold mt-2">$49 / month</p>
-              </CardHeader>
-
-              <CardContent className="space-y-2">
-                <p>✔ 100 Employees</p>
-                <p>✔ Full HRMS</p>
-                <p>✔ Payroll</p>
-                <p>✔ Recruitment (ATS)</p>
-                <p>✔ Reporting</p>
-              </CardContent>
-            </Card>
-
-            {/* Enterprise */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Enterprise</CardTitle>
-                <p className="text-2xl font-bold mt-2">Custom Pricing</p>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p>✔ Unlimited Employees</p>
-                <p>✔ Full Suite</p>
-                <p>✔ Dedicated Support</p>
-                <p>✔ Custom Integrations</p>
-              </CardContent>
-            </Card>
-
-          </div>
-
-        </TabsContent>
-
         {/* ================= INTEGRATIONS TAB ================= */}
         <TabsContent value="integrations">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+          <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
               <div>
-                <CardTitle className="text-xl font-bold flex items-center gap-2">
-                  <Cpu className="h-6 w-6 text-primary" />
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <Cpu className="h-4 w-4 text-blue-600" />
                   Biometric & Hardware Integrations
                 </CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-normal">
                   Connect Hikvision Face Terminals & ZKTeco Biometric Machines for real-time attendance tracking.
                 </p>
               </div>
@@ -877,7 +840,7 @@ export default function Organization() {
                   </DialogHeader>
                   <div className="space-y-4 py-2">
                     <div className="space-y-2">
-                      <Label>Device Brand</Label>
+                      <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Device Brand</Label>
                       <Select
                         value={deviceForm.brand}
                         onValueChange={(val) =>
@@ -899,7 +862,7 @@ export default function Organization() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Device Punch Role / Direction</Label>
+                      <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Device Punch Role / Direction</Label>
                       <Select
                         value={deviceForm.direction || "CHECK_IN"}
                         onValueChange={(val) =>
@@ -924,7 +887,7 @@ export default function Organization() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Device Name / Label</Label>
+                      <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Device Name / Label</Label>
                       <Input
                         value={deviceForm.name}
                         onChange={(e) => setDeviceForm({ ...deviceForm, name: e.target.value })}
@@ -934,7 +897,7 @@ export default function Organization() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label>IP Address</Label>
+                        <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">IP Address</Label>
                         <Input
                           value={deviceForm.ipAddress}
                           onChange={(e) => setDeviceForm({ ...deviceForm, ipAddress: e.target.value })}
@@ -942,7 +905,7 @@ export default function Organization() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Port</Label>
+                        <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Port</Label>
                         <Input
                           value={deviceForm.port}
                           onChange={(e) => setDeviceForm({ ...deviceForm, port: e.target.value })}
@@ -954,7 +917,7 @@ export default function Organization() {
                     {deviceForm.brand === "HIKVISION" && (
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
-                          <Label>Username</Label>
+                          <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Username</Label>
                           <Input
                             value={deviceForm.username}
                             onChange={(e) => setDeviceForm({ ...deviceForm, username: e.target.value })}
@@ -962,7 +925,7 @@ export default function Organization() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Password</Label>
+                          <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Password</Label>
                           <Input
                             type="password"
                             value={deviceForm.password}
@@ -974,7 +937,7 @@ export default function Organization() {
                     )}
 
                     <div className="space-y-2">
-                      <Label>Office Location (Optional)</Label>
+                      <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Office Location (Optional)</Label>
                       <Select
                         value={deviceForm.companyId || ""}
                         onValueChange={(val) => setDeviceForm({ ...deviceForm, companyId: val })}
@@ -1009,7 +972,7 @@ export default function Organization() {
                 </DialogContent>
               </Dialog>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-3 sm:p-4">
               {loadingDevices ? (
                 <p className="text-center py-6 text-muted-foreground">Loading devices...</p>
               ) : devices.length === 0 ? (
@@ -1047,8 +1010,8 @@ export default function Organization() {
                       <TableHead>Brand / Protocol</TableHead>
                       <TableHead>IP & Port</TableHead>
                       <TableHead>Punch Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1100,7 +1063,7 @@ export default function Organization() {
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right space-x-2">
+                        <TableCell className="text-right space-x-1.5">
                           <Button
                             variant="outline"
                             size="sm"
@@ -1158,24 +1121,24 @@ export default function Organization() {
 
         {/* ================= LEAVE TYPES TAB ================= */}
         <TabsContent value="leave-types">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+          <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
               <div>
-                <CardTitle>Leave Types</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Leave Types</CardTitle>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-normal">
                   Manage organization leave types. Created leave types will be available for employees when requesting leaves.
                 </p>
               </div>
-              <Button onClick={handleOpenCreateModal}>
-                <Plus className="h-4 w-4 mr-2" />
+              <Button onClick={handleOpenCreateModal} className="h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl">
+                <Plus className="h-3.5 w-3.5" />
                 Add Leave Type
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-3 sm:p-4">
               {loadingLeaveTypes ? (
                 <p className="text-center py-6 text-muted-foreground">Loading leave types...</p>
               ) : leaveTypes.length === 0 ? (
-                <div className="text-center py-10 border border-dashed rounded-lg space-y-3">
+                <div className="text-center py-12 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl space-y-3">
                   <p className="text-muted-foreground">No leave types created yet.</p>
                   <Button onClick={handleOpenCreateModal} variant="outline" size="sm">
                     <Plus className="h-4 w-4 mr-2" />
@@ -1183,13 +1146,13 @@ export default function Organization() {
                   </Button>
                 </div>
               ) : (
-                <Table>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden"><Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Leave Type Name</TableHead>
-                      <TableHead>Code</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Leave Type Name</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Code</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Status</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1205,19 +1168,20 @@ export default function Organization() {
                           </TableCell>
                           <TableCell>
                             {lt.isActive ? (
-                              <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                              <Badge className="rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
                                 Active
                               </Badge>
                             ) : (
-                              <Badge className="bg-red-100 text-red-800 hover:bg-red-100">
+                              <Badge className="rounded-full border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-50 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800">
                                 Inactive
                               </Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-right space-x-2">
+                          <TableCell className="text-right space-x-1.5">
                             <Button
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
+                              className="size-8 p-0 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300"
                               onClick={() => handleOpenEditModal(lt)}
                             >
                               <Pencil className="h-4 w-4" />
@@ -1225,7 +1189,7 @@ export default function Organization() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-red-600 hover:text-red-800 hover:bg-red-50"
+                              className="size-8 p-0 rounded-lg border border-red-200 text-red-600 hover:text-red-700 hover:bg-red-50 dark:border-red-900"
                               onClick={() => handleDeleteLeaveType(lt.id)}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1235,7 +1199,7 @@ export default function Organization() {
                       );
                     })}
                   </TableBody>
-                </Table>
+                </Table></div>
               )}
             </CardContent>
           </Card>
@@ -1243,24 +1207,24 @@ export default function Organization() {
 
         {/* ================= COMPANIES TAB ================= */}
         <TabsContent value="companies">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+          <Card className="gap-0 shadow-sm border border-gray-200/80 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-100 dark:border-gray-800">
               <div>
-                <CardTitle>Companies</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
+                <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Companies</CardTitle>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-normal">
                   Manage companies for your invoices. These companies will be linked to the invoice section.
                 </p>
               </div>
-              <Button onClick={() => setCompanyModalOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
+              <Button onClick={() => setCompanyModalOpen(true)} className="h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl">
+                <Plus className="h-3.5 w-3.5" />
                 Add Company
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-3 sm:p-4">
               {loadingCompanies ? (
                 <p className="text-center py-6 text-muted-foreground">Loading companies...</p>
               ) : companies.length === 0 ? (
-                <div className="text-center py-10 border border-dashed rounded-lg space-y-3">
+                <div className="text-center py-12 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl space-y-3">
                   <p className="text-muted-foreground">No companies created yet.</p>
                   <Button onClick={() => setCompanyModalOpen(true)} variant="outline" size="sm">
                     <Plus className="h-4 w-4 mr-2" />
@@ -1268,16 +1232,16 @@ export default function Organization() {
                   </Button>
                 </div>
               ) : (
-                <Table>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden"><Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Logo</TableHead>
-                      <TableHead>Company Name</TableHead>
-                      <TableHead>Title/Tagline</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>VAT/Tax ID</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Logo</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Company Name</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Title/Tagline</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Phone</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Email</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">VAT/Tax ID</TableHead>
+                      <TableHead className="h-10 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1288,10 +1252,10 @@ export default function Organization() {
                             <img
                               src={`${API_URL}${company.logoUrl}`}
                               alt={company.name}
-                              className="w-10 h-10 rounded object-cover border"
+                              className="w-10 h-10 rounded-lg object-cover border border-gray-200"
                             />
                           ) : (
-                            <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 border">
+                            <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 flex items-center justify-center text-sm font-semibold">
                               {company.name.charAt(0).toUpperCase()}
                             </div>
                           )}
@@ -1301,17 +1265,19 @@ export default function Organization() {
                         <TableCell>{company.phone || "—"}</TableCell>
                         <TableCell>{company.email || "—"}</TableCell>
                         <TableCell>{company.vat || "—"}</TableCell>
-                        <TableCell className="text-right space-x-1">
+                        <TableCell className="text-right space-x-1.5">
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
+                            className="size-8 p-0 rounded-lg border-gray-200 dark:border-gray-800"
                             onClick={() => handleOpenViewCompanyModal(company)}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
+                            className="size-8 p-0 rounded-lg border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300"
                             onClick={() => handleOpenEditCompanyModal(company)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -1319,7 +1285,7 @@ export default function Organization() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-red-600 hover:text-red-800 hover:bg-red-50"
+                            className="size-8 p-0 rounded-lg border border-red-200 text-red-600 hover:text-red-700 hover:bg-red-50 dark:border-red-900"
                             onClick={() => handleDeleteCompany(company)}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -1328,7 +1294,7 @@ export default function Organization() {
                       </TableRow>
                     ))}
                   </TableBody>
-                </Table>
+                </Table></div>
               )}
             </CardContent>
           </Card>

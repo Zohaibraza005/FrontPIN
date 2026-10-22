@@ -43,7 +43,8 @@ import {
 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 
-const employmentStatuses = ['Full-time', 'Part-time', 'Contract', 'Intern'];
+import { DatePicker } from "../components/ui/date-picker";
+const employmentStatuses = ['Internship', 'Probation', 'Permanent', 'Contract', 'Part-time'];
 const workModes = ['On-site', 'Remote', 'Hybrid'];
 const currencies = ['PKR', 'USD', 'EUR', 'GBP'];
 const cycleDates = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -60,7 +61,7 @@ const privilegesList = [
   { id: 'enable_gps', label: 'GPS Tracking', description: 'Enforce geofencing & location check' },
 ];
 
-const fieldBaseClass = "h-11 px-3.5 bg-white border border-gray-300 rounded-xl text-sm font-medium text-gray-900 shadow-2xs transition-all w-full focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20";
+const fieldBaseClass = "h-10 px-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg text-sm text-gray-900 dark:text-gray-100 transition-colors w-full focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 const visibleInputClass = `${fieldBaseClass} placeholder:text-gray-400`;
 const visibleSelectClass = `${fieldBaseClass} hover:border-gray-400 data-[placeholder]:text-gray-400 [&>span]:line-clamp-1`;
 
@@ -83,7 +84,7 @@ export const AddEmployee: React.FC = () => {
   const [department, setDepartment] = useState('');
   const [location, setLocation] = useState('');
   const [supervisorId, setSupervisorId] = useState('');
-  const [employmentStatus, setEmploymentStatus] = useState('Full-time');
+  const [employmentStatus, setEmploymentStatus] = useState('Permanent');
   const [designation, setDesignation] = useState('');
   const [hiringDate, setHiringDate] = useState('');
   const [workMode, setWorkMode] = useState('On-site');
@@ -299,7 +300,7 @@ export const AddEmployee: React.FC = () => {
     setLocation('');
     setEntityId('');
     setSupervisorId('');
-    setEmploymentStatus('Full-time');
+    setEmploymentStatus('Permanent');
     setDesignation('');
     setHiringDate('');
     setWorkMode('On-site');
@@ -528,8 +529,8 @@ export const AddEmployee: React.FC = () => {
         return (
           <div className="space-y-6">
             {/* Profile Avatar Card */}
-            <div className="bg-gradient-to-r from-blue-50/50 to-indigo-50/50 p-5 rounded-2xl border border-gray-200">
-              <Label className="text-xs font-bold text-gray-800 mb-3 block">Profile Photo</Label>
+            <div className="bg-gray-50 dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800">
+              <Label className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 block">Profile photo</Label>
               <div className="flex flex-col sm:flex-row items-center gap-5">
                 <div className="relative group shrink-0">
                   {imagePreview ? (
@@ -562,7 +563,7 @@ export const AddEmployee: React.FC = () => {
                   <div className="flex items-center justify-center sm:justify-start gap-2">
                     <label
                       htmlFor="profile-upload-btn"
-                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-gray-300 text-gray-700 shadow-xs hover:bg-gray-50 hover:text-gray-900 cursor-pointer transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3.5 h-9 text-xs font-semibold rounded-lg bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 cursor-pointer transition-colors"
                     >
                       <Upload className="w-3.5 h-3.5 text-blue-600" />
                       {imagePreview ? 'Change Photo' : 'Upload Photo'}
@@ -580,7 +581,7 @@ export const AddEmployee: React.FC = () => {
                         variant="outline"
                         size="sm"
                         onClick={removeProfileImage}
-                        className="text-red-600 border-red-200 hover:bg-red-50 text-xs px-3 h-9 rounded-xl"
+                        className="text-red-600 border-red-200 hover:bg-red-50 text-xs px-3 h-9 rounded-lg"
                       >
                         <Trash2 className="w-3.5 h-3.5 mr-1" />
                         Remove
@@ -598,7 +599,7 @@ export const AddEmployee: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Row 1: Entity, Role, Employee ID, Biometric ID */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5 text-gray-400" />
                   Entity
                 </Label>
@@ -618,7 +619,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-gray-400" />
                   Role <span className="text-red-500">*</span>
                 </Label>
@@ -644,7 +645,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-gray-400" />
                     Employee ID (Code)
                   </Label>
@@ -671,9 +672,9 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-gray-400" />
-                    Biometric ID (Device ID)
+                    Biometric ID
                   </Label>
                   {biometricId && (
                     <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
@@ -698,7 +699,7 @@ export const AddEmployee: React.FC = () => {
 
               {/* Row 2: First Name, Last Name, Phone Number, National ID */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-gray-400" />
                   First Name <span className="text-red-500">*</span>
                 </Label>
@@ -711,7 +712,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-gray-400" />
                   Last Name <span className="text-red-500">*</span>
                 </Label>
@@ -724,7 +725,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-gray-400" />
                   Phone Number {canLogin && <span className="text-red-500">*</span>}
                 </Label>
@@ -737,9 +738,9 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-gray-400" />
-                  National ID (CNIC / Passport)
+                  CNIC/Passport
                 </Label>
                 <Input
                   placeholder="35202-xxxxxxx-x"
@@ -751,7 +752,7 @@ export const AddEmployee: React.FC = () => {
 
               {/* Row 3: Gender, Age, Marital Status, Religion */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-gray-400" />
                   Gender
                 </Label>
@@ -769,7 +770,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-gray-400" />
                   Age
                 </Label>
@@ -785,7 +786,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <UserCheck className="w-3.5 h-3.5 text-gray-400" />
                   Marital Status
                 </Label>
@@ -803,7 +804,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-gray-400" />
                   Religion
                 </Label>
@@ -823,7 +824,7 @@ export const AddEmployee: React.FC = () => {
 
               {/* Row 4: Qualification (Full Width across all 4 columns) */}
               <div className="space-y-1.5 col-span-1 sm:col-span-2 lg:col-span-4">
-                <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                   <GraduationCap className="w-3.5 h-3.5 text-gray-400" />
                   Qualification
                 </Label>
@@ -849,7 +850,7 @@ export const AddEmployee: React.FC = () => {
                       Enable System Login Access
                     </Label>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Allow this employee to log into the HR Pro Management System web app & mobile PIN system.
+                      Allow this employee to log into the HR Pro web app & mobile PIN system.
                     </p>
                   </div>
                 </div>
@@ -862,7 +863,7 @@ export const AddEmployee: React.FC = () => {
               {canLogin && (
                 <div className="pt-4 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                       <Mail className="w-3.5 h-3.5 text-gray-400" />
                       Email Address <span className="text-red-500">*</span>
                     </Label>
@@ -876,7 +877,7 @@ export const AddEmployee: React.FC = () => {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-gray-400" />
                       Username <span className="text-red-500">*</span>
                     </Label>
@@ -895,7 +896,7 @@ export const AddEmployee: React.FC = () => {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
                       <Lock className="w-3.5 h-3.5 text-gray-400" />
                       Login Password <span className="text-red-500">*</span>
                     </Label>
@@ -918,7 +919,7 @@ export const AddEmployee: React.FC = () => {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800 flex items-center justify-between">
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-gray-400" />
                         4-Digit Mobile PIN <span className="text-red-500">*</span>
@@ -953,15 +954,15 @@ export const AddEmployee: React.FC = () => {
         return (
           <div className="space-y-6">
             {/* Job Details Card */}
-            <div className="bg-white p-5 rounded-2xl border border-gray-300 space-y-4 shadow-2xs">
-              <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2 border-b pb-2">
+            <div className="bg-white dark:bg-gray-950 p-5 rounded-xl border border-gray-200 dark:border-gray-800 space-y-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
                 <Building2 className="w-4 h-4 text-blue-600" />
                 Workplace & Job Role Details
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                     Location (Office / Company) <span className="text-red-500">*</span>
                   </Label>
                   <Select value={location} onValueChange={setLocation}>
@@ -979,7 +980,7 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Department</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Department</Label>
                   <Select
                     value={department}
                     onValueChange={setDepartment}
@@ -1007,7 +1008,7 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Direct Supervisor</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Direct Supervisor</Label>
                   <Select value={supervisorId} onValueChange={setSupervisorId}>
                     <SelectTrigger className={visibleSelectClass}>
                       <SelectValue placeholder="Select supervisor" />
@@ -1025,7 +1026,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                     Job Designation <span className="text-red-500">*</span>
                   </Label>
                   <Input
@@ -1037,7 +1038,7 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Employment Status</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Employment Status</Label>
                   <Select value={employmentStatus} onValueChange={setEmploymentStatus}>
                     <SelectTrigger className={visibleSelectClass}>
                       <SelectValue placeholder="Select status" />
@@ -1051,9 +1052,8 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Hiring Date</Label>
-                  <Input
-                    type="date"
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Hiring Date</Label>
+                  <DatePicker
                     className={visibleInputClass}
                     value={hiringDate}
                     onChange={e => setHiringDate(e.target.value)}
@@ -1061,9 +1061,8 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Joining Date</Label>
-                  <Input
-                    type="date"
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Joining Date</Label>
+                  <DatePicker
                     className={visibleInputClass}
                     value={joiningDate}
                     onChange={e => setJoiningDate(e.target.value)}
@@ -1072,7 +1071,7 @@ export const AddEmployee: React.FC = () => {
               </div>
 
               <div className="pt-2">
-                <Label className="text-xs font-semibold text-gray-800 mb-2 block">Work Mode</Label>
+                <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 block">Work Mode</Label>
                 <div className="flex gap-3">
                   {workModes.map(mode => (
                     <button
@@ -1093,7 +1092,7 @@ export const AddEmployee: React.FC = () => {
             </div>
 
             {/* Assigned Role Selection Card */}
-            <div className="bg-white p-5 rounded-2xl border border-gray-300 space-y-4 shadow-2xs">
+            <div className="bg-white dark:bg-gray-950 p-5 rounded-xl border border-gray-200 dark:border-gray-800 space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b pb-3">
                 <div>
                   <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
@@ -1118,7 +1117,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="space-y-4">
                 <div className="space-y-1.5 max-w-md">
-                  <Label className="text-xs font-semibold text-gray-800">
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                     System Role <span className="text-red-500">*</span>
                   </Label>
                   <Select value={selectedRoleId} onValueChange={handleRoleSelect}>
@@ -1214,8 +1213,8 @@ export const AddEmployee: React.FC = () => {
         return (
           <div className="space-y-6">
             {/* Payout Type Card */}
-            <div className="bg-white p-5 rounded-2xl border border-gray-300 space-y-4 shadow-2xs">
-              <Label className="text-xs font-semibold text-gray-800 block">Payout Frequency Type</Label>
+            <div className="bg-white dark:bg-gray-950 p-5 rounded-xl border border-gray-200 dark:border-gray-800 space-y-4">
+              <Label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">Payout Frequency Type</Label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {(['monthly', 'hourly', 'daily'] as const).map(type => (
                   <div
@@ -1237,7 +1236,7 @@ export const AddEmployee: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Salary Rate Amount</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Salary Rate Amount</Label>
                   <Input
                     type="number"
                     min={0}
@@ -1249,7 +1248,7 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Currency</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Currency</Label>
                   <Select value={currency} onValueChange={setCurrency}>
                     <SelectTrigger className={`${visibleSelectClass} font-semibold`}>
                       <SelectValue />
@@ -1261,7 +1260,7 @@ export const AddEmployee: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-gray-800">Payout Cycle Date (1–31)</Label>
+                  <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Payout Cycle Date (1–31)</Label>
                   <Select value={cycleDate.toString()} onValueChange={v => setCycleDate(Number(v))}>
                     <SelectTrigger className={visibleSelectClass}>
                       <SelectValue />
@@ -1279,7 +1278,7 @@ export const AddEmployee: React.FC = () => {
             </div>
 
             {/* Overtime Card */}
-            <div className="bg-white p-5 rounded-2xl border border-gray-300 space-y-4 shadow-2xs">
+            <div className="bg-white dark:bg-gray-950 p-5 rounded-xl border border-gray-200 dark:border-gray-800 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
@@ -1303,7 +1302,7 @@ export const AddEmployee: React.FC = () => {
               {allowExtraHours && (
                 <div className="pt-4 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800">Max Extra Hours Allowed</Label>
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Max Extra Hours Allowed</Label>
                     <Input
                       type="number"
                       min={0}
@@ -1315,7 +1314,7 @@ export const AddEmployee: React.FC = () => {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-gray-800">Overtime Hourly Rate ({currency})</Label>
+                    <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Overtime Hourly Rate ({currency})</Label>
                     <Input
                       type="number"
                       min={0}
@@ -1335,7 +1334,7 @@ export const AddEmployee: React.FC = () => {
         return (
           <div className="space-y-6">
             {/* Profile Review Hero Card */}
-            <div className="bg-white border border-gray-300 rounded-2xl shadow-2xs overflow-hidden">
+            <div className="bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-6 text-white flex flex-col sm:flex-row items-center gap-5">
                 {imagePreview ? (
                   <img
@@ -1379,17 +1378,17 @@ export const AddEmployee: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 text-xs text-gray-700">
                 {/* Left Column */}
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                    <h5 className="font-bold text-gray-900 text-sm border-b pb-1.5 flex items-center gap-1.5">
+                  <div className="bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200 dark:border-gray-800 space-y-2">
+                    <h5 className="font-semibold text-gray-900 dark:text-gray-100 text-sm border-b border-gray-100 dark:border-gray-800 pb-2 flex items-center gap-1.5">
                       <User className="w-4 h-4 text-blue-600" />
                       Personal & Contact Information
                     </h5>
-                    <div className="space-y-1 pt-1">
+                    <div className="pt-0.5 [&>p]:flex [&>p]:items-baseline [&>p]:justify-between [&>p]:gap-3 [&>p]:py-1.5 [&>p]:border-b [&>p]:border-gray-50 dark:[&>p]:border-gray-900 [&>p:last-child]:border-0 [&>p>span:last-child]:text-right">
                       <p><span className="font-medium text-gray-500">Employee ID:</span> <span className="font-bold text-gray-900">{employeeId || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Email:</span> <span className="font-semibold text-gray-900">{email || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Username:</span> <span className="font-semibold text-gray-900">{username || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Phone Number:</span> <span className="font-semibold text-gray-900">{phoneNumber || '—'}</span></p>
-                      <p><span className="font-medium text-gray-500">National ID:</span> <span className="font-semibold text-gray-900">{nationalId || '—'}</span></p>
+                      <p><span className="font-medium text-gray-500">CNIC/Passport:</span> <span className="font-semibold text-gray-900">{nationalId || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Entity:</span> <span className="font-semibold text-gray-900">{entities.find(e => e.id.toString() === entityId)?.name || 'None'}</span></p>
                       <p><span className="font-medium text-gray-500">Gender:</span> <span className="font-semibold text-gray-900">{gender || '—'}</span></p>
                       <p><span className="font-medium text-gray-500">Age:</span> <span className="font-semibold text-gray-900">{age || '—'}</span></p>
@@ -1399,12 +1398,12 @@ export const AddEmployee: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                    <h5 className="font-bold text-gray-900 text-sm border-b pb-1.5 flex items-center gap-1.5">
+                  <div className="bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200 dark:border-gray-800 space-y-2">
+                    <h5 className="font-semibold text-gray-900 dark:text-gray-100 text-sm border-b border-gray-100 dark:border-gray-800 pb-2 flex items-center gap-1.5">
                       <Briefcase className="w-4 h-4 text-indigo-600" />
                       Job & Department
                     </h5>
-                    <div className="space-y-1 pt-1">
+                    <div className="pt-0.5 [&>p]:flex [&>p]:items-baseline [&>p]:justify-between [&>p]:gap-3 [&>p]:py-1.5 [&>p]:border-b [&>p]:border-gray-50 dark:[&>p]:border-gray-900 [&>p:last-child]:border-0 [&>p>span:last-child]:text-right">
                       <p><span className="font-medium text-gray-500">Location:</span> <span className="font-bold text-gray-900">{locations.find(l => l.id.toString() === location)?.name || 'Not selected'}</span></p>
                       <p><span className="font-medium text-gray-500">Department:</span> <span className="font-semibold text-gray-900">{department ? departments.find(d => d.id.toString() === department)?.title : 'Not selected'}</span></p>
                       <p><span className="font-medium text-gray-500">Supervisor:</span> <span className="font-semibold text-gray-900">{supervisors.find(s => s.id.toString() === supervisorId) ? `${supervisors.find(s => s.id.toString() === supervisorId).firstName} ${supervisors.find(s => s.id.toString() === supervisorId).lastName || ''}` : 'None'}</span></p>
@@ -1417,8 +1416,8 @@ export const AddEmployee: React.FC = () => {
 
                 {/* Right Column */}
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                    <h5 className="font-bold text-gray-900 text-sm border-b pb-1.5 flex items-center gap-1.5">
+                  <div className="bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200 dark:border-gray-800 space-y-2">
+                    <h5 className="font-semibold text-gray-900 dark:text-gray-100 text-sm border-b border-gray-100 dark:border-gray-800 pb-2 flex items-center gap-1.5">
                       <Shield className="w-4 h-4 text-indigo-600" />
                       Assigned Role & Permissions
                     </h5>
@@ -1453,12 +1452,12 @@ export const AddEmployee: React.FC = () => {
                   </div>
 
 
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2">
-                    <h5 className="font-bold text-gray-900 text-sm border-b pb-1.5 flex items-center gap-1.5">
+                  <div className="bg-white dark:bg-gray-950 p-4 rounded-xl border border-gray-200 dark:border-gray-800 space-y-2">
+                    <h5 className="font-semibold text-gray-900 dark:text-gray-100 text-sm border-b border-gray-100 dark:border-gray-800 pb-2 flex items-center gap-1.5">
                       <DollarSign className="w-4 h-4 text-emerald-600" />
                       Payroll & Overtime Policy
                     </h5>
-                    <div className="space-y-1 pt-1">
+                    <div className="pt-0.5 [&>p]:flex [&>p]:items-baseline [&>p]:justify-between [&>p]:gap-3 [&>p]:py-1.5 [&>p]:border-b [&>p]:border-gray-50 dark:[&>p]:border-gray-900 [&>p:last-child]:border-0 [&>p>span:last-child]:text-right">
                       <p><span className="font-medium text-gray-500">Payout Type:</span> <span className="font-bold text-gray-900 capitalize">{payoutType}</span></p>
                       <p><span className="font-medium text-gray-500">Salary Rate:</span> <span className="font-bold text-emerald-700">{rate} {currency}</span></p>
                       <p><span className="font-medium text-gray-500">Cycle Date:</span> <span className="font-semibold text-gray-900">Day {cycleDate} of month</span></p>
@@ -1470,7 +1469,7 @@ export const AddEmployee: React.FC = () => {
             </div>
 
             {/* Final Info Alert */}
-            <div className="bg-blue-50/80 border border-blue-200 rounded-2xl p-4 flex items-center gap-3 text-xs text-blue-800">
+            <div className="bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl p-4 flex items-center gap-3 text-xs text-blue-800 dark:text-blue-300">
               <Sparkles className="w-5 h-5 text-blue-600 shrink-0" />
               <span>
                 Please double check the details above. Clicking <strong>Create Employee</strong> will register this employee record into the database.
@@ -1484,160 +1483,179 @@ export const AddEmployee: React.FC = () => {
     }
   };
 
+  const currentStep = stepsConfig.find((s) => s.step === step) || stepsConfig[0];
+  const CurrentStepIcon = currentStep.icon;
+
   return (
-    <div className="max-w-5xl mx-auto pb-10">
-      {/* Main Single Card Container */}
-      <Card className="rounded-2xl border border-gray-300 shadow-2xs overflow-hidden bg-white">
-        {/* Integrated Top Header & Simple Un-boxed Stepper Bar */}
-        <div className="p-6 border-b border-gray-200 bg-gray-50/70 space-y-6">
-          {/* Top Row: Back button, Title & Step Badge */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => navigate('/employees')}
-                className="rounded-xl border-gray-300 hover:bg-white text-gray-700 h-10 w-10 shrink-0 shadow-2xs"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-              <div>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold text-blue-600">Employees</span>
-                  <span className="text-gray-300">/</span>
-                  <span className="text-gray-500">Add New</span>
-                </div>
-                <h1 className="text-xl font-bold tracking-tight text-gray-900">Add New Employee</h1>
-              </div>
-            </div>
+    <div className="max-w-[1400px] mx-auto p-1 sm:p-2 pb-10 space-y-6">
+      {/* Page header */}
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => navigate('/employees')}
+          className="rounded-xl border-gray-200 dark:border-gray-800 h-9 w-9 shrink-0"
+          title="Back to employees"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+            <button type="button" onClick={() => navigate('/employees')} className="hover:text-blue-600">Employees</button>
+            <ChevronRight className="w-3 h-3" />
+            <span>Add new</span>
           </div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Add New Employee</h1>
+        </div>
+      </div>
 
-          {/* Simple Horizontal Stepper Line (No Cards) */}
-          <div className="pt-2">
-            <div className="flex items-center justify-between relative max-w-3xl mx-auto px-4">
-              {/* Connected Background Progress Line */}
-              <div className="absolute left-[10%] right-[10%] top-4 h-0.5 bg-gray-200 z-0" />
-              <div
-                className="absolute left-[10%] top-4 h-0.5 bg-blue-600 transition-all duration-300 z-0"
-                style={{
-                  width: `${((step - 1) / (totalSteps - 1)) * 80}%`,
-                }}
-              />
-
+      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6 items-start">
+        {/* Stepper: vertical on desktop */}
+        <aside className="hidden lg:block lg:sticky lg:top-4">
+          <div className="rounded-2xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-950 shadow-sm p-3">
+            <p className="px-2 pt-1 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+              Step {step} of {totalSteps}
+            </p>
+            <ol className="space-y-1">
               {stepsConfig.map((s) => {
                 const isActive = s.step === step;
                 const isCompleted = s.step < step;
                 const Icon = s.icon;
-
                 return (
-                  <div
-                    key={s.step}
-                    onClick={() => {
-                      if (isCompleted) setStep(s.step);
-                    }}
-                    className={`relative z-10 flex flex-col items-center group transition-all ${
-                      isCompleted ? 'cursor-pointer' : ''
-                    }`}
-                  >
-                    {/* Circle Node Badge */}
-                    <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
+                  <li key={s.step}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isCompleted) setStep(s.step);
+                      }}
+                      className={`w-full flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors ${
                         isActive
-                          ? 'bg-blue-600 text-white ring-4 ring-blue-100 shadow-md scale-110'
+                          ? 'bg-blue-50 dark:bg-blue-950/50'
                           : isCompleted
-                          ? 'bg-emerald-600 text-white shadow-2xs'
-                          : 'bg-white border-2 border-gray-300 text-gray-400'
+                          ? 'hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer'
+                          : 'cursor-default'
                       }`}
                     >
-                      {isCompleted ? <Check className="w-4 h-4" /> : <span>{s.step}</span>}
-                    </div>
-
-                    {/* Step Title */}
-                    <div className="mt-2 text-center">
-                      <p className={`text-xs font-bold transition-colors ${
-                        isActive
-                          ? 'text-blue-700'
-                          : isCompleted
-                          ? 'text-gray-900'
-                          : 'text-gray-400'
-                      }`}>
-                        {s.title}
-                      </p>
-                      <p className="text-[10px] text-gray-400 hidden sm:block mt-0.5">
-                        {s.subtitle}
-                      </p>
-                    </div>
-                  </div>
+                      <span
+                        className={`size-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : isCompleted
+                            ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200 dark:bg-emerald-950/50'
+                            : 'bg-gray-100 text-gray-400 dark:bg-gray-900'
+                        }`}
+                      >
+                        {isCompleted ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block text-sm font-semibold ${isActive ? 'text-blue-700 dark:text-blue-300' : isCompleted ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'}`}>
+                          {s.title}
+                        </span>
+                        <span className="block text-[11px] text-gray-500 dark:text-gray-400 truncate">{s.subtitle}</span>
+                      </span>
+                    </button>
+                  </li>
                 );
               })}
+            </ol>
+            <div className="mt-3 mx-2 mb-1 h-1.5 rounded-full bg-gray-100 dark:bg-gray-900 overflow-hidden">
+              <div
+                className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                style={{ width: `${(step / totalSteps) * 100}%` }}
+              />
             </div>
           </div>
-        </div>
+        </aside>
 
-        <CardContent className="p-0">
-          {/* Form Step Body */}
-          <div className="p-6">
-            {renderStepContent()}
+        {/* Form card */}
+        <Card className="gap-0 rounded-2xl border border-gray-200/80 dark:border-gray-800 shadow-sm overflow-hidden bg-white dark:bg-gray-950 min-w-0">
+          {/* Compact stepper for small screens */}
+          <div className="lg:hidden flex items-center gap-1.5 px-4 pt-4">
+            {stepsConfig.map((s) => (
+              <div
+                key={s.step}
+                className={`h-1.5 flex-1 rounded-full ${s.step < step ? 'bg-emerald-500' : s.step === step ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-800'}`}
+              />
+            ))}
           </div>
 
-          {/* Fixed Footer Actions */}
-          <div className="flex items-center justify-between p-6 bg-gray-50/50 border-t border-gray-300">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={goToPrevious}
-              disabled={step === 1 || isSubmitting}
-              className="rounded-xl px-5 h-11 border-gray-300 hover:bg-gray-100 text-xs font-bold"
-            >
-              <ChevronLeft className="mr-1.5 size-4" />
-              Previous Step
-            </Button>
+          {/* Step header */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+            <div className="size-10 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-300 flex items-center justify-center shrink-0">
+              <CurrentStepIcon className="w-4.5 h-4.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Step {step} of {totalSteps}</p>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{currentStep.title}</h2>
+            </div>
+            <span className="ml-auto hidden sm:block text-xs text-gray-500 dark:text-gray-400">{currentStep.subtitle}</span>
+          </div>
 
-            <div className="flex items-center gap-2.5">
+          <CardContent className="p-0">
+            {/* Form Step Body */}
+            <div className="p-5 sm:p-6">
+              {renderStepContent()}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="sticky bottom-0 flex items-center justify-between gap-2 px-5 sm:px-6 py-4 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-t border-gray-100 dark:border-gray-800">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => navigate('/employees')}
-                disabled={isSubmitting}
-                className="rounded-xl px-4 h-11 border-gray-300 hover:bg-gray-100 text-xs font-bold text-gray-600"
+                onClick={goToPrevious}
+                disabled={step === 1 || isSubmitting}
+                className="rounded-lg h-10 px-4"
               >
-                Cancel
+                <ChevronLeft className="mr-1 size-4" />
+                Previous
               </Button>
 
-              {step < totalSteps ? (
+              <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  onClick={goToNext}
-                  disabled={!canGoNext() || isSubmitting}
-                  className="rounded-xl px-6 h-11 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs"
-                >
-                  Next Step
-                  <ChevronRight className="ml-1.5 size-4" />
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  onClick={handleCreateEmployee}
+                  variant="outline"
+                  onClick={() => navigate('/employees')}
                   disabled={isSubmitting}
-                  className="rounded-xl px-7 h-11 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-2"
+                  className="rounded-lg h-10 px-4"
                 >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Creating Employee...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      Create Employee
-                    </>
-                  )}
+                  Cancel
                 </Button>
-              )}
+
+                {step < totalSteps ? (
+                  <Button
+                    type="button"
+                    onClick={goToNext}
+                    disabled={!canGoNext() || isSubmitting}
+                    className="rounded-lg h-10 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                  >
+                    Next
+                    <ChevronRight className="ml-1 size-4" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={handleCreateEmployee}
+                    disabled={isSubmitting}
+                    className="rounded-lg h-10 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-2"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Creating Employee...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        Create Employee
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

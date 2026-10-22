@@ -16,7 +16,21 @@ exports.getDepartments = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.json({ success: true, data: departments });
+    // Active headcount per department (not deleted, not admin)
+    const counts = await prisma.employee.groupBy({
+      by: ["departmentId"],
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        NOT: { role: "ADMIN" },
+        departmentId: { not: null },
+      },
+      _count: { _all: true },
+    });
+    const countMap = new Map(counts.map((c) => [c.departmentId, c._count._all]));
+    const data = departments.map((d) => ({ ...d, activeEmployees: countMap.get(d.id) || 0 }));
+
+    res.json({ success: true, data });
 
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching departments" });
@@ -107,5 +121,51 @@ exports.deleteDepartment = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ success: false, message: "Error deleting department" });
+  }
+};
+
+// GET /departments/:id/employees – active employees of one department
+exports.getDepartmentEmployees = async (req, res) => {
+  try {
+    const orgId = req.user.orgId;
+    const departmentId = Number(req.params.id);
+    const department = await prisma.department.findFirst({
+      where: { id: departmentId, organizationId: orgId, deletedAt: null },
+      select: { id: true, title: true, company: { select: { id: true, name: true } } },
+    });
+    if (!department) return res.status(404).json({ success: false, message: "Department not found" });
+
+    const employees = await prisma.employee.findMany({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        NOT: { role: "ADMIN" },
+        departmentId,
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        biometricId: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+        canLogin: true,
+        profileImage: true,
+        entityId: true,
+        companyId: true,
+        departmentId: true,
+        department: { select: { id: true, title: true } },
+        company: { select: { id: true, name: true } },
+        entity: { select: { id: true, name: true, code: true } },
+        jobInfo: { select: { designation: true, hiringDate: true, employmentStatus: true } },
+      },
+      orderBy: { firstName: "asc" },
+    });
+
+    res.json({ success: true, data: { department, employees } });
+  } catch (error) {
+    console.error("Error fetching department employees:", error);
+    res.status(500).json({ success: false, message: "Error fetching department employees" });
   }
 };

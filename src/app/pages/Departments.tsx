@@ -7,7 +7,8 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
-import { Search, Plus, Edit, Trash2 } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Users } from 'lucide-react';
+import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { departmentAPI, locationAPI } from '../services/api';
 
@@ -162,6 +163,7 @@ export const Departments: React.FC = () => {
                 <TableRow>
                   <TableHead>Title</TableHead>
                   <TableHead>Location</TableHead>
+                  <TableHead>Active Employees</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -170,7 +172,17 @@ export const Departments: React.FC = () => {
                 {filteredDepartments.map((dept) => (
                   <TableRow key={dept.id}>
                     <TableCell className="font-medium">{dept.title}</TableCell>
-                    <TableCell>{dept?.company?.name}</TableCell>
+                    <TableCell>{dept?.company?.name || "—"}</TableCell>
+                    <TableCell>
+                      <Link
+                        to={`/departments/${dept.id}/employees`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold tabular-nums bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-900 cursor-pointer"
+                        title="View active employees"
+                      >
+                        <Users className="size-3.5" />
+                        {dept.activeEmployees ?? 0}
+                      </Link>
+                    </TableCell>
                     <TableCell>{getStatusBadge(dept.status)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">

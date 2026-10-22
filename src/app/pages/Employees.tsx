@@ -40,13 +40,14 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
+  Globe,
 } from 'lucide-react';
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import { API_URL, departmentAPI, employeeAPI, locationAPI } from '../services/api';
+import { API_URL, departmentAPI, employeeAPI, locationAPI, entityAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 
 const getPaginationRange = (current: number, total: number) => {
@@ -86,13 +87,14 @@ export const Employees: React.FC = () => {
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
-
+  const [entities, setEntities] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
+  const [filterEntity, setFilterEntity] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
   const [filterLocation, setFilterLocation] = useState<string>('all');
   const [filterLogin, setFilterLogin] = useState('all');
@@ -103,7 +105,7 @@ export const Employees: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterDepartment, filterRole, filterLocation, filterLogin]);
+  }, [searchQuery, filterDepartment, filterEntity, filterRole, filterLocation, filterLogin]);
 
   useEffect(() => {
     const handleLocationEvent = (e: any) => {
@@ -203,12 +205,14 @@ export const Employees: React.FC = () => {
     fetchEmployees();
     fetchLocations();
     fetchDepartments();
+    fetchEntities();
 
     // 🔄 Real-time polling every 5 seconds for live employee updates from DB
     const pollInterval = setInterval(() => {
       fetchEmployees(true);
       fetchLocations();
       fetchDepartments();
+      fetchEntities();
     }, 5000);
 
     const handleUpdate = () => {
@@ -250,6 +254,15 @@ export const Employees: React.FC = () => {
     try {
       const res = await departmentAPI.getDepartments();
       setDepartments(res.data || []);
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const fetchEntities = async () => {
+    try {
+      const res = await entityAPI.getEntities();
+      setEntities(res.data || []);
     } catch (err) {
       // ignore
     }
@@ -346,6 +359,13 @@ export const Employees: React.FC = () => {
       empDept === filterDepartment ||
       (emp.department?.title && emp.department.title === filterDepartment);
 
+    const empEntityId = emp.entityId ?? emp.entity?.id;
+    const matchesEntity =
+      filterEntity === 'all' ||
+      (filterEntity === 'no_entity'
+        ? !empEntityId || empEntityId === 'none' || empEntityId === ''
+        : empEntityId !== null && empEntityId !== undefined && String(empEntityId) === String(filterEntity));
+
     const matchesRole = filterRole === 'all' || emp.role?.toLowerCase() === filterRole?.toLowerCase();
 
     const empCompId = String(emp.companyId || emp.company?.id || emp.locationId || '');
@@ -360,7 +380,7 @@ export const Employees: React.FC = () => {
       (filterLogin === 'yes' && Boolean(emp.canLogin)) ||
       (filterLogin === 'no' && !emp.canLogin);
 
-    return matchesDept && matchesRole && matchesLocation && matchesLogin;
+    return matchesDept && matchesEntity && matchesRole && matchesLocation && matchesLogin;
   });
 
   // Pagination calculations
@@ -376,6 +396,7 @@ export const Employees: React.FC = () => {
   const isFiltered =
     searchQuery !== '' ||
     filterDepartment !== 'all' ||
+    filterEntity !== 'all' ||
     filterRole !== 'all' ||
     filterLocation !== 'all' ||
     filterLogin !== 'all';
@@ -383,6 +404,7 @@ export const Employees: React.FC = () => {
   const resetFilters = () => {
     setSearchQuery('');
     setFilterDepartment('all');
+    setFilterEntity('all');
     setFilterRole('all');
     setFilterLocation('all');
     setFilterLogin('all');
@@ -407,6 +429,26 @@ export const Employees: React.FC = () => {
           value: String(dept),
           label: String(dept),
         }))),
+  ];
+
+  const entityOptions = [
+    { value: 'all', label: 'All Entities' },
+    ...(entities && entities.length > 0
+      ? entities.map((ent: any) => ({
+          value: String(ent.id),
+          label: ent.name || ent.title || `Entity #${ent.id}`,
+        }))
+      : Array.from(
+          new Map(
+            employees
+              .filter((e) => e.entity || e.entityId)
+              .map((e) => [
+                String(e.entity?.id || e.entityId),
+                e.entity?.name || e.entity?.title || `Entity #${e.entityId}`,
+              ])
+          ).entries()
+        ).map(([value, label]) => ({ value, label }))),
+    { value: 'no_entity', label: 'No Entity' },
   ];
 
   const locationOptions = [
@@ -535,6 +577,17 @@ export const Employees: React.FC = () => {
                 value={filterDepartment}
                 onValueChange={setFilterDepartment}
                 options={departmentOptions}
+              />
+
+              {/* Entity Filter */}
+              <SearchableSelect
+                className="w-[145px] h-9 text-xs sm:text-sm bg-white rounded-xl border-gray-200"
+                icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                placeholder="All Entities"
+                searchPlaceholder="Search entity..."
+                value={filterEntity}
+                onValueChange={setFilterEntity}
+                options={entityOptions}
               />
 
               {/* Role Filter */}
