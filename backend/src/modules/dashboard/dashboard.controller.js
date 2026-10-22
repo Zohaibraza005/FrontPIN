@@ -18,6 +18,51 @@ const getWeekRange = () => {
 };
 
 /* ---------------------------------- */
+/* Helper: Is Employee Off Day by Schedule */
+/* ---------------------------------- */
+function isEmployeeOffDay(schedules, dateStr, timezone = null) {
+  if (!schedules) return false;
+  const scheduleList = Array.isArray(schedules) ? schedules : [schedules];
+  const activeSchedule = scheduleList.find((s) => s && !s.deletedAt);
+  if (!activeSchedule) return false;
+
+  let days = activeSchedule.days;
+  if (typeof days === "string") {
+    try {
+      days = JSON.parse(days);
+    } catch {
+      return false;
+    }
+  }
+  if (!Array.isArray(days) || days.length === 0) return false;
+
+  let mDate;
+  if (typeof dateStr === "string") {
+    const cleanStr = dateStr.slice(0, 10);
+    mDate = timezone ? moment.tz(cleanStr, "YYYY-MM-DD", timezone) : moment(cleanStr, "YYYY-MM-DD");
+  } else if (moment.isMoment(dateStr)) {
+    mDate = timezone ? dateStr.clone().tz(timezone) : dateStr;
+  } else if (dateStr instanceof Date) {
+    mDate = timezone ? moment(dateStr).tz(timezone) : moment(dateStr);
+  } else {
+    mDate = timezone ? moment().tz(timezone) : moment();
+  }
+
+  const shortDay = mDate.format("ddd").toLowerCase();
+  const fullDay = mDate.format("dddd").toLowerCase();
+
+  const daysArr = days.map((d) => {
+    if (typeof d === "object" && d !== null) {
+      return String(d.day || d.dayFull || d.name || d.short || "").trim().toLowerCase();
+    }
+    return String(d).trim().toLowerCase();
+  });
+
+  const isWorkingDay = daysArr.includes(shortDay) || daysArr.includes(fullDay);
+  return !isWorkingDay;
+}
+
+/* ---------------------------------- */
 /* ADMIN DASHBOARD */
 /* ---------------------------------- */
 const getAdminDashboard = async (req, res) => {
@@ -91,6 +136,9 @@ const getAdminDashboard = async (req, res) => {
       include: {
         company: {
           select: { timezone: true, name: true },
+        },
+        Schedule: {
+          where: { deletedAt: null },
         },
         Attendance: {
           where: {
@@ -225,6 +273,12 @@ const getAdminDashboard = async (req, res) => {
       (e) => e.isLate || e.status === "LATE" || e.status === "TARDY"
     ).length;
 
+    const offDayEmployees = employees.filter((emp) => {
+      const empTz = emp.company?.timezone || orgTimeZone;
+      return isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
+    });
+    const offDay = offDayEmployees.length;
+
     const overtimeRequests = await prisma.overtime.count({
       where: {
         OR: [
@@ -357,6 +411,7 @@ const getAdminDashboard = async (req, res) => {
         onLeave,
         absentToday,
         lateToday,
+        offDay,
         overtimeRequests,
         activeProjects,
         completedTasks,
@@ -647,6 +702,9 @@ const getSupervisorDashboard = async (req, res) => {
       include: {
         company: true,
         department: true,
+        Schedule: {
+          where: { deletedAt: null },
+        },
         Attendance: {
           where: {
             OR: [
@@ -779,6 +837,12 @@ const getSupervisorDashboard = async (req, res) => {
 
     const lateToday = attendanceWidget.filter((e) => e.status === "LATE" || e.status === "TARDY").length;
 
+    const offDayEmployees = employees.filter((emp) => {
+      const empTz = emp.company?.timezone || orgTimeZone;
+      return isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
+    });
+    const offDay = offDayEmployees.length;
+
     // 7️⃣ Projects & Tasks
     const projPriv = rawPrivs.find((p) => p.module === "PROJECT");
     const taskPriv = rawPrivs.find((p) => p.module === "TASK");
@@ -850,6 +914,7 @@ const getSupervisorDashboard = async (req, res) => {
         onLeave,
         absentToday,
         lateToday,
+        offDay,
         activeProjects,
         completedTasks,
         pendingTasks,
@@ -1622,6 +1687,8 @@ const getStatsDetails = async (req, res) => {
       let isLate = false;
       let lateMinutes = 0;
 
+      const isOffDay = isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
+
       if (leave) {
         status = "on_leave";
       } else if (effectiveCheckIn) {
@@ -1642,6 +1709,8 @@ const getStatsDetails = async (req, res) => {
         } else {
           status = "present";
         }
+      } else if (isOffDay) {
+        status = "off_day";
       }
 
       // Collect all raw biometric punches for this date
@@ -1781,6 +1850,7 @@ const getStatsDetails = async (req, res) => {
         departmentId: emp.departmentId || emp.department?.id,
         role: emp.role,
         status,
+        isOffDay,
         clockIn,
         clockOut,
         checkInTime: effectiveCheckIn || null,
@@ -1839,6 +1909,16 @@ const getStatsDetails = async (req, res) => {
       case "late-tardy":
       case "late-today":
         list = unifiedEmployeeList.filter((e) => e.isLate || e.status === "late" || e.status === "tardy");
+        break;
+
+      // ────────────────────────────────────────────────
+      // off-day & scheduled-off
+      // ────────────────────────────────────────────────
+      case "off-day":
+      case "scheduled-off":
+      case "off-today":
+      case "day-off":
+        list = unifiedEmployeeList.filter((e) => e.isOffDay || e.status === "off_day" || e.status === "off");
         break;
 
       case "overtime-requests":

@@ -216,6 +216,7 @@ export const StatsDetails: React.FC = () => {
     if (cat === "present-today") return "Present Today";
     if (cat === "absent-today") return "Absent Today";
     if (cat === "on-leave") return "On Leave";
+    if (cat === "off-day" || cat === "scheduled-off" || cat === "off-today" || cat === "day-off") return "Off Day";
     if (cat === "total-employees") return "Total Employees";
     if (cat === "overtime-requests" || cat === "overtime") return "Overtime Requests";
     return cat
@@ -387,6 +388,15 @@ export const StatsDetails: React.FC = () => {
         bg: "bg-purple-50 text-purple-600 border-purple-200",
         badgeBg: "bg-purple-100 text-purple-800 border-purple-200",
         sub: "Employees on approved leave today",
+      };
+    }
+    if (category === "off-day" || category === "scheduled-off" || category === "off-today" || category === "day-off") {
+      return {
+        icon: Coffee,
+        color: "purple",
+        bg: "bg-purple-50 text-purple-600 border-purple-200",
+        badgeBg: "bg-purple-100 text-purple-800 border-purple-200",
+        sub: "Employees whose schedule has today as an off day",
       };
     }
     if (category === "overtime-requests" || category === "overtime") {

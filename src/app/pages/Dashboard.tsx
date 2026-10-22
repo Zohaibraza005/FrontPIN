@@ -158,6 +158,7 @@ export const Dashboard: React.FC = () => {
     onLeave: 0,
     absentToday: 0,
     lateToday: 0,
+    offDay: 0,
     overtimeRequests: 0,
     pendingLeaves: 0,
     activeProjects: 0,
@@ -1075,13 +1076,13 @@ export const Dashboard: React.FC = () => {
                   label="Late Today"
                 />
                 <StatCard
-                  title="Overtime Requests"
-                  value={stats.overtimeRequests ?? 0}
-                  icon={Timer}
+                  title="Off Day"
+                  value={stats.offDay ?? 0}
+                  icon={Coffee}
                   color="purple"
                   selectedDate={selectedDate}
                   selectedLocation={selectedLocation}
-                  label="Overtime"
+                  label="Off Day"
                 />
               </div>
               
