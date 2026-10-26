@@ -228,10 +228,13 @@ const getAdminDashboard = async (req, res) => {
         }
       }
 
+      const isOffDay = isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
       let status = "ABSENT";
       let isLate = false;
 
-      if (leaveEmployeeIds.includes(emp.id)) {
+      if (isOffDay) {
+        status = "OFF_DAY";
+      } else if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
       } else if (effectiveCheckIn) {
         isLate = Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY");
@@ -255,6 +258,7 @@ const getAdminDashboard = async (req, res) => {
         checkInTime: effectiveCheckIn || null,
         checkOutTime: effectiveCheckOut || null,
         isLate,
+        isOffDay,
         activities: attendance?.activities ? attendance?.activities : [],
         company: emp.company?.name || null,
       };
@@ -273,11 +277,11 @@ const getAdminDashboard = async (req, res) => {
       (e) => e.isLate || e.status === "LATE" || e.status === "TARDY"
     ).length;
 
-    const offDayEmployees = employees.filter((emp) => {
-      const empTz = emp.company?.timezone || orgTimeZone;
-      return isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
-    });
-    const offDay = offDayEmployees.length;
+    const offDay = attendanceWidget.filter((e) => e.status === "OFF_DAY").length;
+
+    const onLeave = attendanceWidget.filter((e) => e.status === "LEAVE").length;
+
+    const absentToday = attendanceWidget.filter((e) => e.status === "ABSENT").length;
 
     const overtimeRequests = await prisma.overtime.count({
       where: {
@@ -293,9 +297,6 @@ const getAdminDashboard = async (req, res) => {
         },
       },
     });
-
-    const onLeave = leaveEmployeeIds.length;
-    const absentToday = Math.max(0, totalEmployees - presentToday - onLeave);
 
     // ────────────────────────────────────────────────
     // 8️⃣ Weekly Attendance Trend
@@ -789,10 +790,13 @@ const getSupervisorDashboard = async (req, res) => {
         }
       }
 
+      const isOffDay = isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
       let status = "ABSENT";
       let isLate = false;
 
-      if (leaveEmployeeIds.includes(emp.id)) {
+      if (isOffDay) {
+        status = "OFF_DAY";
+      } else if (leaveEmployeeIds.includes(emp.id)) {
         status = "LEAVE";
       } else if (effectiveCheckIn) {
         isLate = Boolean(attendance?.isLate || attendance?.status === "LATE" || attendance?.status === "TARDY");
@@ -816,6 +820,7 @@ const getSupervisorDashboard = async (req, res) => {
         checkInTime: effectiveCheckIn || null,
         checkOutTime: effectiveCheckOut || null,
         isLate,
+        isOffDay,
         activities: attendance?.activities || [],
         company: emp.company?.name || null,
         department: emp.department?.title || null,
@@ -829,19 +834,15 @@ const getSupervisorDashboard = async (req, res) => {
       ["PRESENT", "LATE", "TARDY", "BREAK"].includes(e.status)
     ).length;
 
-    const onLeave = leaveEmployeeIds.length;
+    const onLeave = attendanceWidget.filter((e) => e.status === "LEAVE").length;
+
+    const offDay = attendanceWidget.filter((e) => e.status === "OFF_DAY").length;
 
     const absentToday = attendanceWidget.filter(
       (e) => e.status === "ABSENT"
     ).length;
 
     const lateToday = attendanceWidget.filter((e) => e.status === "LATE" || e.status === "TARDY").length;
-
-    const offDayEmployees = employees.filter((emp) => {
-      const empTz = emp.company?.timezone || orgTimeZone;
-      return isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
-    });
-    const offDay = offDayEmployees.length;
 
     // 7️⃣ Projects & Tasks
     const projPriv = rawPrivs.find((p) => p.module === "PROJECT");
@@ -1593,7 +1594,9 @@ const getStatsDetails = async (req, res) => {
         },
         department: { select: { id: true, title: true } },
         jobInfo: true,
-        Schedule: true,
+        Schedule: {
+          where: { deletedAt: null },
+        },
         Attendance: {
           where: {
             OR: [
@@ -1689,13 +1692,18 @@ const getStatsDetails = async (req, res) => {
 
       const isOffDay = isEmployeeOffDay(emp.Schedule, targetDateStr, empTz);
 
-      if (leave) {
-        status = "on_leave";
-      } else if (effectiveCheckIn) {
+      if (effectiveCheckIn) {
         clockIn = moment(effectiveCheckIn).tz(empTz).format("hh:mm A");
         if (effectiveCheckOut) {
           clockOut = moment(effectiveCheckOut).tz(empTz).format("hh:mm A");
         }
+      }
+
+      if (isOffDay) {
+        status = "off_day";
+      } else if (leave) {
+        status = "on_leave";
+      } else if (effectiveCheckIn) {
         isLate = Boolean(att?.isLate || att?.status === "LATE" || att?.status === "TARDY");
         lateMinutes = att?.lateMinutes || 0;
 
@@ -1709,8 +1717,6 @@ const getStatsDetails = async (req, res) => {
         } else {
           status = "present";
         }
-      } else if (isOffDay) {
-        status = "off_day";
       }
 
       // Collect all raw biometric punches for this date
@@ -1918,7 +1924,9 @@ const getStatsDetails = async (req, res) => {
       case "scheduled-off":
       case "off-today":
       case "day-off":
-        list = unifiedEmployeeList.filter((e) => e.isOffDay || e.status === "off_day" || e.status === "off");
+        list = unifiedEmployeeList.filter(
+          (e) => e.status === "off_day" || (e.isOffDay && e.status !== "on_leave")
+        );
         break;
 
       case "overtime-requests":

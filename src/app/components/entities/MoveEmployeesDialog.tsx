@@ -98,6 +98,42 @@ export const MoveEmployeesDialog: React.FC<MoveEmployeesDialogProps> = ({
     setSaving(true);
     try {
       const res = await entityAPI.moveEmployees({ employeeIds: selected, toEntityId: Number(toId) });
+
+      let actorName = 'HR Admin';
+      try {
+        const userRaw = localStorage.getItem('user');
+        if (userRaw) {
+          const u = JSON.parse(userRaw);
+          if (u?.name) actorName = u.name;
+          else if (u?.firstName) actorName = `${u.firstName} ${u.lastName || ''}`.trim();
+        }
+      } catch (e) {}
+
+      // Save audit log to each moved employee's history in real-time
+      selected.forEach((empId) => {
+        try {
+          const key = `frontpin_audit_logs_${empId}`;
+          const raw = localStorage.getItem(key);
+          const logs = raw ? JSON.parse(raw) : [];
+          const logEntry = {
+            id: `move_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            type: 'ENTITY_TRANSFER',
+            category: 'Transfers',
+            title: `Entity Transfer: ${fromName || 'Previous Entity'} → ${toName || 'New Entity'}`,
+            fromValue: fromName || 'Previous Entity',
+            toValue: toName || 'New Entity',
+            description: `Employee moved to business entity "${toName || 'New Entity'}" from "${fromName || 'Previous Entity'}".`,
+            date: new Date().toISOString(),
+            actor: actorName,
+          };
+          logs.unshift(logEntry);
+          localStorage.setItem(key, JSON.stringify(logs));
+        } catch (e) {
+          console.error("Failed to log entity move for emp", empId, e);
+        }
+      });
+      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { movedIds: selected, toEntityId: toId } }));
+
       toast.success(res?.message || "Employees moved");
       onOpenChange(false);
       onMoved?.();

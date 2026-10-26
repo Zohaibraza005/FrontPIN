@@ -37,7 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { FileSpreadsheet, Printer } from "lucide-react";
+import { FileSpreadsheet, Printer, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { DatePickerWithRange } from "../components/ui/date-range-picker";
 import type { DateRange as RangeType } from "react-day-picker";
@@ -94,6 +94,7 @@ export const Reports: React.FC = () => {
   const [employeeId, setEmployeeId] = useState("all");
   const [employees, setEmployees] = useState<any[]>([]);
   const [monthlyReportEmployees, setMonthlyReportEmployees] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadFilters();
@@ -156,6 +157,7 @@ export const Reports: React.FC = () => {
 
   const loadReports = async () => {
     try {
+      setLoading(true);
       const { start, end, view } = getDateInterval();
       const formattedStart = format(start, "yyyy-MM-dd");
       const formattedEnd = format(end, "yyyy-MM-dd");
@@ -215,6 +217,8 @@ export const Reports: React.FC = () => {
       }
     } catch (err) {
       console.error("Failed to load reports:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -634,9 +638,16 @@ export const Reports: React.FC = () => {
             <CardHeader className="py-2.5 px-4 flex flex-row items-center justify-between flex-wrap gap-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
               <div>
                 <CardTitle className="text-sm font-bold">Real-Time Attendance Excel Grid View</CardTitle>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Showing {monthlyReportEmployees.length} employee records matching current filters
-                </p>
+                {loading ? (
+                  <div className="flex items-center gap-1.5 text-xs text-blue-600 font-medium mt-0.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0" />
+                    <span>Loading attendance...</span>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Showing {monthlyReportEmployees.length} employee records matching current filters
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <Select value={dateRange} onValueChange={setDateRange}>
@@ -726,7 +737,12 @@ export const Reports: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="p-2 sm:p-3">
-              {monthlyReportEmployees.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-2.5 text-muted-foreground">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <p className="text-sm font-medium text-gray-500">Loading attendance...</p>
+                </div>
+              ) : monthlyReportEmployees.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">
                   No real-time employee attendance records found for the selected filters.
                 </div>

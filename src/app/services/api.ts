@@ -263,6 +263,10 @@ export const departmentAPI = {
   getDepartmentEmployees: async (id: number | string) => {
     return apiCall(`/departments/${id}/employees`);
   },
+
+  moveEmployees: async (data: { employeeIds: number[]; toDepartmentId: number }) => {
+    return apiCall("/departments/move-employees", { method: "POST", body: JSON.stringify(data) });
+  },
 };
 
 // Entity API

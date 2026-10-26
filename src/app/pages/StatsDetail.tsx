@@ -888,9 +888,16 @@ export const StatsDetails: React.FC = () => {
                           );
                         } else if (st === "on_leave" || st === "leave") {
                           return (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                              <span className="size-1.5 rounded-full bg-purple-500" />
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                              <span className="size-1.5 rounded-full bg-sky-500" />
                               On Leave
+                            </span>
+                          );
+                        } else if (st === "off_day" || st === "off" || st === "off-day") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
+                              <span className="size-1.5 rounded-full bg-slate-500" />
+                              Off Day
                             </span>
                           );
                         } else {

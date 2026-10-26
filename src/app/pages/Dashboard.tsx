@@ -583,6 +583,7 @@ export const Dashboard: React.FC = () => {
       if (status === "break") return st === "break" || st === "on_break";
       if (status === "leave") return st === "leave" || st === "on_leave";
       if (status === "absent") return st === "absent";
+      if (status === "off_day" || status === "off") return st === "off_day" || st === "off" || st === "off day";
       return st === status;
     });
   };
@@ -1048,7 +1049,7 @@ export const Dashboard: React.FC = () => {
                 />
                 <StatCard
                   title="Absent Today"
-                  value={stats.absentToday ?? Math.max(0, stats.totalEmployees - stats.presentToday - stats.onLeave)}
+                  value={stats.absentToday ?? Math.max(0, stats.totalEmployees - stats.presentToday - stats.onLeave - (stats.offDay ?? 0))}
                   icon={UserX}
                   color="red"
                   selectedDate={selectedDate}
@@ -1378,6 +1379,13 @@ export const Dashboard: React.FC = () => {
                               On Leave
                             </span>
                           );
+                        } else if (st === "off_day" || st === "off" || st === "off day") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                              <span className="size-1.5 rounded-full bg-purple-500" />
+                              Off Day
+                            </span>
+                          );
                         } else {
                           return (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
@@ -1445,7 +1453,9 @@ export const Dashboard: React.FC = () => {
                       </div>
                     </div>
                     <p className="text-xs sm:text-sm font-bold text-gray-900 capitalize truncate">
-                      {selectedAttendance.status || "—"}
+                      {selectedAttendance.status === "OFF_DAY" || selectedAttendance.status === "off_day"
+                        ? "Off Day"
+                        : (selectedAttendance.status || "—")}
                     </p>
                   </div>
                 </div>
@@ -2619,6 +2629,8 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
     break: { bg: "bg-orange-50", text: "text-orange-700" },
     leave: { bg: "bg-purple-50", text: "text-purple-700" },
     absent: { bg: "bg-rose-50", text: "text-rose-700" },
+    off_day: { bg: "bg-purple-50", text: "text-purple-700" },
+    off: { bg: "bg-purple-50", text: "text-purple-700" },
   };
 
   const currentBadge = statusBadgeColor[status] || { bg: "bg-blue-50", text: "text-blue-700" };
@@ -2689,6 +2701,16 @@ const TabContent = ({ status, title, icon: Icon, color, getFiltered, setSelected
                         <>
                           <span className="size-2 rounded-full bg-rose-500 shrink-0" />
                           <span className="text-rose-600 font-medium text-xs">Absent</span>
+                        </>
+                      ) : status === "off_day" || status === "off" ? (
+                        <>
+                          <span className="size-2 rounded-full bg-purple-500 shrink-0" />
+                          <span className="text-purple-600 font-medium text-xs">Off Day</span>
+                        </>
+                      ) : status === "leave" ? (
+                        <>
+                          <span className="size-2 rounded-full bg-purple-500 shrink-0" />
+                          <span className="text-purple-600 font-medium text-xs">On Leave</span>
                         </>
                       ) : status === "break" ? (
                         <>

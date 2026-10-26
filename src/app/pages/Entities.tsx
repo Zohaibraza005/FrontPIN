@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Search, Plus, Edit, Trash2, Building2, RefreshCw, Shuffle, Users } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Building2, RefreshCw, Shuffle, Users, Eye, MapPin, Calendar, Clock, FileText } from "lucide-react";
 import { Link } from "react-router";
 import { MoveEmployeesDialog } from "../components/entities/MoveEmployeesDialog";
 import { toast } from "sonner";
@@ -49,6 +49,8 @@ export const Entities: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewingEntity, setViewingEntity] = useState<Entity | null>(null);
 
   // Form Fields
   const [entityName, setEntityName] = useState("");
@@ -105,6 +107,11 @@ export const Entities: React.FC = () => {
     setEntityLocation(item.companyId ? String(item.companyId) : "none");
     setEntityStatus(item.status || "active");
     setDialogOpen(true);
+  };
+
+  const openViewDialog = (item: Entity) => {
+    setViewingEntity(item);
+    setViewDialogOpen(true);
   };
 
   const handleSave = async () => {
@@ -269,7 +276,6 @@ export const Entities: React.FC = () => {
                 <TableRow>
                   <TableHead className="w-[120px]">Entity Code</TableHead>
                   <TableHead>Entity Name</TableHead>
-                  <TableHead>Description</TableHead>
                   <TableHead>Location / Branch</TableHead>
                   <TableHead>Active Employees</TableHead>
                   <TableHead>Status</TableHead>
@@ -279,13 +285,13 @@ export const Entities: React.FC = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
                       Loading entities...
                     </TableCell>
                   </TableRow>
                 ) : filteredEntities.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={6} className="text-center py-12 text-gray-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Building2 className="size-10 text-gray-300" />
                         <p className="font-medium text-gray-600">No entities found</p>
@@ -308,9 +314,6 @@ export const Entities: React.FC = () => {
                       <TableCell className="font-medium text-gray-900">
                         {item.name}
                       </TableCell>
-                      <TableCell className="max-w-[260px] truncate text-gray-600 text-sm">
-                        {item.description || "—"}
-                      </TableCell>
                       <TableCell className="text-gray-600 text-sm">
                         {item.company?.name || "—"}
                       </TableCell>
@@ -327,6 +330,14 @@ export const Entities: React.FC = () => {
                       <TableCell>{getStatusBadge(item.status)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="View Entity"
+                            onClick={() => openViewDialog(item)}
+                          >
+                            <Eye className="size-4 text-gray-600 hover:text-gray-900" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -360,6 +371,156 @@ export const Entities: React.FC = () => {
         entities={entities}
         onMoved={fetchEntities}
       />
+
+      {/* View Entity Dialog */}
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="sm:max-w-[520px] rounded-2xl p-6">
+          <DialogHeader className="pb-1">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+                <Building2 className="size-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-bold text-slate-900">
+                  Entity Details
+                </DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Business entity profile and operational bindings
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {viewingEntity && (
+            <div className="space-y-4 py-2">
+              {/* Entity Banner */}
+              <div className="rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/70">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs tracking-wider shrink-0">
+                      {viewingEntity.code.slice(0, 3)}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 leading-tight">
+                        {viewingEntity.name}
+                      </h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white text-slate-700 border border-slate-200 shadow-xs">
+                          {viewingEntity.code}
+                        </span>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-xs text-slate-500">
+                          {viewingEntity.company?.name || "Organization-wide"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    {getStatusBadge(viewingEntity.status)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                  <FileText className="size-3.5 text-slate-400" />
+                  Description
+                </div>
+                <div className="text-xs text-slate-700 bg-slate-50/60 border border-slate-200/60 rounded-xl p-3 leading-relaxed min-h-[56px] flex items-center">
+                  {viewingEntity.description ? (
+                    <p className="whitespace-pre-wrap">{viewingEntity.description}</p>
+                  ) : (
+                    <p className="text-slate-400 italic">No description provided for this entity.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50/50 p-3 space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                    <MapPin className="size-3.5 text-slate-400" />
+                    Location / Branch
+                  </div>
+                  <p className="text-sm font-semibold text-slate-800 truncate">
+                    {viewingEntity.company?.name || "None / Organization-wide"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50/50 p-3 space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                    <Users className="size-3.5 text-slate-400" />
+                    Active Employees
+                  </div>
+                  <div>
+                    <Link
+                      to={`/entities/${viewingEntity.id}/employees`}
+                      onClick={() => setViewDialogOpen(false)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold tabular-nums bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                      title="View active employees"
+                    >
+                      <Users className="size-3" />
+                      {viewingEntity.activeEmployees ?? 0} Employees
+                    </Link>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dates */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="size-3 text-slate-400" />
+                  <span>Created:</span>
+                  <span className="font-semibold text-slate-700">
+                    {viewingEntity.createdAt
+                      ? new Date(viewingEntity.createdAt).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3 text-slate-400" />
+                  <span>Updated:</span>
+                  <span className="font-semibold text-slate-700">
+                    {viewingEntity.updatedAt
+                      ? new Date(viewingEntity.updatedAt).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="pt-2 border-t border-slate-100 gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setViewDialogOpen(false)}
+              className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-slate-900 font-semibold text-xs h-9 px-4"
+            >
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                const ent = viewingEntity;
+                setViewDialogOpen(false);
+                if (ent) openEditDialog(ent);
+              }}
+              className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-4 shadow-sm flex items-center gap-1.5"
+            >
+              <Edit className="size-3.5" />
+              Edit Entity
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

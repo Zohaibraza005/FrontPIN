@@ -16,7 +16,7 @@ import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
 import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins, RotateCcw, History, CreditCard, CheckSquare, ArrowRightLeft, ArrowRight, TrendingUp, ShieldCheck, UserCheck, Filter, Sparkles } from 'lucide-react';
 import { useParams, Link } from 'react-router';
-import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI } from '../services/api';
+import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI, entityAPI } from '../services/api';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
@@ -77,7 +77,7 @@ const mockDocuments = [
 
 export interface EmployeeAuditLog {
   id: string;
-  type: 'TRANSFER' | 'LOCATION' | 'SUPERVISOR' | 'ROLE' | 'STATUS' | 'SCHEDULE' | 'PAYROLL' | 'INCREMENT' | 'SEPARATION' | 'NOTE' | 'ONBOARDING' | 'SYSTEM';
+  type: 'TRANSFER' | 'ENTITY_TRANSFER' | 'LOCATION' | 'SUPERVISOR' | 'ROLE' | 'STATUS' | 'SCHEDULE' | 'PAYROLL' | 'INCREMENT' | 'SEPARATION' | 'NOTE' | 'ONBOARDING' | 'SYSTEM';
   category: 'Transfers' | 'Job & Role' | 'Schedule' | 'Payroll' | 'System';
   title: string;
   fromValue?: string;
@@ -166,8 +166,10 @@ export const EmployeeDetail: React.FC = () => {
   const [locationsList, setLocationsList] = useState<any[]>([]);
   const [departmentsList, setDepartmentsList] = useState<any[]>([]);
   const [supervisorsList, setSupervisorsList] = useState<any[]>([]);
+  const [entitiesList, setEntitiesList] = useState<any[]>([]);
 
   const [job, setJob] = useState({
+    entityId: '',
     entity: '',
     locationId: '',
     location: '',
@@ -291,7 +293,8 @@ export const EmployeeDetail: React.FC = () => {
       });
 
       setJob({
-        entity: emp.company?.name || emp.entity || '',
+        entityId: emp.entityId ? String(emp.entityId) : (emp.entity?.id ? String(emp.entity.id) : ''),
+        entity: emp.entity?.name || emp.company?.name || emp.entity || '',
         locationId: emp.companyId ? String(emp.companyId) : (emp.company?.id ? String(emp.company.id) : ''),
         location: emp.company?.name || emp.location?.name || '',
         departmentId: emp.departmentId ? String(emp.departmentId) : (emp.department?.id ? String(emp.department.id) : ''),
@@ -565,6 +568,48 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
+      // Ensure current department is reflected in the audit logs
+      if (emp.department?.title) {
+        const hasCurrentDeptLog = currentLogs.some(
+          (l) => (l.type === 'TRANSFER' || l.category === 'Transfers') &&
+                 (l.toValue?.toLowerCase() === emp.department.title.toLowerCase() || l.title?.toLowerCase().includes(emp.department.title.toLowerCase()))
+        );
+        if (!hasCurrentDeptLog) {
+          currentLogs.unshift({
+            id: `dept_${Date.now()}_${emp.id}`,
+            type: 'TRANSFER',
+            category: 'Transfers',
+            title: `Department Transfer: ${emp.department.title}`,
+            fromValue: 'Previous Department',
+            toValue: emp.department.title,
+            description: `Employee placed/transferred to "${emp.department.title}" department.`,
+            date: emp.updatedAt || new Date().toISOString(),
+            actor: 'HR Admin',
+          });
+        }
+      }
+
+      // Ensure current entity is reflected in the audit logs
+      if (emp.entity?.name) {
+        const hasCurrentEntityLog = currentLogs.some(
+          (l) => (l.type === 'TRANSFER' || l.category === 'Transfers') &&
+                 (l.toValue?.toLowerCase() === emp.entity.name.toLowerCase() || l.title?.toLowerCase().includes(emp.entity.name.toLowerCase()))
+        );
+        if (!hasCurrentEntityLog) {
+          currentLogs.unshift({
+            id: `ent_${Date.now()}_${emp.id}`,
+            type: 'ENTITY_TRANSFER',
+            category: 'Transfers',
+            title: `Entity Assignment: ${emp.entity.name}`,
+            fromValue: 'Previous Entity',
+            toValue: emp.entity.name,
+            description: `Employee assigned to entity "${emp.entity.name}".`,
+            date: emp.updatedAt || new Date().toISOString(),
+            actor: 'HR Admin',
+          });
+        }
+      }
+
       // Sort logs by date descending (latest first)
       currentLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -581,16 +626,18 @@ export const EmployeeDetail: React.FC = () => {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        const [locRes, depRes, empRes, rolesRes] = await Promise.all([
+        const [locRes, depRes, empRes, rolesRes, entRes] = await Promise.all([
           locationAPI.getLocations(),
           departmentAPI.getDepartments(),
           employeeAPI.getActiveEmployees ? employeeAPI.getActiveEmployees() : employeeAPI.getEmployees(),
           roleAPI.getRoles ? roleAPI.getRoles() : Promise.resolve({ data: [] }),
+          entityAPI.getEntities ? entityAPI.getEntities() : Promise.resolve({ data: [] }),
         ]);
         if (locRes?.data) setLocationsList(locRes.data);
         if (depRes?.data) setDepartmentsList(depRes.data);
         if (empRes?.data) setSupervisorsList(empRes.data);
         if (rolesRes?.data) setRolesList(rolesRes.data);
+        if (entRes?.data) setEntitiesList(entRes.data);
       } catch (err) {
         console.error("Metadata error:", err);
       }
@@ -650,7 +697,7 @@ export const EmployeeDetail: React.FC = () => {
     try {
       const prevRoleName = employee?.appRole?.name || employee?.role || 'User';
       const newRoleObj = rolesList.find((r) => String(r.id) === String(personal.roleId));
-      const newRoleName = newRoleObj?.name || (personal.roleId ? 'Custom Role' : 'No Role Assigned');
+      const newRoleName = newRoleObj?.name || (personal.roleId && personal.roleId !== 'none' ? 'Custom Role' : 'No Role Assigned');
 
       if (String(employee?.roleId || employee?.appRole?.id || '') !== String(personal.roleId || '')) {
         appendAuditLog({
@@ -676,6 +723,57 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
+      const prevFullName = `${employee?.firstName || ''} ${employee?.lastName || ''}`.trim();
+      const newFullName = `${personal.firstName || ''} ${personal.lastName || ''}`.trim();
+      if (prevFullName && newFullName && prevFullName !== newFullName) {
+        appendAuditLog({
+          type: 'STATUS',
+          category: 'System',
+          title: `Employee Name Changed`,
+          fromValue: prevFullName,
+          toValue: newFullName,
+          description: `Employee name changed from "${prevFullName}" to "${newFullName}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      if (personal.email && employee?.email && employee.email !== personal.email) {
+        appendAuditLog({
+          type: 'SYSTEM',
+          category: 'System',
+          title: `Email Address Updated`,
+          fromValue: employee.email,
+          toValue: personal.email,
+          description: `Employee email address changed from "${employee.email}" to "${personal.email}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      const prevPhone = employee?.phoneNumber || employee?.phone || '';
+      if (personal.phone && prevPhone && prevPhone !== personal.phone) {
+        appendAuditLog({
+          type: 'SYSTEM',
+          category: 'System',
+          title: `Phone Number Updated`,
+          fromValue: prevPhone,
+          toValue: personal.phone,
+          description: `Contact phone number changed from "${prevPhone}" to "${personal.phone}".`,
+          actor: 'HR Admin',
+        });
+      }
+
+      if (personal.employeeId && employee?.employeeId && employee.employeeId !== personal.employeeId) {
+        appendAuditLog({
+          type: 'SYSTEM',
+          category: 'System',
+          title: `Employee ID Code Changed`,
+          fromValue: employee.employeeId,
+          toValue: personal.employeeId,
+          description: `Employee company code modified from "${employee.employeeId}" to "${personal.employeeId}".`,
+          actor: 'HR Admin',
+        });
+      }
+
       await employeeAPI.updateEmployee(Number(id), {
         firstName: personal.firstName,
         lastName: personal.lastName,
@@ -697,6 +795,7 @@ export const EmployeeDetail: React.FC = () => {
   const handleSaveJob = async () => {
     try {
       const payload: any = {};
+      if (job.entityId !== undefined && job.entityId !== '') payload.entityId = Number(job.entityId);
       if (job.locationId) payload.companyId = Number(job.locationId);
       if (job.departmentId) payload.departmentId = Number(job.departmentId);
       if (job.supervisorId) payload.supervisorId = Number(job.supervisorId);
@@ -704,12 +803,15 @@ export const EmployeeDetail: React.FC = () => {
       if (job.employmentStatus) payload.employmentStatus = job.employmentStatus;
       if (job.workMode) payload.workMode = job.workMode;
 
-      // Track department transfer (e.g. Tech -> Sales or GMB)
-      const prevDeptName = employee?.department?.title || job.department || 'Unassigned';
-      const newDeptObj = departmentsList.find((d) => String(d.id) === String(job.departmentId));
-      const newDeptName = newDeptObj?.title || job.department;
+      // 1. Track Department transfer
+      const prevDeptId = employee?.departmentId ? String(employee.departmentId) : (employee?.department?.id ? String(employee.department.id) : '');
+      const newDeptId = job.departmentId ? String(job.departmentId) : '';
+      if (prevDeptId !== newDeptId) {
+        const prevDeptObj = departmentsList.find((d) => String(d.id) === prevDeptId) || employee?.department;
+        const newDeptObj = departmentsList.find((d) => String(d.id) === newDeptId);
+        const prevDeptName = prevDeptObj?.title || employee?.department?.title || 'Unassigned';
+        const newDeptName = newDeptObj?.title || job.department || (newDeptId ? 'New Department' : 'Unassigned');
 
-      if (job.departmentId && String(employee?.departmentId || '') !== String(job.departmentId) && prevDeptName !== newDeptName) {
         appendAuditLog({
           type: 'TRANSFER',
           category: 'Transfers',
@@ -721,12 +823,37 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
-      // Track location transfer
-      const prevLocName = employee?.company?.name || employee?.location?.name || job.location || 'Johar Town Branch';
-      const newLocObj = locationsList.find((l) => String(l.id) === String(job.locationId));
-      const newLocName = newLocObj?.name || job.location;
+      // 2. Track Entity transfer
+      const prevEntId = employee?.entityId ? String(employee.entityId) : (employee?.entity?.id ? String(employee.entity.id) : '');
+      const newEntId = job.entityId ? String(job.entityId) : '';
+      if (prevEntId !== newEntId || (job.entity && job.entity !== (employee?.entity?.name || employee?.company?.name))) {
+        const prevEntObj = entitiesList.find((e) => String(e.id) === prevEntId) || employee?.entity;
+        const newEntObj = entitiesList.find((e) => String(e.id) === newEntId);
+        const prevEntName = prevEntObj?.name || employee?.entity?.name || employee?.company?.name || 'Unassigned';
+        const newEntName = newEntObj?.name || job.entity || 'Unassigned';
 
-      if (job.locationId && String(employee?.companyId || employee?.locationId || '') !== String(job.locationId) && prevLocName !== newLocName) {
+        if (prevEntName !== newEntName) {
+          appendAuditLog({
+            type: 'ENTITY_TRANSFER',
+            category: 'Transfers',
+            title: `Entity Transfer: ${prevEntName} → ${newEntName}`,
+            fromValue: prevEntName,
+            toValue: newEntName,
+            description: `Employee moved to business entity "${newEntName}" from "${prevEntName}".`,
+            actor: 'HR Admin',
+          });
+        }
+      }
+
+      // 3. Track Location transfer
+      const prevLocId = employee?.companyId ? String(employee.companyId) : (employee?.company?.id ? String(employee.company.id) : '');
+      const newLocId = job.locationId ? String(job.locationId) : '';
+      if (prevLocId !== newLocId) {
+        const prevLocObj = locationsList.find((l) => String(l.id) === prevLocId) || employee?.company || employee?.location;
+        const newLocObj = locationsList.find((l) => String(l.id) === newLocId);
+        const prevLocName = prevLocObj?.name || 'Unassigned';
+        const newLocName = newLocObj?.name || job.location || 'Unassigned';
+
         appendAuditLog({
           type: 'LOCATION',
           category: 'Transfers',
@@ -738,12 +865,15 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
-      // Track supervisor change
-      const prevSupName = employee?.supervisor ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}` : (job.supervisor || 'Unassigned');
-      const newSupObj = supervisorsList.find((s) => String(s.id) === String(job.supervisorId));
-      const newSupName = newSupObj ? `${newSupObj.firstName} ${newSupObj.lastName}` : job.supervisor;
+      // 4. Track Supervisor change
+      const prevSupId = employee?.supervisorId ? String(employee.supervisorId) : (employee?.supervisor?.id ? String(employee.supervisor.id) : '');
+      const newSupId = job.supervisorId ? String(job.supervisorId) : '';
+      if (prevSupId !== newSupId) {
+        const prevSupObj = employee?.supervisor || supervisorsList.find((s) => String(s.id) === prevSupId);
+        const newSupObj = supervisorsList.find((s) => String(s.id) === newSupId);
+        const prevSupName = prevSupObj ? `${prevSupObj.firstName} ${prevSupObj.lastName}` : 'Unassigned';
+        const newSupName = newSupObj ? `${newSupObj.firstName} ${newSupObj.lastName}` : 'Unassigned';
 
-      if (job.supervisorId && String(employee?.supervisorId || '') !== String(job.supervisorId) && prevSupName !== newSupName) {
         appendAuditLog({
           type: 'SUPERVISOR',
           category: 'Job & Role',
@@ -755,7 +885,7 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
-      // Track employment status change
+      // 5. Track Employment Status change
       const prevStatus = employee?.employmentStatus || employee?.jobInfo?.employmentStatus || 'Permanent';
       if (job.employmentStatus && prevStatus !== job.employmentStatus) {
         appendAuditLog({
@@ -769,7 +899,7 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
-      // Track work mode change
+      // 6. Track Work Mode change
       const prevWorkMode = employee?.workMode || employee?.jobInfo?.workMode || 'On-site';
       if (job.workMode && prevWorkMode !== job.workMode) {
         appendAuditLog({
@@ -783,6 +913,20 @@ export const EmployeeDetail: React.FC = () => {
         });
       }
 
+      // 7. Track Hiring Date change
+      const prevHiring = employee?.hiringDate ? employee.hiringDate.split('T')[0] : (employee?.jobInfo?.hiringDate ? employee.jobInfo.hiringDate.split('T')[0] : '');
+      if (job.hiringDate && prevHiring !== job.hiringDate) {
+        appendAuditLog({
+          type: 'STATUS',
+          category: 'Job & Role',
+          title: `Hiring Date Updated`,
+          fromValue: prevHiring || 'None',
+          toValue: job.hiringDate,
+          description: `Official hiring date modified from "${prevHiring || 'None'}" to "${job.hiringDate}".`,
+          actor: 'HR Admin',
+        });
+      }
+
       await employeeAPI.updateEmployee(Number(id), payload);
       toast.success('Job information updated');
       setEditJob(false);
@@ -791,7 +935,8 @@ export const EmployeeDetail: React.FC = () => {
       if (res?.data) {
         setEmployee(res.data);
         setJob({
-          entity: res.data.company?.name || res.data.entity || '',
+          entityId: res.data.entityId ? String(res.data.entityId) : (res.data.entity?.id ? String(res.data.entity.id) : ''),
+          entity: res.data.entity?.name || res.data.company?.name || res.data.entity || '',
           locationId: res.data.companyId ? String(res.data.companyId) : '',
           location: res.data.company?.name || res.data.location?.name || '',
           departmentId: res.data.departmentId ? String(res.data.departmentId) : '',
@@ -1467,12 +1612,33 @@ export const EmployeeDetail: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div>
                     <Label className="text-xs font-medium text-slate-700">Entity</Label>
-                    <Input
-                      value={job.entity}
-                      onChange={(e) => setJob({ ...job, entity: e.target.value })}
-                      placeholder="e.g. Frontpin HQ"
-                      className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
-                    />
+                    {entitiesList && entitiesList.length > 0 ? (
+                      <SearchableSelect
+                        className="w-full mt-1.5"
+                        placeholder="Select Entity"
+                        searchPlaceholder="Search entity..."
+                        value={job.entityId}
+                        onValueChange={(val) => {
+                          const found = entitiesList.find((e) => String(e.id) === String(val));
+                          setJob({
+                            ...job,
+                            entityId: val,
+                            entity: found?.name || '',
+                          });
+                        }}
+                        options={entitiesList.map((e) => ({
+                          value: String(e.id),
+                          label: e.code ? `${e.name} (${e.code})` : e.name,
+                        }))}
+                      />
+                    ) : (
+                      <Input
+                        value={job.entity}
+                        onChange={(e) => setJob({ ...job, entity: e.target.value })}
+                        placeholder="e.g. Frontpin HQ"
+                        className="mt-1.5 h-10 rounded-xl border-slate-200 bg-white text-slate-900 font-medium text-sm focus:border-blue-500"
+                      />
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-slate-700">Location</Label>
@@ -2859,10 +3025,11 @@ export const EmployeeDetail: React.FC = () => {
               </span>
               {[
                 { id: 'all', label: 'All Activity', count: auditLogs.length },
-                { id: 'transfers', label: 'Transfers', count: auditLogs.filter(l => l.category === 'Transfers' || l.type === 'TRANSFER' || l.type === 'LOCATION').length },
+                { id: 'transfers', label: 'Transfers', count: auditLogs.filter(l => l.category === 'Transfers' || l.type === 'TRANSFER' || l.type === 'LOCATION' || l.type === 'ENTITY_TRANSFER').length },
                 { id: 'job', label: 'Job & Role', count: auditLogs.filter(l => l.category === 'Job & Role' || l.type === 'ROLE' || l.type === 'STATUS' || l.type === 'SUPERVISOR').length },
                 { id: 'schedule', label: 'Schedule', count: auditLogs.filter(l => l.category === 'Schedule' || l.type === 'SCHEDULE').length },
                 { id: 'payroll', label: 'Payroll & Increments', count: auditLogs.filter(l => l.category === 'Payroll' || l.type === 'PAYROLL' || l.type === 'INCREMENT').length },
+                { id: 'system', label: 'System', count: auditLogs.filter(l => l.category === 'System' || l.type === 'SYSTEM' || l.type === 'ONBOARDING').length },
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -2887,10 +3054,11 @@ export const EmployeeDetail: React.FC = () => {
               {(() => {
                 const filtered = auditLogs.filter((log) => {
                   if (historyFilter === 'all') return true;
-                  if (historyFilter === 'transfers') return log.category === 'Transfers' || log.type === 'TRANSFER' || log.type === 'LOCATION';
+                  if (historyFilter === 'transfers') return log.category === 'Transfers' || log.type === 'TRANSFER' || log.type === 'LOCATION' || log.type === 'ENTITY_TRANSFER';
                   if (historyFilter === 'job') return log.category === 'Job & Role' || log.type === 'ROLE' || log.type === 'STATUS' || log.type === 'SUPERVISOR';
                   if (historyFilter === 'schedule') return log.category === 'Schedule' || log.type === 'SCHEDULE';
                   if (historyFilter === 'payroll') return log.category === 'Payroll' || log.type === 'PAYROLL' || log.type === 'INCREMENT';
+                  if (historyFilter === 'system') return log.category === 'System' || log.type === 'SYSTEM' || log.type === 'ONBOARDING';
                   return true;
                 });
 
@@ -2911,19 +3079,32 @@ export const EmployeeDetail: React.FC = () => {
                 return (
                   <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
                     {filtered.map((log) => {
-                      const isTransfer = log.type === 'TRANSFER' || log.type === 'LOCATION';
+                      const isEntityTransfer =
+                        log.type === 'ENTITY_TRANSFER' ||
+                        Boolean(log.title && /entity transfer|entity assignment/i.test(log.title)) ||
+                        Boolean(log.description && (/business entity/i.test(log.description) || /entity "/i.test(log.description)));
+
+                      const isDeptTransfer =
+                        !isEntityTransfer &&
+                        (log.type === 'TRANSFER' ||
+                         Boolean(log.title && /department transfer|assigned to.*department/i.test(log.title)) ||
+                         Boolean(log.description && /department/i.test(log.description)));
+
+                      const isLocationTransfer = log.type === 'LOCATION';
+                      const isTransfer = isEntityTransfer || isDeptTransfer || isLocationTransfer;
                       const isSchedule = log.type === 'SCHEDULE';
                       const isPayroll = log.type === 'PAYROLL' || log.type === 'INCREMENT';
                       const isSeparation = log.type === 'SEPARATION';
                       const isRole = log.type === 'ROLE' || log.type === 'SUPERVISOR' || log.type === 'STATUS';
+                      const isSystem = log.category === 'System' || log.type === 'SYSTEM' || log.type === 'ONBOARDING';
 
                       let dotBg = 'bg-blue-600';
                       let badgeColor = 'bg-blue-50 text-blue-700 border-blue-200';
                       let IconComponent = UserCheck;
 
                       if (isTransfer) {
-                        dotBg = 'bg-indigo-600';
-                        badgeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                        dotBg = 'bg-blue-600';
+                        badgeColor = 'bg-blue-50 text-blue-700 border-blue-200';
                         IconComponent = ArrowRightLeft;
                       } else if (isSchedule) {
                         dotBg = 'bg-amber-500';
@@ -2941,7 +3122,19 @@ export const EmployeeDetail: React.FC = () => {
                         dotBg = 'bg-purple-600';
                         badgeColor = 'bg-purple-50 text-purple-700 border-purple-200';
                         IconComponent = ShieldCheck;
+                      } else if (isSystem) {
+                        dotBg = 'bg-sky-600';
+                        badgeColor = 'bg-sky-50 text-sky-700 border-sky-200';
+                        IconComponent = Sparkles;
                       }
+
+                      const badgeLabel = isEntityTransfer
+                        ? 'Entity Transfer'
+                        : isDeptTransfer
+                        ? 'Department Transfer'
+                        : isLocationTransfer
+                        ? 'Location Transfer'
+                        : log.category;
 
                       return (
                         <div key={log.id} className="relative group">
@@ -2953,7 +3146,7 @@ export const EmployeeDetail: React.FC = () => {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${badgeColor}`}>
                                   <IconComponent className="size-3.5" />
-                                  {log.type === 'TRANSFER' ? 'Department Transfer' : log.type === 'LOCATION' ? 'Location Transfer' : log.category}
+                                  {badgeLabel}
                                 </span>
                                 <span className="font-bold text-sm text-slate-900">{log.title}</span>
                               </div>
@@ -3013,6 +3206,7 @@ export const EmployeeDetail: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="TRANSFER">Department Transfer (e.g. Tech → Sales / GMB)</SelectItem>
+                      <SelectItem value="ENTITY_TRANSFER">Business Entity Transfer</SelectItem>
                       <SelectItem value="LOCATION">Branch / Location Transfer</SelectItem>
                       <SelectItem value="ROLE">Role / Designation Change</SelectItem>
                       <SelectItem value="SCHEDULE">Schedule / Shift Timing Note</SelectItem>
@@ -3075,19 +3269,29 @@ export const EmployeeDetail: React.FC = () => {
                     const dateVal = (document.getElementById('manual-log-date') as HTMLInputElement)?.value;
                     const typeTitle = manualLogType === 'TRANSFER'
                       ? `Department Transfer: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
+                      : manualLogType === 'ENTITY_TRANSFER'
+                      ? `Entity Transfer: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
                       : manualLogType === 'LOCATION'
                       ? `Location Transfer: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
                       : manualLogType === 'ROLE'
                       ? `Role Change: ${manualLogFrom || 'Previous'} → ${manualLogTo || 'New'}`
                       : 'Employment Milestone Recorded';
 
+                    const logDesc = manualLogNote || (
+                      manualLogType === 'ENTITY_TRANSFER'
+                        ? `Employee moved to business entity "${manualLogTo || 'new entity'}" from "${manualLogFrom || 'previous entity'}".`
+                        : manualLogType === 'TRANSFER'
+                        ? `Transferred from department "${manualLogFrom || 'previous department'}" to "${manualLogTo || 'new department'}".`
+                        : `Transferred from ${manualLogFrom || 'previous'} to ${manualLogTo || 'new'}.`
+                    );
+
                     appendAuditLog({
                       type: manualLogType as any,
-                      category: manualLogType === 'TRANSFER' || manualLogType === 'LOCATION' ? 'Transfers' : 'Job & Role',
+                      category: manualLogType === 'TRANSFER' || manualLogType === 'ENTITY_TRANSFER' || manualLogType === 'LOCATION' ? 'Transfers' : 'Job & Role',
                       title: typeTitle,
                       fromValue: manualLogFrom || undefined,
                       toValue: manualLogTo || undefined,
-                      description: manualLogNote || `Transferred from ${manualLogFrom || 'previous department'} to ${manualLogTo || 'new department'}.`,
+                      description: logDesc,
                       date: dateVal ? new Date(dateVal).toISOString() : new Date().toISOString(),
                       actor: 'HR Admin',
                     });

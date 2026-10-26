@@ -169,3 +169,55 @@ exports.getDepartmentEmployees = async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching department employees" });
   }
 };
+
+// POST /departments/move-employees – bulk move employees between departments
+exports.moveEmployees = async (req, res) => {
+  try {
+    if (!["ADMIN", "SUPERVISOR"].includes(req.user?.role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+    const orgId = req.user.orgId;
+    const toDepartmentId = Number(req.body?.toDepartmentId);
+    const ids = [...new Set((req.body?.employeeIds || []).map(Number).filter(Boolean))];
+    if (!toDepartmentId || !ids.length) {
+      return res.status(400).json({ success: false, message: "Select employees and a target department" });
+    }
+
+    const target = await prisma.department.findFirst({
+      where: { id: toDepartmentId, organizationId: orgId, deletedAt: null },
+    });
+    if (!target) return res.status(404).json({ success: false, message: "Target department not found" });
+
+    const employees = await prisma.employee.findMany({
+      where: { id: { in: ids }, organizationId: orgId, deletedAt: null },
+      select: { id: true, departmentId: true, companyId: true },
+    });
+
+    let moved = 0;
+    let unchanged = 0;
+    for (const emp of employees) {
+      if (emp.departmentId === toDepartmentId) {
+        unchanged++;
+        continue;
+      }
+      const updateData = { departmentId: toDepartmentId };
+      if (target.companyId) {
+        updateData.companyId = target.companyId;
+      }
+      await prisma.employee.update({
+        where: { id: emp.id },
+        data: updateData,
+      });
+      moved++;
+    }
+
+    res.json({
+      success: true,
+      message: `${moved} employee${moved === 1 ? "" : "s"} moved to ${target.title}${unchanged ? ` (${unchanged} already there)` : ""}`,
+      data: { moved, unchanged },
+    });
+  } catch (error) {
+    console.error("Error moving department employees:", error);
+    res.status(500).json({ success: false, message: "Error moving employees" });
+  }
+};

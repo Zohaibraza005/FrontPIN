@@ -2745,7 +2745,7 @@ exports.exportAttendanceExcel = async (req, res) => {
           }
         }
 
-        if (dayOff && st !== "PRESENT" && st !== "LATE" && st !== "TARDY") {
+        if (dayOff && st !== "LEAVE") {
           return { code: "OFF", type: "OFF_DAY" };
         }
 

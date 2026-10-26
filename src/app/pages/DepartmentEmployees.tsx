@@ -11,6 +11,7 @@ import {
   MapPin,
   RefreshCw,
   Search,
+  Shuffle,
   Users,
   X,
 } from "lucide-react";
@@ -18,8 +19,10 @@ import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Checkbox } from "../components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { SearchableSelect } from "../components/ui/SearchableSelect";
+import { MoveDepartmentEmployeesDialog } from "../components/departments/MoveDepartmentEmployeesDialog";
 import { API_URL, departmentAPI } from "../services/api";
 import { avatarColor } from "../utils/avatar";
 
@@ -31,11 +34,14 @@ export const DepartmentEmployees: React.FC = () => {
 
   const [department, setDepartment] = useState<any>(null);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
   const [filterEntity, setFilterEntity] = useState("all");
   const [filterLocation, setFilterLocation] = useState("all");
+  const [selected, setSelected] = useState<number[]>([]);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -47,6 +53,7 @@ export const DepartmentEmployees: React.FC = () => {
       const res = await departmentAPI.getDepartmentEmployees(id);
       setDepartment(res?.data?.department || null);
       setEmployees(res?.data?.employees || []);
+      setSelected([]);
     } catch (err: any) {
       toast.error(err?.message || "Failed to load employees");
     } finally {
@@ -56,6 +63,10 @@ export const DepartmentEmployees: React.FC = () => {
 
   useEffect(() => {
     load();
+    departmentAPI
+      .getDepartments()
+      .then((res: any) => setDepartments(Array.isArray(res?.data) ? res.data : []))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -97,6 +108,18 @@ export const DepartmentEmployees: React.FC = () => {
   const start = (page - 1) * itemsPerPage;
   const rows = filtered.slice(start, start + itemsPerPage);
   const isFiltered = Boolean(search || filterEntity !== "all" || filterLocation !== "all");
+
+  const allVisibleSelected = rows.length > 0 && rows.every((e) => selected.includes(e.id));
+  const toggleAllVisible = () => {
+    if (allVisibleSelected) {
+      setSelected((prev) => prev.filter((id) => !rows.some((e) => e.id === id)));
+    } else {
+      setSelected((prev) => [...new Set([...prev, ...rows.map((e) => e.id)])]);
+    }
+  };
+  const toggle = (id: number) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   const resetFilters = () => {
     setSearch("");
@@ -143,6 +166,14 @@ export const DepartmentEmployees: React.FC = () => {
             title="Refresh"
           >
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+          <Button
+            onClick={() => setMoveOpen(true)}
+            disabled={!employees.length}
+            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs rounded-xl"
+          >
+            <Shuffle className="size-3.5" />
+            {selected.length ? `Move ${selected.length} selected` : "Move Employees"}
           </Button>
         </div>
       </div>
@@ -213,7 +244,14 @@ export const DepartmentEmployees: React.FC = () => {
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50/80 dark:bg-gray-900/60 hover:bg-gray-50/80">
-                  <TableHead className={`${th} pl-6`}>EMPLOYEE</TableHead>
+                  <TableHead className="w-10 pl-4 pr-1">
+                    <Checkbox
+                      checked={allVisibleSelected}
+                      onCheckedChange={toggleAllVisible}
+                      aria-label="Select all on this page"
+                    />
+                  </TableHead>
+                  <TableHead className={`${th} pl-2`}>EMPLOYEE</TableHead>
                   <TableHead className={th}>DEPARTMENT & LOCATION</TableHead>
                   <TableHead className={th}>POSITION</TableHead>
                   <TableHead className={th}>JOIN DATE</TableHead>
@@ -225,7 +263,7 @@ export const DepartmentEmployees: React.FC = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-48 text-center text-gray-400 text-sm">
+                    <TableCell colSpan={7} className="h-48 text-center text-gray-400 text-sm">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <RefreshCw className="size-5 animate-spin text-blue-600" />
                         <span>Loading employees...</span>
@@ -234,7 +272,7 @@ export const DepartmentEmployees: React.FC = () => {
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-48 text-center text-gray-400 text-sm">
+                    <TableCell colSpan={7} className="h-48 text-center text-gray-400 text-sm">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Users className="size-8 text-gray-300" />
                         <span className="font-medium text-gray-600 dark:text-gray-300">
@@ -262,8 +300,17 @@ export const DepartmentEmployees: React.FC = () => {
 
                     return (
                       <TableRow key={emp.id} className="hover:bg-gray-50/70 dark:hover:bg-gray-900/40 transition-colors">
+                        {/* Checkbox */}
+                        <TableCell className="pl-4 pr-1">
+                          <Checkbox
+                            checked={selected.includes(emp.id)}
+                            onCheckedChange={() => toggle(emp.id)}
+                            aria-label={`Select ${name}`}
+                          />
+                        </TableCell>
+
                         {/* Employee */}
-                        <TableCell className="pl-6 py-3">
+                        <TableCell className="pl-2 py-3">
                           <div className="flex items-center gap-3">
                             {emp.profileImage ? (
                               <img
@@ -397,6 +444,15 @@ export const DepartmentEmployees: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      <MoveDepartmentEmployeesDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        departments={departments}
+        fromDepartmentId={id}
+        preselectedIds={selected}
+        onMoved={load}
+      />
     </div>
   );
 };

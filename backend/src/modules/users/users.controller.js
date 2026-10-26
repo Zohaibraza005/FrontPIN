@@ -557,6 +557,7 @@ exports.updateEmployee = async (req, res) => {
       include: {
         company: true,
         department: true,
+        entity: true,
         supervisor: true,
         appRole: true,
         jobInfo: true,
@@ -803,6 +804,7 @@ exports.getEmployeeDetail = async (req, res) => {
       include: {
         company: true,
         department: true,
+        entity: true,
         appRole: true,
         supervisor: {
           select: {
