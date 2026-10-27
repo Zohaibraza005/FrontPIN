@@ -1262,16 +1262,7 @@ export const Visitors: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.print()}
-              className="text-xs rounded-xl h-9"
-            >
-              <Printer className="size-3.5 mr-1.5" /> Print Pass
-            </Button>
-
+          <div className="p-3.5 sm:p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end shrink-0">
             <Button
               size="sm"
               onClick={() => setViewModalOpen(false)}
