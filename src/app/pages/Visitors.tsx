@@ -46,7 +46,22 @@ import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { visitorAPI, employeeAPI, locationAPI, departmentAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
-import { DatePicker } from '../components/ui/date-picker';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { format } from 'date-fns';
+
+const DatePickerCustomInput = React.forwardRef<HTMLButtonElement, any>(({ value, onClick }, ref) => (
+  <button
+    type="button"
+    onClick={onClick}
+    ref={ref}
+    className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-3.5 py-1.5 rounded-xl shadow-2xs text-xs font-semibold text-gray-800 transition-all cursor-pointer h-9 shrink-0"
+  >
+    <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+    <span>{value || "All Dates"}</span>
+  </button>
+));
+DatePickerCustomInput.displayName = 'DatePickerCustomInput';
 
 const getPaginationRange = (current: number, total: number) => {
   if (total <= 7) {
@@ -83,8 +98,7 @@ export const Visitors: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterLocation, setFilterLocation] = useState('all');
   const [filterDepartment, setFilterDepartment] = useState('all');
-  const [filterDate, setFilterDate] = useState('all');
-  const [customDate, setCustomDate] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
 
   // Layout & Pagination
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
@@ -133,7 +147,7 @@ export const Visitors: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterStatus, filterLocation, filterDepartment, filterDate, customDate]);
+  }, [searchQuery, filterStatus, filterLocation, filterDepartment, selectedDate]);
 
   useEffect(() => {
     fetchVisitors();
@@ -320,40 +334,19 @@ export const Visitors: React.FC = () => {
         !filterDepartment ||
         String(v.departmentId || '') === String(filterDepartment);
 
-      // Date
+      // Date Filter
       let matchesDate = true;
-      if (customDate) {
-        // Specific custom date (previous day or any selected date)
-        const cDate = customDate; // format: "YYYY-MM-DD"
-        const createdDate = v.createdAt ? new Date(v.createdAt).toISOString().slice(0, 10) : '';
-        const checkInDate = v.checkInTime ? new Date(v.checkInTime).toISOString().slice(0, 10) : '';
-        const startDateStr = v.startDate ? new Date(v.startDate).toISOString().slice(0, 10) : '';
-        matchesDate = cDate === createdDate || cDate === checkInDate || cDate === startDateStr;
-      } else if (filterDate === 'today') {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const vDateStr = v.createdAt ? new Date(v.createdAt).toISOString().slice(0, 10) : '';
-        const checkInStr = v.checkInTime ? new Date(v.checkInTime).toISOString().slice(0, 10) : '';
-        matchesDate = todayStr === vDateStr || todayStr === checkInStr;
-      } else if (filterDate === 'yesterday') {
-        const yest = new Date();
-        yest.setDate(yest.getDate() - 1);
-        const yestStr = yest.toISOString().slice(0, 10);
-        const vDateStr = v.createdAt ? new Date(v.createdAt).toISOString().slice(0, 10) : '';
-        const checkInStr = v.checkInTime ? new Date(v.checkInTime).toISOString().slice(0, 10) : '';
-        matchesDate = yestStr === vDateStr || yestStr === checkInStr;
-      } else if (filterDate === 'week') {
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        matchesDate = v.createdAt && new Date(v.createdAt) >= weekAgo;
-      } else if (filterDate === 'month') {
-        const monthAgo = new Date();
-        monthAgo.setDate(monthAgo.getDate() - 30);
-        matchesDate = v.createdAt && new Date(v.createdAt) >= monthAgo;
+      if (selectedDate) {
+        const targetStr = format(selectedDate, 'yyyy-MM-dd');
+        const createdDate = v.createdAt ? format(new Date(v.createdAt), 'yyyy-MM-dd') : '';
+        const checkInDate = v.checkInTime ? format(new Date(v.checkInTime), 'yyyy-MM-dd') : '';
+        const startDateStr = v.startDate ? format(new Date(v.startDate), 'yyyy-MM-dd') : '';
+        matchesDate = targetStr === createdDate || targetStr === checkInDate || targetStr === startDateStr;
       }
 
       return matchesStatus && matchesLocation && matchesDept && matchesDate;
     });
-  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment, filterDate, customDate]);
+  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment, selectedDate]);
 
   // Pagination calculations
   const totalVisitors = filteredVisitors.length;
@@ -634,41 +627,29 @@ export const Visitors: React.FC = () => {
             />
           )}
 
-          {/* Date Presets Filter */}
-          <SearchableSelect
-            className="w-[130px] h-9 rounded-xl border-gray-200 text-xs bg-gray-50/40 hover:bg-white"
-            icon={<Calendar className="w-3.5 h-3.5 text-gray-400" />}
-            placeholder="All Time"
-            searchPlaceholder="Filter date..."
-            value={filterDate}
-            onValueChange={(val) => {
-              setFilterDate(val);
-              if (val !== 'custom') setCustomDate('');
-            }}
-            options={[
-              { value: 'all', label: 'All Time' },
-              { value: 'today', label: 'Today' },
-              { value: 'yesterday', label: 'Yesterday' },
-              { value: 'week', label: 'Past 7 Days' },
-              { value: 'month', label: 'Past 30 Days' },
-            ]}
-          />
-
-          {/* Specific Date Filter (Previous Day / Custom Date Picker) */}
-          <DatePicker
-            size="sm"
-            value={customDate}
-            onValueChange={(val) => {
-              setCustomDate(val);
-              if (val) setFilterDate('all');
-            }}
-            placeholder="Pick Date"
-            clearable
-            className="w-[145px] rounded-xl border-gray-200 bg-gray-50/40 hover:bg-white text-xs"
-          />
+          {/* Date Picker (Default Today, Same as Dashboard & Attendance) */}
+          <div className="flex items-center gap-1.5">
+            <DatePicker
+              selected={selectedDate}
+              onChange={(date: Date | null) => setSelectedDate(date)}
+              dateFormat="dd MMM yyyy"
+              customInput={<DatePickerCustomInput />}
+            />
+            {selectedDate && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedDate(null)}
+                className="h-9 px-2 text-xs text-gray-500 hover:text-gray-800 rounded-xl"
+                title="View All Visitors (All Dates)"
+              >
+                All Dates
+              </Button>
+            )}
+          </div>
 
           {/* Reset Filters button */}
-          {(searchQuery || filterStatus !== 'all' || filterLocation !== 'all' || filterDepartment !== 'all' || filterDate !== 'all' || customDate) && (
+          {(searchQuery || filterStatus !== 'all' || filterLocation !== 'all' || filterDepartment !== 'all' || (selectedDate && format(selectedDate, 'yyyy-MM-dd') !== format(new Date(), 'yyyy-MM-dd'))) && (
             <Button
               variant="ghost"
               size="sm"
@@ -677,8 +658,7 @@ export const Visitors: React.FC = () => {
                 setFilterStatus('all');
                 setFilterLocation('all');
                 setFilterDepartment('all');
-                setFilterDate('all');
-                setCustomDate('');
+                setSelectedDate(new Date());
               }}
               className="h-9 px-2.5 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-medium"
             >
