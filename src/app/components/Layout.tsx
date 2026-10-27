@@ -27,7 +27,7 @@ import {
   X,
   HelpCircle,
   ChevronDown,
-  Coffee, RefreshCw, Cog, ChevronRight,
+  Coffee, RefreshCw, Cog, ChevronRight, UserCheck,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -94,6 +94,16 @@ const menuItems = [
       { label: 'All Employees', path: '/employees' },
       { label: 'Add Employee', path: '/employees/add', canCreateModule: 'EMPLOYEE' },
       { label: 'Roles', path: '/roles', roles: ['ADMIN'] },
+    ],
+  },
+  {
+    icon: UserCheck,
+    label: 'Visitor',
+    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
+    module: 'VISITOR',
+    children: [
+      { label: 'All Visitors', path: '/visitors' },
+      { label: 'Add Visitor', path: '/visitors/add' },
     ],
   },
   { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
@@ -828,7 +838,7 @@ export const Layout: React.FC = () => {
       }
       
       // Default fallback when privilege record is missing in DB/session
-      const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE'];
+      const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE', 'VISITOR'];
       return defaultVisibleModules.includes(item.module);
     }
 

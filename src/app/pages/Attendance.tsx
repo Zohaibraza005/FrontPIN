@@ -66,7 +66,7 @@ import {
   Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { attendanceAPI, departmentAPI, employeeAPI, locationAPI, entityAPI } from '../services/api';
+import { attendanceAPI, departmentAPI, employeeAPI, locationAPI, entityAPI, visitorAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import DatePicker from "react-datepicker";
@@ -525,6 +525,7 @@ export const Attendance: React.FC = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [entities, setEntities] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [visitorsList, setVisitorsList] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingMachine, setSyncingMachine] = useState(false);
@@ -1135,6 +1136,10 @@ export const Attendance: React.FC = () => {
       } catch (err) {
         console.error("Failed to load entities:", err);
       }
+      try {
+        const vis = await visitorAPI.getVisitors();
+        setVisitorsList(vis?.data || []);
+      } catch (err) {}
   
       setDepartments(dept.data || []);
       setLocations(loc.data || []);
@@ -1905,6 +1910,12 @@ export const Attendance: React.FC = () => {
                       value: String(emp.id),
                       label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
                     })),
+                    ...(visitorsList.length > 0
+                      ? visitorsList.map((v) => ({
+                          value: `visitor-${v.id}`,
+                          label: `[Visitor] ${v.fullName}`,
+                        }))
+                      : []),
                   ]}
                 />
               </>

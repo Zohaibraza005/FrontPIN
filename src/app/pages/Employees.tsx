@@ -47,7 +47,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../com
 import { toast } from 'sonner';
 import { Link, Navigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import { API_URL, departmentAPI, employeeAPI, locationAPI, entityAPI } from '../services/api';
+import { API_URL, departmentAPI, employeeAPI, locationAPI, entityAPI, visitorAPI } from '../services/api';
 import { deviceService } from '../services/device.service';
 
 const getPaginationRange = (current: number, total: number) => {
@@ -86,6 +86,7 @@ export const Employees: React.FC = () => {
   }
 
   const [employees, setEmployees] = useState<any[]>([]);
+  const [visitors, setVisitors] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [entities, setEntities] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -232,8 +233,12 @@ export const Employees: React.FC = () => {
   const fetchEmployees = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const res = await employeeAPI.getEmployees();
+      const [res, visRes] = await Promise.all([
+        employeeAPI.getEmployees(),
+        visitorAPI.getVisitors().catch(() => ({ data: [] })),
+      ]);
       setEmployees(res.data || []);
+      setVisitors(visRes?.data || []);
     } catch (err) {
       if (!silent) toast.error('Failed to load employees');
     } finally {
@@ -316,7 +321,65 @@ export const Employees: React.FC = () => {
   };
 
   // Filter employees logic
-  const filteredEmployees = employees.filter((emp) => {
+  const filteredEmployees = filterRole === 'visitor'
+    ? visitors
+        .map((v) => ({
+          id: `vis-${v.id}`,
+          realVisitorId: v.id,
+          isVisitor: true,
+          firstName: v.fullName,
+          lastName: '',
+          name: v.fullName,
+          username: v.badgeNumber ? `Pass #${v.badgeNumber}` : `Visitor #${v.id}`,
+          email: v.email || '—',
+          phoneNumber: v.phone || '—',
+          employeeId: v.badgeNumber ? `PASS-${v.badgeNumber}` : `VIS-${v.id}`,
+          biometricId: v.badgeNumber || '',
+          role: 'visitor',
+          companyId: v.companyId,
+          company: v.company,
+          departmentId: v.departmentId,
+          department: v.department,
+          jobInfo: { designation: `Visitor (${v.visitorCompany || v.purpose || 'Guest'})` },
+          designation: `Visitor (${v.visitorCompany || v.purpose || 'Guest'})`,
+          entity: null,
+          canLogin: false,
+          profileImage: v.photo,
+          status: v.status,
+          host: v.host,
+        }))
+        .filter((emp) => {
+          const fullName = emp.name || '';
+          const phone = emp.phoneNumber || '';
+          const email = emp.email || '';
+          const compName = emp.company?.name || '';
+          const deptName = emp.department?.title || '';
+          const query = searchQuery.toLowerCase().trim();
+
+          const matchesSearch =
+            !query ||
+            fullName.toLowerCase().includes(query) ||
+            phone.toLowerCase().includes(query) ||
+            email.toLowerCase().includes(query) ||
+            compName.toLowerCase().includes(query) ||
+            deptName.toLowerCase().includes(query);
+
+          if (!matchesSearch) return false;
+
+          const matchesDept =
+            filterDepartment === 'all' ||
+            String(emp.departmentId || '') === String(filterDepartment) ||
+            (emp.department?.title && emp.department.title === filterDepartment);
+
+          const matchesLocation =
+            filterLocation === 'all' ||
+            filterLocation === 'ALL' ||
+            !filterLocation ||
+            String(emp.companyId || '') === String(filterLocation);
+
+          return matchesDept && matchesLocation;
+        })
+    : employees.filter((emp) => {
     if (emp.role === 'ADMIN' || emp.role === 'admin') return false;
     const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || '';
     const email = emp.email || '';
@@ -465,6 +528,7 @@ export const Employees: React.FC = () => {
     { value: 'all', label: 'All Roles' },
     { value: 'supervisor', label: 'Supervisor' },
     { value: 'user', label: 'User' },
+    { value: 'visitor', label: 'Visitor' },
   ];
 
   const loginOptions = [
@@ -474,7 +538,7 @@ export const Employees: React.FC = () => {
   ];
 
   const getRoleBadge = (role: string) => {
-    switch (role) {
+    switch (role?.toLowerCase()) {
       case 'admin':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200/60 shadow-2xs">
@@ -487,6 +551,13 @@ export const Employees: React.FC = () => {
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/60 shadow-2xs">
             <UserCheck className="size-3 text-blue-600" />
             Supervisor
+          </span>
+        );
+      case 'visitor':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-2xs">
+            <UserCheck className="size-3 text-emerald-600" />
+            Visitor
           </span>
         );
       default:
@@ -512,7 +583,7 @@ export const Employees: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <h2 className="text-2xl font-bold tracking-tight text-gray-900">Employee Management</h2>
             <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 font-semibold px-2.5 py-0.5 text-xs">
-              {filteredEmployees.length} {filteredEmployees.length === employees.length ? 'Staff' : `of ${employees.length} Staff`}
+              {filterRole === 'visitor' ? `${filteredEmployees.length} Visitors` : `${filteredEmployees.length} ${filteredEmployees.length === employees.length ? 'Staff' : `of ${employees.length} Staff`}`}
             </Badge>
           </div>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
@@ -779,7 +850,7 @@ export const Employees: React.FC = () => {
 
                               <div>
                                 <Link
-                                  to={`/employees/${emp.id}`}
+                                  to={emp.isVisitor ? '/visitors' : `/employees/${emp.id}`}
                                   className="text-sm font-bold text-gray-900 hover:text-sky-600 transition-colors leading-snug block"
                                 >
                                   {empName}
@@ -841,7 +912,7 @@ export const Employees: React.FC = () => {
                               <div className="flex items-center justify-end gap-1">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Link to={`/employees/${emp.id}`}>
+                                    <Link to={emp.isVisitor ? '/visitors' : `/employees/${emp.id}`}>
                                       <Button
                                         variant="ghost"
                                         size="icon"
@@ -992,7 +1063,7 @@ export const Employees: React.FC = () => {
                             </div>
 
                             <Link
-                              to={`/employees/${emp.id}`}
+                              to={emp.isVisitor ? '/visitors' : `/employees/${emp.id}`}
                               className="text-base font-bold text-gray-900 hover:text-sky-600 transition-colors"
                             >
                               {empName}
@@ -1022,7 +1093,7 @@ export const Employees: React.FC = () => {
 
                         {/* Card Action Footer */}
                         <div className="flex items-center gap-2 pt-4 mt-4 border-t border-gray-100">
-                          <Link to={`/employees/${emp.id}`} className="flex-1">
+                          <Link to={emp.isVisitor ? '/visitors' : `/employees/${emp.id}`} className="flex-1">
                             <Button
                               variant="outline"
                               size="sm"

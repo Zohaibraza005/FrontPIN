@@ -25,6 +25,7 @@ const candidateRoutes = require("./modules/job/candidate.routes");
 const reportRoutes = require("./modules/report/report.routes");
 const deviceRoutes = require("./modules/devices/device.routes");
 const roleRoutes = require("./modules/roles/role.routes");
+const visitorRoutes = require("./modules/visitor/visitor.routes");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));  // for urlencoded (optional but good)
@@ -81,6 +82,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/payroll", payrollRoutes);
 app.use("/api/roles", roleRoutes);
+app.use("/api/visitors", visitorRoutes);
 
 
 

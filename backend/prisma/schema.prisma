@@ -94,6 +94,7 @@ model Organization {
   Candidate      Candidate[]
   Entity         Entity[]
   AppRole        AppRole[]
+  Visitor        Visitor[]
   
   @@index([deletedAt])
   @@map("organization")
@@ -131,6 +132,7 @@ model Company {
   Department Department[]
   Schedule   Schedule[]
   Entity     Entity[]
+  Visitor    Visitor[]
 
   @@index([organizationId])
   @@index([deletedAt])
@@ -224,6 +226,7 @@ model Employee {
 
   // Payroll Audit Logs
   Job Job[]
+  visitorsHosted Visitor[] @relation("EmployeeVisitors")
 
   @@index([organizationId])
   @@index([companyId])
@@ -270,6 +273,7 @@ model Department {
   updatedAt DateTime   @updatedAt
   deletedAt DateTime?
   Employee  Employee[]
+  Visitor   Visitor[]
 
   @@index([organizationId])
   @@index([companyId])
@@ -1372,3 +1376,52 @@ model BiometricDevice {
   @@map("biometricdevice")
 }
 
+
+
+////////////////////////////////////////////////
+////////////////// VISITOR /////////////////////
+////////////////////////////////////////////////
+
+model Visitor {
+  id             Int          @id @default(autoincrement())
+  fullName       String
+  phone          String
+  email          String?
+  nationalId     String?
+  visitorCompany String?
+  purpose        String?
+
+  hostId         Int?
+  host           Employee?    @relation("EmployeeVisitors", fields: [hostId], references: [id], onDelete: SetNull)
+
+  companyId      Int?
+  company        Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  departmentId   Int?
+  department     Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  badgeNumber    String?
+  checkInTime    DateTime?    @default(now())
+  checkOutTime   DateTime?
+  expectedDate   DateTime?
+  status         String       @default("CHECKED_IN") // CHECKED_IN | EXPECTED | CHECKED_OUT | CANCELLED
+  vehicleNumber  String?
+  notes          String?      @db.Text
+  photo          String?
+  startDate      DateTime?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  @@index([organizationId])
+  @@index([companyId])
+  @@index([departmentId])
+  @@index([hostId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("visitor")
+}

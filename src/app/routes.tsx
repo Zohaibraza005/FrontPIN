@@ -41,6 +41,8 @@ import Organization from "./pages/Organization";
 import { Register } from "./pages/Register";
 import { Profile } from "./pages/Profile";
 import { Roles } from "./pages/Roles";
+import { Visitors } from "./pages/Visitors";
+import { AddVisitor } from "./pages/AddVisitor";
 
 // Wrapper component for providers
 import { Navigate } from "react-router";
@@ -115,6 +117,8 @@ export const router = createBrowserRouter([
       { path: "employees", Component: Employees },
       { path: "employees/add", Component: AddEmployee },
       { path: "employees/:id", Component: EmployeeDetail },
+      { path: "visitors", Component: Visitors },
+      { path: "visitors/add", Component: AddVisitor },
       { path: "roles", Component: Roles },
       { path: "departments", Component: Departments },
       { path: "departments/:id/employees", Component: DepartmentEmployees },

@@ -850,6 +850,77 @@ export const employeeAPI = {
   },
 };
 
+export const visitorAPI = {
+  getVisitors: async (filters?: any) => {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== 'all' && v !== 'ALL' && v !== '') {
+          params.append(k, String(v));
+        }
+      });
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return apiCall(`/visitors${query}`);
+  },
+  getStats: async (filters?: any) => {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== 'all' && v !== 'ALL' && v !== '') {
+          params.append(k, String(v));
+        }
+      });
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return apiCall(`/visitors/stats${query}`);
+  },
+  getVisitor: async (id: number | string) => {
+    return apiCall(`/visitors/${id}`);
+  },
+  createVisitor: async (data: any) => {
+    if (data instanceof FormData) {
+      return apiCall('/visitors', {
+        method: 'POST',
+        body: data,
+      });
+    }
+    return apiCall('/visitors', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+  updateVisitor: async (id: number | string, data: any) => {
+    if (data instanceof FormData) {
+      return apiCall(`/visitors/${id}`, {
+        method: 'PUT',
+        body: data,
+      });
+    }
+    return apiCall(`/visitors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+  checkOutVisitor: async (id: number | string) => {
+    return apiCall(`/visitors/${id}/checkout`, {
+      method: 'PUT',
+    });
+  },
+  checkInVisitor: async (id: number | string) => {
+    return apiCall(`/visitors/${id}/checkin`, {
+      method: 'PUT',
+    });
+  },
+  deleteVisitor: async (id: number | string) => {
+    return apiCall(`/visitors/${id}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
 
 
 // Invoice API

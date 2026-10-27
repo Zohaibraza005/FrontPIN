@@ -269,6 +269,56 @@ async function findEmployee(biometricId, employeeName) {
 }
 
 /**
+ * Helper to match a visitor by Badge Number, ID, or Full Name
+ */
+async function findVisitor(biometricId, employeeName) {
+  const bioIdStr = biometricId ? String(biometricId).trim() : "";
+  if (bioIdStr) {
+    try {
+      const orConditions = [{ badgeNumber: bioIdStr }];
+      if (!isNaN(parseInt(bioIdStr))) {
+        orConditions.push({ id: parseInt(bioIdStr) });
+      }
+      if (bioIdStr.startsWith("9") && bioIdStr.length > 1 && !isNaN(parseInt(bioIdStr.slice(1)))) {
+        orConditions.push({ id: parseInt(bioIdStr.slice(1)) });
+      }
+
+      const visitor = await prisma.visitor.findFirst({
+        where: {
+          deletedAt: null,
+          OR: orConditions,
+        },
+        include: { company: true },
+      });
+      if (visitor) return visitor;
+    } catch (e) {}
+  }
+
+  if (employeeName && employeeName.trim()) {
+    try {
+      const cleanName = employeeName.trim().toLowerCase();
+      const visitors = await prisma.visitor.findMany({
+        where: { deletedAt: null },
+        include: { company: true },
+      });
+      for (const v of visitors) {
+        if (v.fullName && v.fullName.trim().toLowerCase() === cleanName) {
+          if (bioIdStr && v.badgeNumber !== bioIdStr) {
+            await prisma.visitor.update({
+              where: { id: v.id },
+              data: { badgeNumber: bioIdStr },
+            });
+          }
+          return v;
+        }
+      }
+    } catch (e) {}
+  }
+
+  return null;
+}
+
+/**
  * Determines whether a device is dedicated for CHECK_IN, CHECK_OUT, or DYNAMIC.
  * Prioritizes database configuration (direction), and falls back to device name matching.
  */
@@ -415,7 +465,54 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const employee = await findEmployee(biometricId, employeeName);
 
   if (!employee) {
-    console.warn(`[Biometric Punch] No Employee matched with biometricId: ${biometricId} / Name: ${employeeName}`);
+    // 🔹 Match Visitor if not an Employee
+    const matchedVisitor = await findVisitor(biometricId, employeeName);
+    if (matchedVisitor) {
+      const timezone = matchedVisitor.company?.timezone || "Asia/Karachi";
+      const pTime = punchTime ? moment(punchTime).tz(timezone) : moment().tz(timezone);
+      const punchDate = pTime.toDate();
+      const todayStr = pTime.format("YYYY-MM-DD");
+
+      const isAlreadyCheckedIn =
+        matchedVisitor.status === "CHECKED_IN" &&
+        matchedVisitor.checkInTime &&
+        moment(matchedVisitor.checkInTime).tz(timezone).format("YYYY-MM-DD") === todayStr;
+
+      let newStatus = "CHECKED_IN";
+      let updateData = {};
+
+      if (isAlreadyCheckedIn) {
+        newStatus = "CHECKED_OUT";
+        updateData = {
+          status: "CHECKED_OUT",
+          checkOutTime: punchDate,
+        };
+        console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
+      } else {
+        newStatus = "CHECKED_IN";
+        updateData = {
+          status: "CHECKED_IN",
+          checkInTime: punchDate,
+          checkOutTime: null,
+        };
+        console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
+      }
+
+      await prisma.visitor.update({
+        where: { id: matchedVisitor.id },
+        data: updateData,
+      });
+
+      return {
+        success: true,
+        isVisitor: true,
+        visitor: matchedVisitor,
+        action: newStatus,
+        punchTime: punchDate,
+      };
+    }
+
+    console.warn(`[Biometric Punch] No Employee or Visitor matched with biometricId: ${biometricId} / Name: ${employeeName}`);
     return { success: false, reason: `Employee not found for Biometric ID: ${biometricId} / Name: ${employeeName}` };
   }
 
@@ -1456,7 +1553,7 @@ exports.syncAllDevicesRoute = async (req, res) => {
  */
 exports.pushUsersToDevices = async (req, res) => {
   try {
-    const { employeeId } = req.body;
+    const { employeeId, visitorId, type } = req.body;
     const { pushUserToHikvision, syncBiometricsAcrossDevices } = require("./hikvision.service");
 
     const activeDevices = await prisma.biometricDevice.findMany({
@@ -1470,6 +1567,61 @@ exports.pushUsersToDevices = async (req, res) => {
       });
     }
 
+    // ── PUSH VISITORS ──────────────────────────────────────────────
+    if (visitorId || type === "visitor" || type === "visitors") {
+      let visitors = [];
+      if (visitorId) {
+        const vis = await prisma.visitor.findUnique({
+          where: { id: parseInt(visitorId) },
+        });
+        if (vis) visitors = [vis];
+      } else {
+        visitors = await prisma.visitor.findMany({
+          where: { deletedAt: null },
+        });
+      }
+
+      if (visitors.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No visitors found to push to machine.",
+        });
+      }
+
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (const vis of visitors) {
+        let bioId = vis.badgeNumber ? String(vis.badgeNumber).trim() : `9${String(vis.id).padStart(4, "0")}`;
+        const name = vis.fullName || `Visitor ${bioId}`;
+
+        if (!vis.badgeNumber) {
+          try {
+            await prisma.visitor.update({
+              where: { id: vis.id },
+              data: { badgeNumber: bioId },
+            });
+          } catch (e) {}
+        }
+
+        for (const device of activeDevices) {
+          const pushed = await pushUserToHikvision(device, {
+            biometricId: bioId,
+            name: name,
+          });
+          if (pushed) successCount++;
+          else failedCount++;
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: `Pushed ${visitors.length} visitor(s) to biometric device(s) successfully! You can now register their face or fingerprint on the machine.`,
+        details: { successCount, failedCount, totalVisitors: visitors.length },
+      });
+    }
+
+    // ── PUSH EMPLOYEES ─────────────────────────────────────────────
     let employees = [];
     if (employeeId) {
       const emp = await prisma.employee.findUnique({

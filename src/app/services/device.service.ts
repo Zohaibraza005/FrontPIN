@@ -57,5 +57,12 @@ export const deviceService = {
       body: { employeeId } as any,
     });
   },
+
+  pushVisitors: async (visitorId?: number) => {
+    return await apiCall("/devices/push-users", {
+      method: "POST",
+      body: { visitorId, type: "visitor" } as any,
+    });
+  },
 };
 

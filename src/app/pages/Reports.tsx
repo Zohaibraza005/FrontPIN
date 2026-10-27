@@ -56,7 +56,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { reportsAPI, departmentAPI, locationAPI ,employeeAPI, attendanceAPI} from "../services/api";
+import { reportsAPI, departmentAPI, locationAPI ,employeeAPI, attendanceAPI, visitorAPI } from "../services/api";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
@@ -85,6 +85,7 @@ export const Reports: React.FC = () => {
 
   const [departments, setDepartments] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [reportVisitors, setReportVisitors] = useState<any[]>([]);
 
   const [attendanceTrend, setAttendanceTrend] = useState<any[]>([]);
   const [attendanceStats, setAttendanceStats] = useState<any>({});
@@ -147,8 +148,12 @@ export const Reports: React.FC = () => {
     if (dept && dept.toLowerCase() !== "all") filters.departmentId = dept;
     if (loc && loc.toLowerCase() !== "all") filters.companyId = loc;
   
-    const res = await employeeAPI.getEmployees(filters);
+    const [res, visRes] = await Promise.all([
+      employeeAPI.getEmployees(filters),
+      visitorAPI.getVisitors(filters).catch(() => ({ data: [] })),
+    ]);
     setEmployees(res?.data || []);
+    setReportVisitors(visRes?.data || []);
   };
   useEffect(() => {
     loadEmployees(departmentId, locationId);
@@ -712,6 +717,12 @@ export const Reports: React.FC = () => {
                       value: String(e.id),
                       label: `${e.firstName} ${e.lastName || ""}`.trim(),
                     })),
+                    ...(reportVisitors.length > 0
+                      ? reportVisitors.map((v) => ({
+                          value: `visitor-${v.id}`,
+                          label: `[Visitor] ${v.fullName}`,
+                        }))
+                      : []),
                   ]}
                 />
 
