@@ -11,6 +11,8 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import {
   UserCheck,
+  User,
+  Info,
   Plus,
   Search,
   Trash2,
@@ -39,6 +41,7 @@ import {
   Car,
   FileText,
   Cpu,
+  X,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
@@ -58,7 +61,7 @@ const DatePickerCustomInput = React.forwardRef<HTMLButtonElement, any>(({ value,
     className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-3.5 py-1.5 rounded-xl shadow-2xs text-xs font-semibold text-gray-800 transition-all cursor-pointer h-9 shrink-0"
   >
     <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
-    <span>{value || "All Dates"}</span>
+    <span>{value || "Pick Date"}</span>
   </button>
 ));
 DatePickerCustomInput.displayName = 'DatePickerCustomInput';
@@ -82,6 +85,19 @@ const getPaginationRange = (current: number, total: number) => {
   return range;
 };
 
+const visitPurposes = [
+  'Meeting',
+  'Visitor Employee',
+  'Job Interview',
+  'Client Visit',
+  'Vendor / Supplier',
+  'Delivery / Courier',
+  'Maintenance / IT Support',
+  'Contractor / Work',
+  'Personal Visit',
+  'Other',
+];
+
 export const Visitors: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -98,7 +114,7 @@ export const Visitors: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterLocation, setFilterLocation] = useState('all');
   const [filterDepartment, setFilterDepartment] = useState('all');
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   // Layout & Pagination
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
@@ -120,6 +136,31 @@ export const Visitors: React.FC = () => {
   // Machine sync state
   const [isPushingMachine, setIsPushingMachine] = useState(false);
   const [pushingId, setPushingId] = useState<number | null>(null);
+  const [isSyncingMachine, setIsSyncingMachine] = useState(false);
+
+  const handleSyncVisitors = async () => {
+    try {
+      setIsSyncingMachine(true);
+      const res = await visitorAPI.syncVisitorPunches();
+      if (res && res.success) {
+        if (res.count > 0) {
+          toast.success(res.message || `Synced ${res.count} visitor punch(es) from machine!`);
+        } else {
+          toast.info(res.message || "Biometric machine checked: No new visitor punches found.");
+        }
+      } else {
+        toast.error(res?.message || "Failed to sync visitor punches from machine");
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Error connecting to biometric machine");
+    } finally {
+      setIsSyncingMachine(false);
+      fetchVisitors(true);
+      fetchStats();
+      window.dispatchEvent(new CustomEvent("visitor-updated"));
+    }
+  };
 
   const handlePushToMachine = async (visitorId?: number, visitorName?: string) => {
     try {
@@ -276,14 +317,97 @@ export const Visitors: React.FC = () => {
     }
   };
 
+  // Open Edit Modal with full pre-filled and formatted details
+  const openEditModal = (v: any) => {
+    const toDateInput = (d?: string | Date | null) => {
+      if (!d) return '';
+      try {
+        const dateObj = new Date(d);
+        if (isNaN(dateObj.getTime())) return '';
+        const pad = (n: number) => String(n).padStart(2, '0');
+        return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}`;
+      } catch {
+        return '';
+      }
+    };
+
+    const toDateTimeLocal = (d?: string | Date | null) => {
+      if (!d) return '';
+      try {
+        const dateObj = new Date(d);
+        if (isNaN(dateObj.getTime())) return '';
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const year = dateObj.getFullYear();
+        const month = pad(dateObj.getMonth() + 1);
+        const day = pad(dateObj.getDate());
+        const hours = pad(dateObj.getHours());
+        const minutes = pad(dateObj.getMinutes());
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+      } catch {
+        return '';
+      }
+    };
+
+    setEditData({
+      ...v,
+      fullName: v.fullName || '',
+      phone: v.phone || '',
+      email: v.email || '',
+      nationalId: v.nationalId || '',
+      visitorCompany: v.visitorCompany || '',
+      purpose: v.purpose || 'Meeting',
+      badgeNumber: v.badgeNumber || '',
+      vehicleNumber: v.vehicleNumber || '',
+      notes: v.notes || '',
+      status: v.status || 'CHECKED_IN',
+      companyId: v.companyId ? String(v.companyId) : '',
+      departmentId: v.departmentId ? String(v.departmentId) : '',
+      hostId: v.hostId ? String(v.hostId) : '',
+      startDate: toDateInput(v.startDate),
+      expectedDate: toDateInput(v.expectedDate),
+      checkInTime: toDateTimeLocal(v.checkInTime),
+      checkOutTime: toDateTimeLocal(v.checkOutTime),
+    });
+    setEditModalOpen(true);
+  };
+
   // Edit save
   const handleSaveEdit = async () => {
     if (!editData?.id) return;
+    if (!editData?.fullName?.trim()) {
+      toast.error('Visitor full name is required');
+      return;
+    }
+    if (!editData?.phone?.trim()) {
+      toast.error('Visitor phone number is required');
+      return;
+    }
+
     try {
       setIsUpdating(true);
-      const res = await visitorAPI.updateVisitor(editData.id, editData);
+      const payload: any = {
+        fullName: editData.fullName.trim(),
+        phone: editData.phone.trim(),
+        email: editData.email ? editData.email.trim() : null,
+        nationalId: editData.nationalId ? editData.nationalId.trim() : null,
+        visitorCompany: editData.visitorCompany ? editData.visitorCompany.trim() : null,
+        purpose: editData.purpose ? editData.purpose.trim() : 'Meeting',
+        badgeNumber: editData.badgeNumber ? editData.badgeNumber.trim() : null,
+        vehicleNumber: editData.vehicleNumber ? editData.vehicleNumber.trim() : null,
+        notes: editData.notes ? editData.notes.trim() : null,
+        status: editData.status || 'CHECKED_IN',
+        companyId: editData.companyId && !isNaN(parseInt(editData.companyId)) ? parseInt(editData.companyId) : null,
+        departmentId: editData.departmentId && !isNaN(parseInt(editData.departmentId)) ? parseInt(editData.departmentId) : null,
+        hostId: editData.hostId && !isNaN(parseInt(editData.hostId)) ? parseInt(editData.hostId) : null,
+        startDate: editData.startDate ? new Date(editData.startDate).toISOString() : null,
+        expectedDate: editData.expectedDate ? new Date(editData.expectedDate).toISOString() : null,
+        checkInTime: editData.checkInTime ? new Date(editData.checkInTime).toISOString() : null,
+        checkOutTime: editData.checkOutTime ? new Date(editData.checkOutTime).toISOString() : null,
+      };
+
+      const res = await visitorAPI.updateVisitor(editData.id, payload);
       if (res && res.success) {
-        toast.success('Visitor updated successfully!');
+        toast.success(res.message || 'Visitor details updated successfully!');
         setEditModalOpen(false);
         fetchVisitors(true);
         fetchStats();
@@ -292,6 +416,7 @@ export const Visitors: React.FC = () => {
         toast.error(res?.message || 'Failed to update visitor');
       }
     } catch (err: any) {
+      console.error(err);
       toast.error(err?.message || 'Error updating visitor');
     } finally {
       setIsUpdating(false);
@@ -338,10 +463,35 @@ export const Visitors: React.FC = () => {
       let matchesDate = true;
       if (selectedDate) {
         const targetStr = format(selectedDate, 'yyyy-MM-dd');
-        const createdDate = v.createdAt ? format(new Date(v.createdAt), 'yyyy-MM-dd') : '';
-        const checkInDate = v.checkInTime ? format(new Date(v.checkInTime), 'yyyy-MM-dd') : '';
-        const startDateStr = v.startDate ? format(new Date(v.startDate), 'yyyy-MM-dd') : '';
-        matchesDate = targetStr === createdDate || targetStr === checkInDate || targetStr === startDateStr;
+        const parseDateSafely = (d?: string | Date | null) => {
+          if (!d) return '';
+          try {
+            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+              return d;
+            }
+            return format(new Date(d), 'yyyy-MM-dd');
+          } catch {
+            return '';
+          }
+        };
+
+        const createdDate = parseDateSafely(v.createdAt);
+        const checkInDate = parseDateSafely(v.checkInTime);
+        const startDateStr = parseDateSafely(v.startDate);
+        const expectedDateStr = parseDateSafely(v.expectedDate);
+        const checkOutDate = parseDateSafely(v.checkOutTime);
+
+        const isCurrentlyCheckedInToday =
+          targetStr === format(new Date(), 'yyyy-MM-dd') && v.status === 'CHECKED_IN';
+
+        matchesDate = (
+          targetStr === createdDate ||
+          targetStr === checkInDate ||
+          targetStr === startDateStr ||
+          targetStr === expectedDateStr ||
+          targetStr === checkOutDate ||
+          isCurrentlyCheckedInToday
+        );
       }
 
       return matchesStatus && matchesLocation && matchesDept && matchesDate;
@@ -459,14 +609,12 @@ export const Visitors: React.FC = () => {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => {
-              fetchVisitors();
-              fetchStats();
-            }}
+            onClick={handleSyncVisitors}
+            disabled={isSyncingMachine}
             className="h-10 w-10 text-gray-600 hover:text-gray-900 border-gray-200 rounded-xl"
-            title="Refresh visitors"
+            title="Fetch latest visitor punches from biometric machines & refresh"
           >
-            <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`size-4 ${isSyncingMachine ? 'animate-spin text-blue-600' : ''}`} />
           </Button>
 
           <Button
@@ -627,29 +775,56 @@ export const Visitors: React.FC = () => {
             />
           )}
 
-          {/* Date Picker (Default Today, Same as Dashboard & Attendance) */}
+          {/* Date Picker (Default All Visitors, or Pick Date for Specific Day Attendance - Future dates disabled) */}
           <div className="flex items-center gap-1.5">
             <DatePicker
               selected={selectedDate}
               onChange={(date: Date | null) => setSelectedDate(date)}
+              maxDate={new Date()}
               dateFormat="dd MMM yyyy"
               customInput={<DatePickerCustomInput />}
             />
-            {selectedDate && (
+
+            {selectedDate ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedDate(null)}
+                  className="h-9 px-2.5 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 rounded-xl flex items-center gap-1 font-medium shadow-2xs transition-all"
+                  title="Show all visitors across all dates"
+                >
+                  <X className="size-3.5" />
+                  <span>All Visitors</span>
+                </Button>
+
+                {format(selectedDate, 'yyyy-MM-dd') !== format(new Date(), 'yyyy-MM-dd') && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedDate(new Date())}
+                    className="h-9 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl font-medium"
+                    title="Show today's visitors"
+                  >
+                    Today
+                  </Button>
+                )}
+              </div>
+            ) : (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSelectedDate(null)}
-                className="h-9 px-2 text-xs text-gray-500 hover:text-gray-800 rounded-xl"
-                title="View All Visitors (All Dates)"
+                onClick={() => setSelectedDate(new Date())}
+                className="h-9 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl font-medium"
+                title="Filter by today's visitors"
               >
-                All Dates
+                Today
               </Button>
             )}
           </div>
 
           {/* Reset Filters button */}
-          {(searchQuery || filterStatus !== 'all' || filterLocation !== 'all' || filterDepartment !== 'all' || (selectedDate && format(selectedDate, 'yyyy-MM-dd') !== format(new Date(), 'yyyy-MM-dd'))) && (
+          {(searchQuery || filterStatus !== 'all' || filterLocation !== 'all' || filterDepartment !== 'all' || selectedDate !== null) && (
             <Button
               variant="ghost"
               size="sm"
@@ -658,7 +833,7 @@ export const Visitors: React.FC = () => {
                 setFilterStatus('all');
                 setFilterLocation('all');
                 setFilterDepartment('all');
-                setSelectedDate(new Date());
+                setSelectedDate(null);
               }}
               className="h-9 px-2.5 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-medium"
             >
@@ -872,10 +1047,7 @@ export const Visitors: React.FC = () => {
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => {
-                            setEditData({ ...v });
-                            setEditModalOpen(true);
-                          }}
+                          onClick={() => openEditModal(v)}
                           className="h-8 w-8 text-gray-500 hover:text-indigo-600 rounded-lg"
                           title="Edit Visitor"
                         >
@@ -1082,10 +1254,7 @@ export const Visitors: React.FC = () => {
                           <Button
                             size="icon"
                             variant="outline"
-                            onClick={() => {
-                              setEditData({ ...v });
-                              setEditModalOpen(true);
-                            }}
+                            onClick={() => openEditModal(v)}
                             className="h-8 w-8 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 border-gray-200 rounded-xl"
                           >
                             <Edit className="size-3.5" />
@@ -1256,90 +1425,328 @@ export const Visitors: React.FC = () => {
 
       {/* ── EDIT VISITOR MODAL ────────────────────────────────────── */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="sm:max-w-lg w-[95vw] max-h-[88vh] flex flex-col rounded-2xl p-0 overflow-hidden shadow-2xl">
-          <DialogHeader className="p-5 pb-3 border-b border-gray-100 shrink-0">
-            <DialogTitle className="text-lg font-bold">Edit Visitor Information</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 p-5 overflow-y-auto flex-1 text-sm overscroll-contain">
-            <div>
-              <Label className="text-xs text-gray-500 font-medium">Full Name</Label>
-              <Input
-                value={editData?.fullName || ''}
-                onChange={(e) => setEditData({ ...editData, fullName: e.target.value })}
-                className="mt-1 rounded-xl"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-gray-500 font-medium">Phone</Label>
-                <Input
-                  value={editData?.phone || ''}
-                  onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
-                  className="mt-1 rounded-xl"
-                />
+        <DialogContent className="sm:max-w-4xl w-[96vw] max-h-[92vh] flex flex-col rounded-3xl p-0 overflow-hidden shadow-2xl border border-gray-100 [&>button]:text-white [&>button]:hover:text-white/80 [&>button]:top-5 [&>button]:right-5">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 p-5 sm:p-6 text-white shrink-0 relative flex items-center justify-between">
+            <div className="flex items-center gap-3.5">
+              <div className="size-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center font-bold text-lg text-white shadow-inner">
+                {editData?.fullName ? editData.fullName.slice(0, 2).toUpperCase() : 'VI'}
               </div>
               <div>
-                <Label className="text-xs text-gray-500 font-medium">Purpose</Label>
-                <Input
-                  value={editData?.purpose || ''}
-                  onChange={(e) => setEditData({ ...editData, purpose: e.target.value })}
-                  className="mt-1 rounded-xl"
-                />
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xl font-bold tracking-tight text-white">{editData?.fullName || 'Edit Visitor'}</h3>
+                  {editData?.badgeNumber && (
+                    <span className="px-2.5 py-0.5 rounded-lg bg-blue-500/25 text-blue-200 border border-blue-400/30 font-mono text-xs font-semibold">
+                      Pass #{editData.badgeNumber}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-blue-200/80 mt-0.5">
+                  {editData?.visitorCompany || 'Visitor'} • Comprehensive Visitor Information & Biometrics
+                </p>
+              </div>
+            </div>
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-white/10 text-white/90 border border-white/15">
+                Record #{editData?.id}
+              </span>
+            </div>
+          </div>
+
+          {/* Form Body */}
+          <div className="space-y-5 p-5 sm:p-6 overflow-y-auto flex-1 bg-gray-50/60 text-sm overscroll-contain">
+            {/* Section 1: Personal & Identity Profile */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center gap-2 pb-2.5 border-b border-gray-100">
+                <div className="size-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <User className="size-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-sm">Personal & Contact Profile</h4>
+                  <p className="text-[11px] text-gray-400">Visitor identity, phone number, email and company</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Full Name <span className="text-rose-500">*</span></Label>
+                  <Input
+                    value={editData?.fullName || ''}
+                    onChange={(e) => setEditData({ ...editData, fullName: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-medium"
+                    placeholder="e.g. Jaffar Raza Khan"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Phone Number <span className="text-rose-500">*</span></Label>
+                  <Input
+                    value={editData?.phone || ''}
+                    onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-mono"
+                    placeholder="e.g. 03214960020"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Email Address</Label>
+                  <Input
+                    type="email"
+                    value={editData?.email || ''}
+                    onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200"
+                    placeholder="e.g. visitor@company.com"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">National ID / CNIC</Label>
+                  <Input
+                    value={editData?.nationalId || ''}
+                    onChange={(e) => setEditData({ ...editData, nationalId: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-mono"
+                    placeholder="e.g. 42101-1234567-1"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <Label className="text-xs text-gray-600 font-semibold">Visitor's Company / Organization</Label>
+                  <Input
+                    value={editData?.visitorCompany || ''}
+                    onChange={(e) => setEditData({ ...editData, visitorCompany: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200"
+                    placeholder="e.g. Independent Guest / ABC Corporation"
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
-              <Label className="text-xs text-gray-500 font-medium">Visit Start Date / Joining Date</Label>
-              <Input
-                type="date"
-                value={editData?.startDate ? editData.startDate.slice(0, 10) : ''}
-                onChange={(e) => setEditData({ ...editData, startDate: e.target.value })}
-                className="mt-1 rounded-xl"
-              />
+            {/* Section 2: Visit Assignment & Host */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center gap-2 pb-2.5 border-b border-gray-100">
+                <div className="size-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Building2 className="size-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-sm">Visit Assignment & Host Details</h4>
+                  <p className="text-[11px] text-gray-400">Host employee, office location, department and purpose</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Purpose of Visit</Label>
+                  <select
+                    value={visitPurposes.includes(editData?.purpose) ? editData.purpose : 'Other'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditData({ ...editData, purpose: val === 'Other' ? (editData.purpose || '') : val });
+                    }}
+                    className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    {visitPurposes.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                  {(!visitPurposes.includes(editData?.purpose) || editData?.purpose === 'Other') && (
+                    <Input
+                      value={editData?.purpose === 'Other' ? '' : (editData?.purpose || '')}
+                      onChange={(e) => setEditData({ ...editData, purpose: e.target.value })}
+                      placeholder="Specify custom purpose..."
+                      className="mt-2 rounded-xl h-9 text-xs"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Host Employee</Label>
+                  <select
+                    value={editData?.hostId || ''}
+                    onChange={(e) => setEditData({ ...editData, hostId: e.target.value })}
+                    className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No specific host (General visit)</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName || ''} {emp.employeeId ? `(${emp.employeeId})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Location / Office Branch</Label>
+                  <select
+                    value={editData?.companyId || ''}
+                    onChange={(e) => setEditData({ ...editData, companyId: e.target.value })}
+                    className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Default Location</option>
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id}>{loc.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Department</Label>
+                  <select
+                    value={editData?.departmentId || ''}
+                    onChange={(e) => setEditData({ ...editData, departmentId: e.target.value })}
+                    className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Department (Optional)</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id}>{dept.title || dept.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <Label className="text-xs text-gray-600 font-semibold">Vehicle / License Plate #</Label>
+                  <Input
+                    value={editData?.vehicleNumber || ''}
+                    onChange={(e) => setEditData({ ...editData, vehicleNumber: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-mono"
+                    placeholder="e.g. LE-1234 / BLA-550"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div>
-              <Label className="text-xs text-gray-500 font-medium">Status</Label>
-              <select
-                value={editData?.status || 'CHECKED_IN'}
-                onChange={(e) => setEditData({ ...editData, status: e.target.value })}
-                className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm"
-              >
-                <option value="CHECKED_IN">Checked In</option>
-                <option value="EXPECTED">Expected</option>
-                <option value="CHECKED_OUT">Checked Out</option>
-                <option value="CANCELLED">Cancelled</option>
-              </select>
+            {/* Section 3: Biometric Access, Status & Timing */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center gap-2 pb-2.5 border-b border-gray-100">
+                <div className="size-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Cpu className="size-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-sm">Biometric Access & Presence Schedule</h4>
+                  <p className="text-[11px] text-gray-400">Machine recognition badge, visit status, check-in and check-out</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Biometric Badge / Pass #</Label>
+                  <Input
+                    value={editData?.badgeNumber || ''}
+                    onChange={(e) => setEditData({ ...editData, badgeNumber: e.target.value })}
+                    className="mt-1 rounded-xl h-10 font-mono font-bold text-blue-700 bg-blue-50/40 border-blue-200"
+                    placeholder="e.g. 90002"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Unique badge/ID synced to biometric terminals</p>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Visit Status</Label>
+                  <select
+                    value={editData?.status || 'CHECKED_IN'}
+                    onChange={(e) => setEditData({ ...editData, status: e.target.value })}
+                    className="mt-1 w-full h-10 px-3 bg-white border border-gray-200 rounded-xl text-sm font-semibold focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="CHECKED_IN">🟢 Checked In (Present on premises)</option>
+                    <option value="EXPECTED">🟡 Expected (Upcoming appointment)</option>
+                    <option value="CHECKED_OUT">⚪ Checked Out (Departed)</option>
+                    <option value="CANCELLED">🔴 Cancelled</option>
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">Controls visitor visibility in Today's list</p>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Visit Start Date / Joining Date</Label>
+                  <Input
+                    type="date"
+                    value={editData?.startDate || ''}
+                    onChange={(e) => setEditData({ ...editData, startDate: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Expected Date / Valid Until</Label>
+                  <Input
+                    type="date"
+                    value={editData?.expectedDate || ''}
+                    onChange={(e) => setEditData({ ...editData, expectedDate: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Check-In Date & Time</Label>
+                  <Input
+                    type="datetime-local"
+                    value={editData?.checkInTime || ''}
+                    onChange={(e) => setEditData({ ...editData, checkInTime: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-600 font-semibold">Check-Out Date & Time</Label>
+                  <Input
+                    type="datetime-local"
+                    value={editData?.checkOutTime || ''}
+                    onChange={(e) => setEditData({ ...editData, checkOutTime: e.target.value })}
+                    className="mt-1 rounded-xl h-10 border-gray-200 text-xs font-mono"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div>
-              <Label className="text-xs text-gray-500 font-medium">Notes</Label>
+            {/* Section 4: Notes & Security Remarks */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-3">
+              <div className="flex items-center gap-2 pb-2.5 border-b border-gray-100">
+                <div className="size-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <FileText className="size-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-sm">Notes & Security Remarks</h4>
+                  <p className="text-[11px] text-gray-400">Additional instructions, equipment carried or security clearance</p>
+                </div>
+              </div>
+
               <Textarea
-                rows={2}
+                rows={3}
                 value={editData?.notes || ''}
                 onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
-                className="mt-1 rounded-xl"
+                className="rounded-xl border-gray-200 text-sm"
+                placeholder="Write any additional notes, remarks, belongings or security clearances..."
               />
             </div>
           </div>
 
-          <DialogFooter className="p-4 border-t border-gray-100 bg-gray-50 shrink-0 gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setEditModalOpen(false)}
-              className="rounded-xl"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSaveEdit}
-              disabled={isUpdating}
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl"
-            >
-              {isUpdating ? 'Saving...' : 'Save Changes'}
-            </Button>
+          {/* Footer Actions */}
+          <DialogFooter className="p-4 sm:p-5 border-t border-gray-100 bg-white shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <Info className="size-4 text-blue-600 shrink-0" />
+              <span>Badge and name updates will automatically synchronize with biometric terminals.</span>
+            </div>
+            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditModalOpen(false)}
+                className="rounded-xl border-gray-200 text-gray-700 hover:bg-gray-50 h-10 px-5 text-xs font-semibold"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isUpdating}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl h-10 px-6 text-xs font-semibold shadow-md shadow-blue-500/20"
+              >
+                {isUpdating ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="size-3.5 animate-spin" /> Saving Changes...
+                  </span>
+                ) : (
+                  'Save All Changes'
+                )}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -919,6 +919,11 @@ export const visitorAPI = {
       method: 'DELETE',
     });
   },
+  syncVisitorPunches: async () => {
+    return apiCall('/visitors/sync-punches', {
+      method: 'POST',
+    });
+  },
 };
 
 

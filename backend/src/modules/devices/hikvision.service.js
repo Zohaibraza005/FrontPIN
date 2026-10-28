@@ -140,7 +140,7 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
       port: targetPort,
       path: path,
       method: method,
-      timeout: 10000,
+      timeout: 4000,
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(postData),
@@ -821,6 +821,73 @@ async function syncBiometricsAcrossDevices(prisma) {
   }
 }
 
+/**
+ * Cross-syncs biometric templates (fingerprints) for a specific user/visitor across all active devices.
+ * If the user has enrolled biometrics on ANY device, it pulls the template(s) and clones them to all other devices.
+ * @param {Array} devices - List of active BiometricDevice objects
+ * @param {string} employeeNo - Biometric ID / badge number / employeeNo
+ * @param {string} userName - Optional user name for logging
+ * @returns {Promise<{ found: boolean, donorDevice?: string, enrolledCount: number, clonedCount: number }>}
+ */
+async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "") {
+  if (!devices || devices.length < 2 || !employeeNo) {
+    return { found: false, enrolledCount: 0, clonedCount: 0 };
+  }
+
+  const bioId = String(employeeNo).trim();
+  let donorDevice = null;
+  let enrolledFPs = [];
+
+  // 1. Search all devices in parallel to find where the biometric is enrolled
+  const fpChecks = await Promise.all(
+    devices.map(async (dev) => {
+      try {
+        const fps = await fetchHikvisionFingerprints(dev, bioId);
+        return { dev, fps: fps || [] };
+      } catch (e) {
+        return { dev, fps: [] };
+      }
+    })
+  );
+
+  // Pick the device with the most enrolled fingerprints as donor
+  const withFps = fpChecks.filter((c) => c.fps && c.fps.length > 0);
+  if (withFps.length === 0) {
+    return { found: false, enrolledCount: 0, clonedCount: 0 };
+  }
+
+  withFps.sort((a, b) => b.fps.length - a.fps.length);
+  donorDevice = withFps[0].dev;
+  enrolledFPs = withFps[0].fps;
+
+  console.log(`[Hikvision Bio Sync] Found ${enrolledFPs.length} fingerprint(s) for ${userName || bioId} on ${donorDevice.name} (${donorDevice.ipAddress}).`);
+
+  // 2. Clone to all target devices that have fewer fingerprints
+  let clonedCount = 0;
+  for (const check of fpChecks) {
+    const targetDev = check.dev;
+    if (targetDev.id === donorDevice.id) continue;
+
+    // Check if target already has all fingerprints
+    if (check.fps && check.fps.length >= enrolledFPs.length) continue;
+
+    for (const fp of enrolledFPs) {
+      const ok = await pushHikvisionFingerprint(targetDev, bioId, fp);
+      if (ok) {
+        console.log(`[Hikvision Bio Sync] Cloned FP (ID: ${fp.fingerPrintID}) for ${userName || bioId} -> ${targetDev.name} (${targetDev.ipAddress})`);
+        clonedCount++;
+      }
+    }
+  }
+
+  return {
+    found: true,
+    donorDevice: donorDevice.name,
+    enrolledCount: enrolledFPs.length,
+    clonedCount,
+  };
+}
+
 module.exports = {
   parseHikvisionEvent,
   pushUserToHikvision,
@@ -832,6 +899,7 @@ module.exports = {
   fetchHikvisionAcsEvents,
   syncHikvisionDeviceLogs,
   syncBiometricsAcrossDevices,
+  syncUserBiometricsAcrossDevices,
 };
 
 

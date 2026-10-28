@@ -1910,12 +1910,6 @@ export const Attendance: React.FC = () => {
                       value: String(emp.id),
                       label: `${emp.firstName} ${emp.lastName || ""}`.trim(),
                     })),
-                    ...(visitorsList.length > 0
-                      ? visitorsList.map((v) => ({
-                          value: `visitor-${v.id}`,
-                          label: `[Visitor] ${v.fullName}`,
-                        }))
-                      : []),
                   ]}
                 />
               </>

@@ -717,12 +717,6 @@ export const Reports: React.FC = () => {
                       value: String(e.id),
                       label: `${e.firstName} ${e.lastName || ""}`.trim(),
                     })),
-                    ...(reportVisitors.length > 0
-                      ? reportVisitors.map((v) => ({
-                          value: `visitor-${v.id}`,
-                          label: `[Visitor] ${v.fullName}`,
-                        }))
-                      : []),
                   ]}
                 />
 

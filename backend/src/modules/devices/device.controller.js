@@ -74,6 +74,54 @@ function isOffDay(schedules, date, timezone = null) {
 }
 
 /**
+ * Helper to match a visitor by Badge Number, ID, or Full Name
+ */
+async function findVisitor(biometricId, employeeName) {
+  const bioIdStr = biometricId ? String(biometricId).trim() : "";
+  if (bioIdStr) {
+    try {
+      const orConditions = [{ badgeNumber: bioIdStr }];
+      if (bioIdStr.startsWith("9") && bioIdStr.length > 1 && !isNaN(parseInt(bioIdStr.slice(1)))) {
+        orConditions.push({ id: parseInt(bioIdStr.slice(1)) });
+      }
+
+      const visitor = await prisma.visitor.findFirst({
+        where: {
+          deletedAt: null,
+          OR: orConditions,
+        },
+        include: { company: true },
+      });
+      if (visitor) return visitor;
+    } catch (e) {}
+  }
+
+  if (employeeName && employeeName.trim()) {
+    try {
+      const cleanName = employeeName.trim().toLowerCase();
+      const visitor = await prisma.visitor.findFirst({
+        where: {
+          deletedAt: null,
+          fullName: { equals: cleanName },
+        },
+        include: { company: true },
+      });
+      if (visitor) {
+        if (bioIdStr && visitor.badgeNumber !== bioIdStr) {
+          await prisma.visitor.update({
+            where: { id: visitor.id },
+            data: { badgeNumber: bioIdStr },
+          });
+        }
+        return visitor;
+      }
+    } catch (e) {}
+  }
+
+  return null;
+}
+
+/**
  * Helper to match an employee by Biometric ID, Employee ID, or Machine Name
  */
 async function findEmployee(biometricId, employeeName) {
@@ -83,6 +131,12 @@ async function findEmployee(biometricId, employeeName) {
   const BLOCKED_BIO_IDS = ["1919", "001", "2385"];
   if (bioIdStr && BLOCKED_BIO_IDS.includes(bioIdStr)) {
     console.log(`[Biometric Punch] Skipped blocked/removed biometric ID: ${bioIdStr}`);
+    return null;
+  }
+
+  // 0. If this punch belongs to a visitor, NEVER treat it as an employee
+  const isVis = await findVisitor(biometricId, employeeName);
+  if (isVis) {
     return null;
   }
 
@@ -200,6 +254,11 @@ async function findEmployee(biometricId, employeeName) {
   // 4. Auto-provision new employee if completely new user punches on machine
   if (bioIdStr) {
     try {
+      // Double check it's not a visitor or visitor badge number (e.g. 90xxx)
+      const visitorCheck = await findVisitor(bioIdStr, employeeName);
+      if (visitorCheck || bioIdStr.startsWith("90")) {
+        return null;
+      }
       const existingBio = await prisma.employee.findFirst({
         where: { biometricId: bioIdStr },
         include: {
@@ -263,56 +322,6 @@ async function findEmployee(biometricId, employeeName) {
     } catch (createErr) {
       console.error("[Biometric Punch] Auto-provisioning failed:", createErr.message);
     }
-  }
-
-  return null;
-}
-
-/**
- * Helper to match a visitor by Badge Number, ID, or Full Name
- */
-async function findVisitor(biometricId, employeeName) {
-  const bioIdStr = biometricId ? String(biometricId).trim() : "";
-  if (bioIdStr) {
-    try {
-      const orConditions = [{ badgeNumber: bioIdStr }];
-      if (!isNaN(parseInt(bioIdStr))) {
-        orConditions.push({ id: parseInt(bioIdStr) });
-      }
-      if (bioIdStr.startsWith("9") && bioIdStr.length > 1 && !isNaN(parseInt(bioIdStr.slice(1)))) {
-        orConditions.push({ id: parseInt(bioIdStr.slice(1)) });
-      }
-
-      const visitor = await prisma.visitor.findFirst({
-        where: {
-          deletedAt: null,
-          OR: orConditions,
-        },
-        include: { company: true },
-      });
-      if (visitor) return visitor;
-    } catch (e) {}
-  }
-
-  if (employeeName && employeeName.trim()) {
-    try {
-      const cleanName = employeeName.trim().toLowerCase();
-      const visitors = await prisma.visitor.findMany({
-        where: { deletedAt: null },
-        include: { company: true },
-      });
-      for (const v of visitors) {
-        if (v.fullName && v.fullName.trim().toLowerCase() === cleanName) {
-          if (bioIdStr && v.badgeNumber !== bioIdStr) {
-            await prisma.visitor.update({
-              where: { id: v.id },
-              data: { badgeNumber: bioIdStr },
-            });
-          }
-          return v;
-        }
-      }
-    } catch (e) {}
   }
 
   return null;
@@ -462,25 +471,53 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
     return { success: false, reason: "No identifier provided" };
   }
 
-  const employee = await findEmployee(biometricId, employeeName);
+  // 1. Match Visitor FIRST - Visitors must stay strictly in the Visitor section
+  const matchedVisitor = await findVisitor(biometricId, employeeName);
+  if (matchedVisitor) {
+    const timezone = matchedVisitor.company?.timezone || "Asia/Karachi";
+    const pTime = punchTime ? moment(punchTime).tz(timezone) : moment().tz(timezone);
+    const punchDate = pTime.toDate();
+    const todayStr = pTime.format("YYYY-MM-DD");
 
-  if (!employee) {
-    // 🔹 Match Visitor if not an Employee
-    const matchedVisitor = await findVisitor(biometricId, employeeName);
-    if (matchedVisitor) {
-      const timezone = matchedVisitor.company?.timezone || "Asia/Karachi";
-      const pTime = punchTime ? moment(punchTime).tz(timezone) : moment().tz(timezone);
-      const punchDate = pTime.toDate();
-      const todayStr = pTime.format("YYYY-MM-DD");
+    let deviceDirectionConfig = direction;
+    if (!deviceDirectionConfig && deviceName) {
+      try {
+        const dbDev = await prisma.biometricDevice.findFirst({
+          where: { name: deviceName, deletedAt: null },
+          select: { direction: true },
+        });
+        if (dbDev?.direction) {
+          deviceDirectionConfig = dbDev.direction;
+        }
+      } catch (e) {}
+    }
+    const deviceTag = deviceName ? `${brand} (${deviceName})` : brand;
+    const deviceDir = getDeviceDirection(deviceName, deviceTag, deviceDirectionConfig);
 
-      const isAlreadyCheckedIn =
-        matchedVisitor.status === "CHECKED_IN" &&
-        matchedVisitor.checkInTime &&
-        moment(matchedVisitor.checkInTime).tz(timezone).format("YYYY-MM-DD") === todayStr;
+    const isAlreadyCheckedIn =
+      matchedVisitor.status === "CHECKED_IN" &&
+      matchedVisitor.checkInTime &&
+      moment(matchedVisitor.checkInTime).tz(timezone).format("YYYY-MM-DD") === todayStr;
 
-      let newStatus = "CHECKED_IN";
-      let updateData = {};
+    let newStatus = "CHECKED_IN";
+    let updateData = {};
 
+    if (deviceDir === "CHECK_IN") {
+      newStatus = "CHECKED_IN";
+      updateData = {
+        status: "CHECKED_IN",
+        checkInTime: punchDate,
+        checkOutTime: null,
+      };
+      console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
+    } else if (deviceDir === "CHECK_OUT") {
+      newStatus = "CHECKED_OUT";
+      updateData = {
+        status: "CHECKED_OUT",
+        checkOutTime: punchDate,
+      };
+      console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
+    } else {
       if (isAlreadyCheckedIn) {
         newStatus = "CHECKED_OUT";
         updateData = {
@@ -497,21 +534,25 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         };
         console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
       }
-
-      await prisma.visitor.update({
-        where: { id: matchedVisitor.id },
-        data: updateData,
-      });
-
-      return {
-        success: true,
-        isVisitor: true,
-        visitor: matchedVisitor,
-        action: newStatus,
-        punchTime: punchDate,
-      };
     }
 
+    const updated = await prisma.visitor.update({
+      where: { id: matchedVisitor.id },
+      data: updateData,
+    });
+
+    return {
+      success: true,
+      isVisitor: true,
+      visitor: updated,
+      action: newStatus,
+      punchTime: punchDate,
+    };
+  }
+
+  // 2. Not a visitor -> Process as Employee
+  const employee = await findEmployee(biometricId, employeeName);
+  if (!employee) {
     console.warn(`[Biometric Punch] No Employee or Visitor matched with biometricId: ${biometricId} / Name: ${employeeName}`);
     return { success: false, reason: `Employee not found for Biometric ID: ${biometricId} / Name: ${employeeName}` };
   }
@@ -1549,12 +1590,13 @@ exports.syncAllDevicesRoute = async (req, res) => {
 };
 
 /**
- * Push all active Employees (or a single employee) to active Hikvision devices
+ * Push all active Employees (or a single employee) / Visitors to active Hikvision devices
+ * Automatically checks and clones enrolled biometrics (fingerprints) across all machines!
  */
 exports.pushUsersToDevices = async (req, res) => {
   try {
     const { employeeId, visitorId, type } = req.body;
-    const { pushUserToHikvision, syncBiometricsAcrossDevices } = require("./hikvision.service");
+    const { pushUserToHikvision, syncBiometricsAcrossDevices, syncUserBiometricsAcrossDevices } = require("./hikvision.service");
 
     const activeDevices = await prisma.biometricDevice.findMany({
       where: { brand: "HIKVISION", deletedAt: null },
@@ -1590,6 +1632,8 @@ exports.pushUsersToDevices = async (req, res) => {
 
       let successCount = 0;
       let failedCount = 0;
+      let totalClonedFPs = 0;
+      let bioFoundCount = 0;
 
       for (const vis of visitors) {
         let bioId = vis.badgeNumber ? String(vis.badgeNumber).trim() : `9${String(vis.id).padStart(4, "0")}`;
@@ -1604,20 +1648,50 @@ exports.pushUsersToDevices = async (req, res) => {
           } catch (e) {}
         }
 
-        for (const device of activeDevices) {
-          const pushed = await pushUserToHikvision(device, {
-            biometricId: bioId,
-            name: name,
-          });
-          if (pushed) successCount++;
-          else failedCount++;
+        // 1. Push user metadata and door access rights to all active devices in parallel
+        await Promise.all(
+          activeDevices.map(async (device) => {
+            const pushed = await pushUserToHikvision(device, {
+              biometricId: bioId,
+              name: name,
+            });
+            if (pushed) successCount++;
+            else failedCount++;
+          })
+        );
+
+        // 2. Check if biometric (fingerprint) is enrolled on any machine and sync to all other machines!
+        const bioResult = await syncUserBiometricsAcrossDevices(activeDevices, bioId, name);
+        if (bioResult.found) {
+          bioFoundCount++;
+          totalClonedFPs += bioResult.clonedCount;
+        }
+      }
+
+      let message = "";
+      if (visitors.length === 1) {
+        const visName = visitors[0].fullName || "Visitor";
+        if (totalClonedFPs > 0) {
+          message = `${visName} pushed & biometric (fingerprint) synced across all machines successfully!`;
+        } else if (bioFoundCount > 0) {
+          message = `${visName} and biometric already active & verified across all machines!`;
+        } else {
+          message = `${visName} pushed to all machines! You can now enroll their fingerprint on any gate, then click Push again to sync to all gates.`;
+        }
+      } else {
+        if (totalClonedFPs > 0) {
+          message = `Pushed ${visitors.length} visitor(s) to machines and synced ${totalClonedFPs} biometric template(s) across all gates!`;
+        } else if (bioFoundCount > 0) {
+          message = `Pushed ${visitors.length} visitor(s) to machines. All enrolled biometrics verified active across all gates!`;
+        } else {
+          message = `Pushed ${visitors.length} visitor(s) to biometric devices successfully! Door rights enabled on all gates.`;
         }
       }
 
       return res.json({
         success: true,
-        message: `Pushed ${visitors.length} visitor(s) to biometric device(s) successfully! You can now register their face or fingerprint on the machine.`,
-        details: { successCount, failedCount, totalVisitors: visitors.length },
+        message,
+        details: { successCount, failedCount, totalVisitors: visitors.length, totalClonedFPs, bioFoundCount },
       });
     }
 
@@ -1643,28 +1717,56 @@ exports.pushUsersToDevices = async (req, res) => {
 
     let successCount = 0;
     let failedCount = 0;
+    let totalClonedFPs = 0;
+    let bioFoundCount = 0;
 
     for (const emp of employees) {
       const bioId = emp.biometricId || emp.employeeId || String(emp.id);
       const name = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || `User ${bioId}`;
 
-      for (const device of activeDevices) {
-        const pushed = await pushUserToHikvision(device, {
-          biometricId: bioId,
-          name: name,
-        });
-        if (pushed) successCount++;
-        else failedCount++;
+      // 1. Push user profile and door rights
+      await Promise.all(
+        activeDevices.map(async (device) => {
+          const pushed = await pushUserToHikvision(device, {
+            biometricId: bioId,
+            name: name,
+          });
+          if (pushed) successCount++;
+          else failedCount++;
+        })
+      );
+
+      // 2. If single or few employees, sync their biometrics immediately
+      if (employees.length <= 10) {
+        const bioResult = await syncUserBiometricsAcrossDevices(activeDevices, bioId, name);
+        if (bioResult.found) {
+          bioFoundCount++;
+          totalClonedFPs += bioResult.clonedCount;
+        }
       }
     }
 
-    // Trigger background cross-device biometric template sync (non-blocking)
+    // Trigger fleet background cross-device biometric template sync
     syncBiometricsAcrossDevices(prisma).catch((e) => console.error("Background sync error:", e.message));
+
+    let message = "";
+    if (employees.length === 1) {
+      const empName = `${employees[0].firstName || ''} ${employees[0].lastName || ''}`.trim() || "Employee";
+      if (totalClonedFPs > 0) {
+        message = `${empName} pushed & biometric synced across all machines successfully!`;
+      } else if (bioFoundCount > 0) {
+        message = `${empName} and biometric already active & verified across all machines!`;
+      } else {
+        message = `${empName} pushed to all machines! You can now enroll their fingerprint on any gate, then click Push again to sync to all gates.`;
+      }
+    } else {
+      message = `Pushed ${employees.length} employee(s) to biometric device(s) successfully! Biometric cross-sync active.`;
+    }
 
     return res.json({
       success: true,
-      message: `Pushed ${employees.length} employee(s) to biometric device(s) successfully!`,
-      details: { successCount, failedCount, totalEmployees: employees.length },
+      message,
+      details: { successCount, failedCount, totalEmployees: employees.length, totalClonedFPs, bioFoundCount },
     });
   } catch (error) {
     console.error("Error in pushUsersToDevices:", error);
@@ -1694,6 +1796,113 @@ exports.triggerBiometricsCrossSync = async (req, res) => {
   }
 };
 
+/**
+ * Sync ONLY Visitor punches from all active machines into the Visitor section
+ */
+exports.syncVisitorPunches = async (req, res) => {
+  try {
+    const { fetchHikvisionAcsEvents } = require("./hikvision.service");
+    const moment = require("moment-timezone");
+
+    const visitors = await prisma.visitor.findMany({
+      where: { deletedAt: null },
+    });
+
+    if (visitors.length === 0) {
+      return res.json({
+        success: true,
+        count: 0,
+        message: "No registered visitors found in the system to sync.",
+      });
+    }
+
+    const visitorBadges = new Set(
+      visitors.map((v) => String(v.badgeNumber || "").trim()).filter(Boolean)
+    );
+    const visitorNames = new Set(
+      visitors.map((v) => String(v.fullName || "").trim().toLowerCase()).filter(Boolean)
+    );
+
+    // Active devices excluding enrolling terminal
+    const devices = await prisma.biometricDevice.findMany({
+      where: {
+        brand: "HIKVISION",
+        status: "ONLINE",
+        deletedAt: null,
+        NOT: { name: { contains: "Enrolling" } },
+      },
+    });
+
+    const timezone = "Asia/Karachi";
+    const startTime = moment.tz(timezone).startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+    const endTime = moment.tz(timezone).endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+
+    let syncedVisitorPunches = 0;
+    const syncDetails = [];
+
+    // Query active devices in parallel
+    const syncPromises = devices.map(async (device) => {
+      try {
+        const events = await fetchHikvisionAcsEvents(device, startTime, endTime);
+
+        for (const event of events) {
+          const bioId = String(event.biometricId || event.employeeNoString || event.employeeNo || "").trim();
+          const empName = event.employeeName
+            ? String(event.employeeName).trim()
+            : event.name
+            ? String(event.name).trim()
+            : "";
+          const cleanName = empName.toLowerCase();
+
+          const isVisitor =
+            visitorBadges.has(bioId) ||
+            bioId.startsWith("90") ||
+            (cleanName && visitorNames.has(cleanName));
+
+          if (isVisitor) {
+            const punchResult = await processBiometricPunch({
+              biometricId: bioId,
+              punchTime: event.punchTime,
+              brand: "HIKVISION",
+              deviceName: device.name,
+              method: event.method || "HIKVISION",
+              employeeName: empName,
+              direction: device.direction,
+            });
+
+            if (punchResult?.success && punchResult.isVisitor) {
+              syncedVisitorPunches++;
+              syncDetails.push({
+                visitorName: punchResult.visitor.fullName,
+                action: punchResult.action,
+                device: device.name,
+                time: punchResult.punchTime,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[Visitor Sync Error] Device ${device.name}:`, err.message);
+      }
+    });
+
+    await Promise.allSettled(syncPromises);
+
+    return res.json({
+      success: true,
+      count: syncedVisitorPunches,
+      message:
+        syncedVisitorPunches > 0
+          ? `Successfully synced ${syncedVisitorPunches} visitor punch(es) from biometric machine(s)!`
+          : "Biometric machines checked: No new visitor punches found for today.",
+      details: syncDetails,
+    });
+  } catch (error) {
+    console.error("Error in syncVisitorPunches:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   processBiometricPunch,
   handleHikvisionEvent: exports.handleHikvisionEvent,
@@ -1708,5 +1917,6 @@ module.exports = {
   syncSingleDevice,
   pushUsersToDevices: exports.pushUsersToDevices,
   triggerBiometricsCrossSync: exports.triggerBiometricsCrossSync,
+  syncVisitorPunches: exports.syncVisitorPunches,
 };
 

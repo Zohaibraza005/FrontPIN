@@ -1333,7 +1333,7 @@ exports.getAttendanceReport = async (req, res) => {
     }
 
     if (user.role === "ADMIN") {
-      if (employeeId && String(employeeId).toLowerCase() !== "all") {
+      if (employeeId && String(employeeId).toLowerCase() !== "all" && !isNaN(Number(employeeId))) {
         employeeWhere.id = Number(employeeId);
       }
       if (departmentId && String(departmentId).toLowerCase() !== "all") {

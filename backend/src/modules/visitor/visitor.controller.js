@@ -53,27 +53,53 @@ exports.getVisitors = async (req, res) => {
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date();
       endOfDay.setHours(23, 59, 59, 999);
-      where.createdAt = { gte: startOfDay, lte: endOfDay };
+      where.OR = [
+        { checkInTime: { gte: startOfDay, lte: endOfDay } },
+        { checkOutTime: { gte: startOfDay, lte: endOfDay } },
+        { expectedDate: { gte: startOfDay, lte: endOfDay } },
+        { createdAt: { gte: startOfDay, lte: endOfDay } },
+        { status: "CHECKED_IN" }
+      ];
     } else if (dateRange === "week") {
       const startOfWeek = new Date();
       startOfWeek.setDate(startOfWeek.getDate() - 7);
-      where.createdAt = { gte: startOfWeek };
+      where.OR = [
+        { checkInTime: { gte: startOfWeek } },
+        { checkOutTime: { gte: startOfWeek } },
+        { createdAt: { gte: startOfWeek } },
+        { status: "CHECKED_IN" }
+      ];
     } else if (dateRange === "month") {
       const startOfMonth = new Date();
       startOfMonth.setDate(startOfMonth.getDate() - 30);
-      where.createdAt = { gte: startOfMonth };
+      where.OR = [
+        { checkInTime: { gte: startOfMonth } },
+        { checkOutTime: { gte: startOfMonth } },
+        { createdAt: { gte: startOfMonth } },
+        { status: "CHECKED_IN" }
+      ];
     } else if (startDate && endDate) {
-      where.createdAt = {
-        gte: new Date(startDate),
-        lte: new Date(endDate),
-      };
+      const sDate = new Date(startDate);
+      const eDate = new Date(endDate);
+      where.OR = [
+        { checkInTime: { gte: sDate, lte: eDate } },
+        { checkOutTime: { gte: sDate, lte: eDate } },
+        { expectedDate: { gte: sDate, lte: eDate } },
+        { createdAt: { gte: sDate, lte: eDate } }
+      ];
     } else if (req.query.date) {
       const selected = new Date(req.query.date);
       const startOfDay = new Date(selected);
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(selected);
       endOfDay.setHours(23, 59, 59, 999);
-      where.createdAt = { gte: startOfDay, lte: endOfDay };
+      where.OR = [
+        { checkInTime: { gte: startOfDay, lte: endOfDay } },
+        { checkOutTime: { gte: startOfDay, lte: endOfDay } },
+        { expectedDate: { gte: startOfDay, lte: endOfDay } },
+        { createdAt: { gte: startOfDay, lte: endOfDay } },
+        { status: "CHECKED_IN" }
+      ];
     }
 
     const visitors = await prisma.visitor.findMany({
@@ -275,7 +301,6 @@ exports.createVisitor = async (req, res) => {
         companyId: targetCompanyId,
         departmentId: departmentId && !isNaN(parseInt(departmentId)) ? parseInt(departmentId) : null,
         badgeNumber: badgeNumber && badgeNumber.trim() ? badgeNumber.trim() : null,
-        startDate: startDate ? new Date(startDate) : null,
         expectedDate: expectedDate ? new Date(expectedDate) : null,
         checkInTime: checkInTime ? new Date(checkInTime) : (visitorStatus === "CHECKED_IN" ? new Date() : null),
         status: visitorStatus,
@@ -299,9 +324,48 @@ exports.createVisitor = async (req, res) => {
       },
     });
 
+    if (startDate) {
+      try {
+        await prisma.$executeRawUnsafe(
+          "UPDATE visitor SET startDate = ? WHERE id = ?",
+          new Date(startDate),
+          newVisitor.id
+        );
+        newVisitor.startDate = new Date(startDate);
+      } catch (e) {
+        console.warn("Error updating visitor startDate:", e.message);
+      }
+    }
+
+    // Ensure visitor has a badge number (9XXXX)
+    let finalBadge = newVisitor.badgeNumber;
+    if (!finalBadge) {
+      finalBadge = `9${String(newVisitor.id).padStart(4, "0")}`;
+      try {
+        await prisma.visitor.update({
+          where: { id: newVisitor.id },
+          data: { badgeNumber: finalBadge },
+        });
+        newVisitor.badgeNumber = finalBadge;
+      } catch (e) {}
+    }
+
+    // Auto-provision visitor to online biometric devices in background
+    prisma.biometricDevice.findMany({
+      where: { brand: "HIKVISION", deletedAt: null },
+    }).then((devices) => {
+      const { pushUserToHikvision } = require("../devices/hikvision.service");
+      for (const dev of devices) {
+        pushUserToHikvision(dev, {
+          biometricId: finalBadge,
+          name: newVisitor.fullName,
+        }).catch((e) => console.error(`[Visitor Auto-Push Error] ${dev.name}:`, e.message));
+      }
+    }).catch(() => {});
+
     res.status(201).json({
       success: true,
-      message: "Visitor added successfully!",
+      message: "Visitor added successfully! Pushed to biometric machines.",
       data: newVisitor,
     });
   } catch (error) {
@@ -373,7 +437,6 @@ exports.updateVisitor = async (req, res) => {
         ...(companyId !== undefined ? { companyId: companyId && !isNaN(parseInt(companyId)) ? parseInt(companyId) : null } : {}),
         ...(departmentId !== undefined ? { departmentId: departmentId && !isNaN(parseInt(departmentId)) ? parseInt(departmentId) : null } : {}),
         ...(badgeNumber !== undefined ? { badgeNumber: badgeNumber && badgeNumber.trim() ? badgeNumber.trim() : null } : {}),
-        ...(startDate !== undefined ? { startDate: startDate ? new Date(startDate) : null } : {}),
         ...(expectedDate !== undefined ? { expectedDate: expectedDate ? new Date(expectedDate) : null } : {}),
         ...(checkInTime !== undefined ? { checkInTime: checkInTime ? new Date(checkInTime) : null } : {}),
         ...(checkOutTime !== undefined ? { checkOutTime: checkOutTime ? new Date(checkOutTime) : null } : {}),
@@ -396,6 +459,35 @@ exports.updateVisitor = async (req, res) => {
         },
       },
     });
+
+    if (startDate !== undefined) {
+      try {
+        await prisma.$executeRawUnsafe(
+          "UPDATE visitor SET startDate = ? WHERE id = ?",
+          startDate ? new Date(startDate) : null,
+          parseInt(id)
+        );
+        updated.startDate = startDate ? new Date(startDate) : null;
+      } catch (e) {
+        console.warn("Error updating visitor startDate:", e.message);
+      }
+    }
+
+    // Auto-update visitor details on active biometric devices in background
+    if (fullName || badgeNumber) {
+      const bioId = updated.badgeNumber || `9${String(updated.id).padStart(4, "0")}`;
+      prisma.biometricDevice.findMany({
+        where: { brand: "HIKVISION", deletedAt: null },
+      }).then((devices) => {
+        const { pushUserToHikvision } = require("../devices/hikvision.service");
+        for (const dev of devices) {
+          pushUserToHikvision(dev, {
+            biometricId: bioId,
+            name: updated.fullName,
+          }).catch((e) => console.error(`[Visitor Update Auto-Push Error] ${dev.name}:`, e.message));
+        }
+      }).catch(() => {});
+    }
 
     res.json({
       success: true,
