@@ -757,6 +757,15 @@ exports.deleteEmployee = async (req, res) => {
           firstName: true,
           lastName: true,
           employeeId: true,
+          departmentId: true,
+          companyId: true,
+          jobInfo: {
+            select: {
+              hiringDate: true,
+              joiningDate: true,
+              designation: true,
+            },
+          },
           payroll: {
             select: {
               rate: true,

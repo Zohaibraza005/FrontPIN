@@ -1417,6 +1417,8 @@ model Visitor {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
 
+  logs           VisitorLog[]
+
   @@index([organizationId])
   @@index([companyId])
   @@index([departmentId])
@@ -1424,4 +1426,22 @@ model Visitor {
   @@index([status])
   @@index([deletedAt])
   @@map("visitor")
+}
+
+model VisitorLog {
+  id             Int       @id @default(autoincrement())
+  visitorId      Int
+  visitor        Visitor   @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  organizationId Int
+  punchTime      DateTime  @default(now())
+  punchType      String    // CHECK_IN | CHECK_OUT
+  date           String    // YYYY-MM-DD
+  device         String?
+  method         String?   @default("BIOMETRIC") // BIOMETRIC | FACE | CARD | MANUAL | SYSTEM
+  createdAt      DateTime  @default(now())
+
+  @@index([visitorId])
+  @@index([organizationId])
+  @@index([date])
+  @@map("visitor_log")
 }

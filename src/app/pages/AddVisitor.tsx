@@ -183,8 +183,7 @@ export const AddVisitor: React.FC = () => {
       if (companyId && companyId !== 'all') formData.append('companyId', companyId);
       if (departmentId && departmentId !== 'all') formData.append('departmentId', departmentId);
       if (startDate) formData.append('startDate', startDate);
-      formData.append('status', 'CHECKED_IN');
-      formData.append('checkInTime', new Date().toISOString());
+      formData.append('status', 'EXPECTED');
       if (photoFile) formData.append('photo', photoFile);
 
       const res = await visitorAPI.createVisitor(formData);

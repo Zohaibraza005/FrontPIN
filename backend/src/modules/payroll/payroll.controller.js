@@ -163,11 +163,16 @@ exports.createPayroll = async (req, res) => {
       periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
     }
 
-    // 🔹 Hiring Date Adjustment
-    if (employee.jobInfo?.hiringDate) {
-      const hiringDate = moment(employee.jobInfo.hiringDate);
+    // 🔹 Hiring / Joining Date Validation & Adjustment
+    const rawJoinDate = employee.jobInfo?.joiningDate || employee.joiningDate || employee.jobInfo?.hiringDate || employee.hiringDate;
+    if (rawJoinDate) {
+      const hiringDate = moment(rawJoinDate);
       if (hiringDate.isAfter(periodEnd)) {
-        return res.status(400).json({ message: "Employee hired after payroll period" });
+        const formattedDate = hiringDate.format("DD MMM YYYY");
+        const empName = `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || "Employee";
+        return res.status(400).json({
+          message: `${empName}'s joining date is ${formattedDate}. Payroll cannot be generated for this period.`
+        });
       }
       if (hiringDate.isAfter(periodStart) && hiringDate.isSameOrBefore(periodEnd)) {
         periodStart = hiringDate.clone().startOf("day");
@@ -438,6 +443,8 @@ exports.generateBulkPayroll = async (req, res) => {
 
     let generated = 0;
     let skipped = 0;
+    let skippedDuplicates = 0;
+    const skippedHiring = [];
 
     for (const emp of employees) {
       if (!emp.payroll) continue;
@@ -453,12 +460,26 @@ exports.generateBulkPayroll = async (req, res) => {
         periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
       }
 
-      const hiringDate = emp.jobInfo?.hiringDate
-        ? moment(emp.jobInfo.hiringDate)
-        : null;
+      // 🔹 Check official joining date
+      const rawJoinDate = emp.jobInfo?.joiningDate || emp.joiningDate || emp.jobInfo?.hiringDate || emp.hiringDate;
+      const hiringDate = rawJoinDate ? moment(rawJoinDate) : null;
 
-      // ❌ Skip if hired after cycle end
+      // ❌ Skip if hired/joined after cycle end
       if (hiringDate && hiringDate.isAfter(periodEnd)) {
+        const formattedDate = hiringDate.format("DD MMM YYYY");
+        const empName = `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || `Employee #${emp.id}`;
+        const cycleDateDisplay = cycleDate <= 1
+          ? `1st to ${moment({ year: Number(year), month: Number(month) - 1 }).endOf("month").format("Do")} (${emp.payroll.payoutType || "monthly"})`
+          : `${moment().date(cycleDate).format("Do")} to ${moment().date(cycleDate - 1).format("Do")} (${emp.payroll.payoutType || "monthly"})`;
+        skippedHiring.push({
+          employeeId: emp.id,
+          name: empName,
+          date: formattedDate,
+          payCycle: cycleDateDisplay,
+          periodStart: periodStart.format("DD MMM YYYY"),
+          periodEnd: periodEnd.format("DD MMM YYYY"),
+          message: `${empName} (Joined ${formattedDate} - after period end ${periodEnd.format("DD MMM YYYY")})`
+        });
         skipped++;
         continue;
       }
@@ -489,6 +510,7 @@ exports.generateBulkPayroll = async (req, res) => {
       });
 
       if (existing) {
+        skippedDuplicates++;
         skipped++;
         continue;
       }
@@ -649,7 +671,27 @@ exports.generateBulkPayroll = async (req, res) => {
       generated++;
     }
 
-    res.json({ success: true, generated, skipped });
+    // If no payroll was generated and employees were skipped because of hiring/joining date
+    if (generated === 0 && skippedHiring.length > 0 && skippedDuplicates === 0) {
+      return res.status(400).json({
+        message: skippedHiring.length === 1
+          ? skippedHiring[0].message
+          : `Selected employees were hired/joined after this payroll period:\n${skippedHiring.map(s => `• ${s.message}`).join("\n")}`,
+        skippedHiring,
+        skippedDuplicates
+      });
+    }
+
+    res.json({
+      success: true,
+      generated,
+      skipped,
+      skippedDuplicates,
+      skippedHiring,
+      warningMessage: skippedHiring.length > 0
+        ? (skippedHiring.length === 1 ? skippedHiring[0].message : `${skippedHiring.length} employees were skipped because their joining date is after this period.`)
+        : null
+    });
 
   } catch (err) {
     console.error("Bulk Payroll Error:", err);
@@ -815,6 +857,7 @@ exports.getSinglePayroll = async (req, res) => {
         employee: {
           include: {
             jobInfo: true,
+            payroll: true,
             department: true,
             company: true,
             Schedule: true
@@ -1538,7 +1581,8 @@ exports.generateRunPayrolls = async (req, res) => {
         periodStart = periodEnd.clone().subtract(1, "month").add(1, "day").startOf("day");
       }
 
-      const hiringDate = emp.jobInfo?.hiringDate ? moment(emp.jobInfo.hiringDate) : null;
+      const rawJoinDate = emp.jobInfo?.joiningDate || emp.joiningDate || emp.jobInfo?.hiringDate || emp.hiringDate;
+      const hiringDate = rawJoinDate ? moment(rawJoinDate) : null;
 
       // Skip if hired after periodEnd
       if (hiringDate && hiringDate.isAfter(periodEnd)) {

@@ -594,6 +594,40 @@ export const Payroll: React.FC = () => {
       return toast.error("Please select at least one option");
     }
 
+    // Helper to get official joining date
+    const getEffectiveJoinMoment = (emp: any) => {
+      const rawJoinDate = emp?.jobInfo?.joiningDate || emp?.joiningDate || emp?.jobInfo?.hiringDate || emp?.hiringDate;
+      return rawJoinDate ? moment(rawJoinDate) : null;
+    };
+
+    const periodEnd = moment({ year: selectedYear, month: selectedMonth - 1 }).endOf("month");
+
+    // Pre-check: if ALL target employees were hired after the selected period, block generation
+    let targetEmployees: any[] = [];
+    if (type === "INDIVIDUAL") {
+      targetEmployees = employees.filter(e => selectedEmployees.includes(e.id));
+    } else if (type === "DEPARTMENT") {
+      targetEmployees = employees.filter(e => selectedDepartments.includes(e.departmentId));
+    } else if (type === "LOCATION") {
+      targetEmployees = employees.filter(e => selectedLocations.includes(e.companyId));
+    }
+
+    if (targetEmployees.length > 0) {
+      const allIneligible = targetEmployees.every(emp => {
+        const joinMoment = getEffectiveJoinMoment(emp);
+        return joinMoment && joinMoment.isAfter(periodEnd);
+      });
+
+      if (allIneligible) {
+        if (targetEmployees.length === 1) {
+          const emp = targetEmployees[0];
+          const joinMoment = getEffectiveJoinMoment(emp);
+          return toast.error(`${emp.firstName} ${emp.lastName}'s hiring/joining date is ${joinMoment?.format("DD MMM YYYY")}. Payroll cannot be generated for this period.`);
+        }
+        return toast.error(`All employees in selected ${type.toLowerCase()} were hired after ${moment({ year: selectedYear, month: selectedMonth - 1 }).format("MMMM YYYY")}. Payroll cannot be generated.`);
+      }
+    }
+
     // If month is not completed yet, show warning dialog to confirm
     if (isPeriodIncomplete(selectedMonth, selectedYear)) {
       setIncompleteWarningOpen(true);
@@ -622,13 +656,29 @@ export const Payroll: React.FC = () => {
 
       const generatedCount = res?.generated ?? 0;
       const skippedCount = res?.skipped ?? 0;
+      const skippedDuplicates = res?.skippedDuplicates ?? 0;
+      const skippedHiring = res?.skippedHiring ?? [];
 
       if (generatedCount > 0) {
         toast.success(`Successfully generated ${generatedCount} payroll record${generatedCount > 1 ? "s" : ""}!`);
-      } else if (skippedCount > 0) {
-        toast.info(`Payroll already generated for ${skippedCount} employee${skippedCount > 1 ? "s" : ""}.`);
-      } else {
-        toast.info("No payroll records were generated.");
+      }
+
+      if (skippedHiring.length > 0) {
+        if (skippedHiring.length <= 3) {
+          skippedHiring.forEach((s: any) => {
+            toast.warning(s.message || `${s.name}'s joining date is ${s.date}. Skipped for this period.`);
+          });
+        } else {
+          toast.warning(`${skippedHiring.length} employees skipped because their joining date is after this period.`);
+        }
+      }
+
+      if (generatedCount === 0 && skippedHiring.length === 0) {
+        if (skippedDuplicates > 0 || skippedCount > 0) {
+          toast.info(`Payroll already generated for ${skippedDuplicates || skippedCount} employee${(skippedDuplicates || skippedCount) > 1 ? "s" : ""}.`);
+        } else {
+          toast.info("No payroll records were generated.");
+        }
       }
 
       setIncompleteWarningOpen(false);
@@ -641,7 +691,14 @@ export const Payroll: React.FC = () => {
       await loadAnalytics(selectedMonth!, selectedYear!);
 
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Generation failed");
+      const errData = err?.response?.data;
+      if (errData?.skippedHiring?.length > 0) {
+        errData.skippedHiring.forEach((s: any) => {
+          toast.warning(s.message || `${s.name}'s hiring/joining date is ${s.date}. Payroll cannot be generated for this period.`);
+        });
+      } else {
+        toast.error(errData?.message || "Generation failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -758,15 +815,32 @@ export const Payroll: React.FC = () => {
 
             {/* Summary notification */}
             {generateResult && (
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1">
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-2">
                 <p className="font-bold text-emerald-950 flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   Payroll Generation Complete
                 </p>
-                <div className="flex items-center gap-4 text-emerald-800 pt-1">
+                <div className="flex flex-wrap items-center gap-4 text-emerald-800 pt-1">
                   <span>Generated Records: <strong>{generateResult.generated || 0}</strong></span>
-                  <span>Skipped Duplicates: <strong>{generateResult.skipped || 0}</strong></span>
+                  {(generateResult.skippedDuplicates > 0 || (!generateResult.skippedHiring?.length && generateResult.skipped > 0)) && (
+                    <span>Skipped Duplicates: <strong>{generateResult.skippedDuplicates || generateResult.skipped || 0}</strong></span>
+                  )}
+                  {generateResult.skippedHiring?.length > 0 && (
+                    <span className="text-amber-800 font-semibold">
+                      Skipped (Joining Date): <strong>{generateResult.skippedHiring.length}</strong>
+                    </span>
+                  )}
                 </div>
+                {generateResult.skippedHiring?.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-amber-200 space-y-1">
+                    {generateResult.skippedHiring.map((s: any, idx: number) => (
+                      <p key={idx} className="text-amber-900 text-2xs flex items-center gap-1">
+                        <AlertTriangle className="size-3 text-amber-600 shrink-0" />
+                        <span>{s.message}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -882,29 +956,47 @@ export const Payroll: React.FC = () => {
                       {targetSearch ? "No matching employees found" : "No active employees found"}
                     </p>
                   ) : (
-                    filteredEmployees.map(emp => (
-                      <label
-                        key={emp.id}
-                        className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
-                          selectedEmployees.includes(emp.id)
-                            ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
-                            : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <Checkbox
-                            checked={selectedEmployees.includes(emp.id)}
-                            onCheckedChange={() =>
-                              toggleSelection(emp.id, selectedEmployees, setSelectedEmployees)
-                            }
-                          />
-                          <div className="size-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
-                            {emp.firstName?.charAt(0)}{emp.lastName?.charAt(0)}
+                    filteredEmployees.map(emp => {
+                      const rawJoinDate = emp.jobInfo?.joiningDate || emp.joiningDate || emp.jobInfo?.hiringDate || emp.hiringDate;
+                      const joinMoment = rawJoinDate ? moment(rawJoinDate) : null;
+                      const periodEnd = (selectedMonth && selectedYear)
+                        ? moment({ year: selectedYear, month: selectedMonth - 1 }).endOf("month")
+                        : null;
+                      const isHiredAfterPeriod = Boolean(joinMoment && periodEnd && joinMoment.isAfter(periodEnd));
+
+                      return (
+                        <label
+                          key={emp.id}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
+                            selectedEmployees.includes(emp.id)
+                              ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
+                              : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Checkbox
+                              checked={selectedEmployees.includes(emp.id)}
+                              onCheckedChange={() =>
+                                toggleSelection(emp.id, selectedEmployees, setSelectedEmployees)
+                              }
+                            />
+                            <div className="size-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                              {emp.firstName?.charAt(0)}{emp.lastName?.charAt(0)}
+                            </div>
+                            <span className="text-xs font-semibold">{emp.firstName} {emp.lastName}</span>
                           </div>
-                          <span className="text-xs font-semibold">{emp.firstName} {emp.lastName}</span>
-                        </div>
-                      </label>
-                    ))
+
+                          {isHiredAfterPeriod && (
+                            <span
+                              className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-normal"
+                              title={`Joined on ${joinMoment!.format("DD MMM YYYY")}. Cannot generate payroll for this period.`}
+                            >
+                              Joined: {joinMoment!.format("DD MMM YYYY")}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })
                   )
                 )}
 
@@ -914,24 +1006,52 @@ export const Payroll: React.FC = () => {
                       {targetSearch ? "No matching departments found" : "No departments found"}
                     </p>
                   ) : (
-                    filteredDepartments.map(dep => (
-                      <label
-                        key={dep.id}
-                        className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all cursor-pointer ${
-                          selectedDepartments.includes(dep.id)
-                            ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
-                            : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        <Checkbox
-                          checked={selectedDepartments.includes(dep.id)}
-                          onCheckedChange={() =>
-                            toggleSelection(dep.id, selectedDepartments, setSelectedDepartments)
-                          }
-                        />
-                        <span className="text-xs font-semibold">{dep.title}</span>
-                      </label>
-                    ))
+                    filteredDepartments.map(dep => {
+                      const deptEmps = employees.filter(e => e.departmentId === dep.id);
+                      const periodEnd = (selectedMonth && selectedYear)
+                        ? moment({ year: selectedYear, month: selectedMonth - 1 }).endOf("month")
+                        : null;
+                      const ineligible = deptEmps.filter(emp => {
+                        const rawJoinDate = emp.jobInfo?.joiningDate || emp.joiningDate || emp.jobInfo?.hiringDate || emp.hiringDate;
+                        const joinMoment = rawJoinDate ? moment(rawJoinDate) : null;
+                        return Boolean(joinMoment && periodEnd && joinMoment.isAfter(periodEnd));
+                      });
+
+                      return (
+                        <label
+                          key={dep.id}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
+                            selectedDepartments.includes(dep.id)
+                              ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
+                              : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Checkbox
+                              checked={selectedDepartments.includes(dep.id)}
+                              onCheckedChange={() =>
+                                toggleSelection(dep.id, selectedDepartments, setSelectedDepartments)
+                              }
+                            />
+                            <span className="text-xs font-semibold">{dep.title}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-gray-500 font-medium">
+                              {deptEmps.length} {deptEmps.length === 1 ? 'employee' : 'employees'}
+                            </span>
+                            {ineligible.length > 0 && (
+                              <span
+                                className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-normal"
+                                title={`${ineligible.length} employee(s) joined after this period and will not be generated`}
+                              >
+                                {ineligible.length} joined later
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })
                   )
                 )}
 
@@ -941,24 +1061,52 @@ export const Payroll: React.FC = () => {
                       {targetSearch ? "No matching locations found" : "No locations found"}
                     </p>
                   ) : (
-                    filteredLocations.map(loc => (
-                      <label
-                        key={loc.id}
-                        className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all cursor-pointer ${
-                          selectedLocations.includes(loc.id)
-                            ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
-                            : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        <Checkbox
-                          checked={selectedLocations.includes(loc.id)}
-                          onCheckedChange={() =>
-                            toggleSelection(loc.id, selectedLocations, setSelectedLocations)
-                          }
-                        />
-                        <span className="text-xs font-semibold">{loc.name}</span>
-                      </label>
-                    ))
+                    filteredLocations.map(loc => {
+                      const locEmps = employees.filter(e => e.companyId === loc.id);
+                      const periodEnd = (selectedMonth && selectedYear)
+                        ? moment({ year: selectedYear, month: selectedMonth - 1 }).endOf("month")
+                        : null;
+                      const ineligible = locEmps.filter(emp => {
+                        const rawJoinDate = emp.jobInfo?.joiningDate || emp.joiningDate || emp.jobInfo?.hiringDate || emp.hiringDate;
+                        const joinMoment = rawJoinDate ? moment(rawJoinDate) : null;
+                        return Boolean(joinMoment && periodEnd && joinMoment.isAfter(periodEnd));
+                      });
+
+                      return (
+                        <label
+                          key={loc.id}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
+                            selectedLocations.includes(loc.id)
+                              ? 'bg-blue-50/80 border-blue-200 text-blue-900 font-medium'
+                              : 'bg-white border-transparent hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Checkbox
+                              checked={selectedLocations.includes(loc.id)}
+                              onCheckedChange={() =>
+                                toggleSelection(loc.id, selectedLocations, setSelectedLocations)
+                              }
+                            />
+                            <span className="text-xs font-semibold">{loc.name}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-gray-500 font-medium">
+                              {locEmps.length} {locEmps.length === 1 ? 'employee' : 'employees'}
+                            </span>
+                            {ineligible.length > 0 && (
+                              <span
+                                className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-normal"
+                                title={`${ineligible.length} employee(s) joined after this period and will not be generated`}
+                              >
+                                {ineligible.length} joined later
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })
                   )
                 )}
               </div>
@@ -1269,6 +1417,7 @@ export const Payroll: React.FC = () => {
                     />
                   </TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Employee</TableHead>
+                  <TableHead className="font-bold text-gray-700 text-xs">Pay Cycle</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Base Salary</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Overtime</TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Net Pay</TableHead>
@@ -1319,6 +1468,15 @@ export const Payroll: React.FC = () => {
                             <p className="text-xs text-gray-500 font-medium">{deptTitle}</p>
                           </div>
                         </div>
+                      </TableCell>
+
+                      {/* Pay Cycle Cell */}
+                      <TableCell className="py-3.5">
+                        <span className="text-xs text-gray-600 font-medium">
+                          {payroll.periodStart && payroll.periodEnd
+                            ? `${moment(payroll.periodStart).format("DD MMM")} – ${moment(payroll.periodEnd).format("DD MMM")}`
+                            : '—'}
+                        </span>
                       </TableCell>
 
                       {/* Base Salary Cell */}

@@ -74,13 +74,28 @@ function isOffDay(schedules, date, timezone = null) {
 }
 
 /**
- * Helper to match a visitor by Badge Number, ID, or Full Name
+ * Helper to match a visitor by Badge Number, ID, Phone, National ID, or Full Name
  */
 async function findVisitor(biometricId, employeeName) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
   if (bioIdStr) {
     try {
-      const orConditions = [{ badgeNumber: bioIdStr }];
+      const orConditions = [
+        { badgeNumber: bioIdStr },
+      ];
+
+      // Match phone with or without leading zero
+      if (bioIdStr.length >= 7) {
+        orConditions.push({ phone: bioIdStr });
+        if (bioIdStr.startsWith("0")) {
+          orConditions.push({ phone: bioIdStr.slice(1) });
+        } else {
+          orConditions.push({ phone: `0${bioIdStr}` });
+        }
+        orConditions.push({ nationalId: bioIdStr });
+      }
+
+      // Match 9XXXX badge prefix to visitor numeric id (e.g. 90004 -> id: 4)
       if (bioIdStr.startsWith("9") && bioIdStr.length > 1 && !isNaN(parseInt(bioIdStr.slice(1)))) {
         orConditions.push({ id: parseInt(bioIdStr.slice(1)) });
       }
@@ -99,19 +114,36 @@ async function findVisitor(biometricId, employeeName) {
   if (employeeName && employeeName.trim()) {
     try {
       const cleanName = employeeName.trim().toLowerCase();
-      const visitor = await prisma.visitor.findFirst({
+      // 1. Exact full name match
+      let visitor = await prisma.visitor.findFirst({
         where: {
           deletedAt: null,
           fullName: { equals: cleanName },
         },
         include: { company: true },
       });
+
+      // 2. Specific multi-word visitor variations (e.g. "jaffar raza" / "jaffer raza")
+      if (!visitor && (cleanName.includes("jaffar") || cleanName.includes("jaffer")) && cleanName.includes("raza")) {
+        visitor = await prisma.visitor.findFirst({
+          where: {
+            deletedAt: null,
+            OR: [
+              { fullName: { contains: "Jaffar Raza" } },
+              { fullName: { contains: "Jaffer Raza" } },
+            ],
+          },
+          include: { company: true },
+        });
+      }
+
       if (visitor) {
-        if (bioIdStr && visitor.badgeNumber !== bioIdStr) {
+        // Only set badgeNumber if bioIdStr is a valid 9XXXX visitor badge
+        if (bioIdStr && bioIdStr.startsWith("9") && visitor.badgeNumber !== bioIdStr) {
           await prisma.visitor.update({
             where: { id: visitor.id },
             data: { badgeNumber: bioIdStr },
-          });
+          }).catch(() => {});
         }
         return visitor;
       }
@@ -500,51 +532,38 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       moment(matchedVisitor.checkInTime).tz(timezone).format("YYYY-MM-DD") === todayStr;
 
     let newStatus = "CHECKED_IN";
-    let updateData = {};
 
     if (deviceDir === "CHECK_IN") {
       newStatus = "CHECKED_IN";
-      updateData = {
-        status: "CHECKED_IN",
-        checkInTime: punchDate,
-        checkOutTime: null,
-      };
       console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
     } else if (deviceDir === "CHECK_OUT") {
       newStatus = "CHECKED_OUT";
-      updateData = {
-        status: "CHECKED_OUT",
-        checkOutTime: punchDate,
-      };
       console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
     } else {
       if (isAlreadyCheckedIn) {
         newStatus = "CHECKED_OUT";
-        updateData = {
-          status: "CHECKED_OUT",
-          checkOutTime: punchDate,
-        };
         console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
       } else {
         newStatus = "CHECKED_IN";
-        updateData = {
-          status: "CHECKED_IN",
-          checkInTime: punchDate,
-          checkOutTime: null,
-        };
         console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
       }
     }
 
-    const updated = await prisma.visitor.update({
-      where: { id: matchedVisitor.id },
-      data: updateData,
+    const visitorLogService = require("../visitor/visitorLog.service");
+    const logRes = await visitorLogService.recordVisitorPunch({
+      visitorId: matchedVisitor.id,
+      organizationId: matchedVisitor.organizationId,
+      punchTime: punchDate,
+      punchType: newStatus,
+      device: deviceName ? `${brand} (${deviceName})` : brand,
+      method: method || brand || "BIOMETRIC",
+      timezone,
     });
 
     return {
       success: true,
       isVisitor: true,
-      visitor: updated,
+      visitor: logRes.visitor,
       action: newStatus,
       punchTime: punchDate,
     };
@@ -1636,10 +1655,12 @@ exports.pushUsersToDevices = async (req, res) => {
       let bioFoundCount = 0;
 
       for (const vis of visitors) {
-        let bioId = vis.badgeNumber ? String(vis.badgeNumber).trim() : `9${String(vis.id).padStart(4, "0")}`;
+        let bioId = (vis.badgeNumber && String(vis.badgeNumber).trim().startsWith("9"))
+          ? String(vis.badgeNumber).trim()
+          : `9${String(vis.id).padStart(4, "0")}`;
         const name = vis.fullName || `Visitor ${bioId}`;
 
-        if (!vis.badgeNumber) {
+        if (!vis.badgeNumber || !String(vis.badgeNumber).trim().startsWith("9")) {
           try {
             await prisma.visitor.update({
               where: { id: vis.id },
@@ -1660,11 +1681,28 @@ exports.pushUsersToDevices = async (req, res) => {
           })
         );
 
+        // Candidate IDs for this visitor to search on machines
+        const candidateIds = [
+          bioId,
+          String(vis.id),
+          vis.phone,
+          vis.phone && vis.phone.startsWith("0") ? vis.phone.slice(1) : (vis.phone ? `0${vis.phone}` : null),
+          vis.nationalId,
+          `9${String(vis.id).padStart(4, "0")}`,
+        ].filter(Boolean);
+
         // 2. Check if biometric (fingerprint) is enrolled on any machine and sync to all other machines!
-        const bioResult = await syncUserBiometricsAcrossDevices(activeDevices, bioId, name);
+        const bioResult = await syncUserBiometricsAcrossDevices(activeDevices, bioId, name, candidateIds);
         if (bioResult.found) {
           bioFoundCount++;
           totalClonedFPs += bioResult.clonedCount;
+
+          if (bioResult.actualId && vis.badgeNumber !== bioResult.actualId) {
+            await prisma.visitor.update({
+              where: { id: vis.id },
+              data: { badgeNumber: bioResult.actualId },
+            }).catch(() => {});
+          }
         }
       }
 
@@ -1834,8 +1872,13 @@ exports.syncVisitorPunches = async (req, res) => {
     });
 
     const timezone = "Asia/Karachi";
-    const startTime = moment.tz(timezone).startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
-    const endTime = moment.tz(timezone).endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+    const targetDate = req.body?.date || req.query?.date;
+    const startTime = targetDate 
+      ? moment.tz(targetDate, timezone).startOf("day").format("YYYY-MM-DDTHH:mm:ssZ")
+      : moment.tz(timezone).startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+    const endTime = targetDate
+      ? moment.tz(targetDate, timezone).endOf("day").format("YYYY-MM-DDTHH:mm:ssZ")
+      : moment.tz(timezone).endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
 
     let syncedVisitorPunches = 0;
     const syncDetails = [];

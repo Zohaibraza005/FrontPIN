@@ -212,15 +212,17 @@ async function pushUserToHikvision(device, { biometricId, name }) {
       userType: "normal",
       doorRight: "1",
       RightPlan: [
-        {
-          doorNo: 1,
-          planTemplateNo: "1",
-        },
+        { doorNo: 1, planTemplateNo: "1" },
+        { doorNo: 2, planTemplateNo: "1" },
+        { doorNo: 3, planTemplateNo: "1" },
+        { doorNo: 4, planTemplateNo: "1" },
       ],
+      roomNumber: 99,
+      floorNumber: 99,
       closeDelayEnabled: false,
       Valid: {
         enable: true,
-        beginTime: "2026-01-01T00:00:00",
+        beginTime: "2020-01-01T00:00:00",
         endTime: "2037-12-31T23:59:59",
       },
     },
@@ -241,6 +243,51 @@ async function pushUserToHikvision(device, { biometricId, name }) {
     return res.status === 200;
   } catch (error) {
     console.error(`[Hikvision User Push Error] Failed to push user to ${device.ipAddress}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Deletes user(s) and their biometric templates (face/fingerprint/card) from a Hikvision device
+ */
+async function deleteUserFromHikvision(device, biometricIds = []) {
+  if (!device || !biometricIds) return false;
+
+  const ids = (Array.isArray(biometricIds) ? biometricIds : [biometricIds])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+
+  if (ids.length === 0) return false;
+
+  const employeeNoList = ids.map((id) => ({ employeeNo: id }));
+
+  const payload = {
+    UserInfoDetail: {
+      mode: "byEmployeeNo",
+      EmployeeNoList: employeeNoList,
+    },
+  };
+
+  try {
+    const res = await sendHikvisionDigest(
+      device.ipAddress,
+      resolveHikvisionPort(device.port),
+      device.username || "admin",
+      device.password || "",
+      "PUT",
+      "/ISAPI/AccessControl/UserInfo/Delete?format=json",
+      payload
+    );
+
+    console.log(
+      `[Hikvision User Delete] Deleted user(s) [${ids.join(", ")}] from ${device.name || "Device"} (${device.ipAddress}): status ${res.status}`
+    );
+    return res.status === 200;
+  } catch (error) {
+    console.error(
+      `[Hikvision User Delete Error] Failed to delete user(s) from ${device.ipAddress}:`,
+      error.message
+    );
     return false;
   }
 }
@@ -829,53 +876,115 @@ async function syncBiometricsAcrossDevices(prisma) {
  * @param {string} userName - Optional user name for logging
  * @returns {Promise<{ found: boolean, donorDevice?: string, enrolledCount: number, clonedCount: number }>}
  */
-async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "") {
-  if (!devices || devices.length < 2 || !employeeNo) {
+/**
+ * Cross-syncs biometric templates (fingerprints) for a specific user/visitor across all active devices.
+ * If the user has enrolled biometrics on ANY device, it pulls the template(s) and clones them to all other devices.
+ * Also searches candidate IDs and device user names (e.g. Jaffar Raza Khan) if ID format differs between machine & DB.
+ * @param {Array} devices - List of active BiometricDevice objects
+ * @param {string} employeeNo - Primary Biometric ID / badge number
+ * @param {string} userName - Optional user name for logging and name matching
+ * @param {Array} candidateIds - Optional list of alternate IDs (e.g. numeric ID, phone number)
+ * @returns {Promise<{ found: boolean, donorDevice?: string, actualId?: string, enrolledCount: number, clonedCount: number }>}
+ */
+async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "", candidateIds = []) {
+  if (!devices || devices.length < 2 || (!employeeNo && !userName)) {
     return { found: false, enrolledCount: 0, clonedCount: 0 };
   }
 
-  const bioId = String(employeeNo).trim();
-  let donorDevice = null;
-  let enrolledFPs = [];
-
-  // 1. Search all devices in parallel to find where the biometric is enrolled
-  const fpChecks = await Promise.all(
-    devices.map(async (dev) => {
-      try {
-        const fps = await fetchHikvisionFingerprints(dev, bioId);
-        return { dev, fps: fps || [] };
-      } catch (e) {
-        return { dev, fps: [] };
-      }
-    })
+  const allCandidateIds = Array.from(
+    new Set(
+      [
+        employeeNo ? String(employeeNo).trim() : null,
+        ...(Array.isArray(candidateIds) ? candidateIds.map((x) => (x ? String(x).trim() : null)) : []),
+      ].filter(Boolean)
+    )
   );
 
-  // Pick the device with the most enrolled fingerprints as donor
-  const withFps = fpChecks.filter((c) => c.fps && c.fps.length > 0);
-  if (withFps.length === 0) {
+  let donorDevice = null;
+  let enrolledFPs = [];
+  let donorId = null;
+
+  // 1. Search devices using candidate IDs
+  for (const dev of devices) {
+    for (const testId of allCandidateIds) {
+      try {
+        let fps = await fetchHikvisionFingerprints(dev, testId);
+        if (!fps || fps.length === 0) {
+          // Quick retry in case device was busy
+          await new Promise((r) => setTimeout(r, 600));
+          fps = await fetchHikvisionFingerprints(dev, testId);
+        }
+        if (fps && fps.length > 0) {
+          if (!enrolledFPs || fps.length > enrolledFPs.length) {
+            donorDevice = dev;
+            enrolledFPs = fps;
+            donorId = testId;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // 2. If not found by candidate IDs, search users on devices by name
+  if (!donorDevice && userName && userName.trim()) {
+    const cleanTargetName = userName.trim().toLowerCase();
+    for (const dev of devices) {
+      try {
+        const users = await fetchHikvisionUsers(dev);
+        const match = users.find((u) => {
+          if (!u.name) return false;
+          const uName = String(u.name).trim().toLowerCase();
+          return (
+            (u.numOfFP || 0) > 0 &&
+            (uName === cleanTargetName ||
+              uName.includes(cleanTargetName) ||
+              cleanTargetName.includes(uName) ||
+              (cleanTargetName.includes("jaffar") && uName.includes("jaffer")) ||
+              (cleanTargetName.includes("jaffer") && uName.includes("jaffar")))
+          );
+        });
+
+        if (match) {
+          const fps = await fetchHikvisionFingerprints(dev, match.employeeNo);
+          if (fps && fps.length > 0) {
+            donorDevice = dev;
+            enrolledFPs = fps;
+            donorId = String(match.employeeNo);
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (!donorDevice || !enrolledFPs || enrolledFPs.length === 0) {
     return { found: false, enrolledCount: 0, clonedCount: 0 };
   }
 
-  withFps.sort((a, b) => b.fps.length - a.fps.length);
-  donorDevice = withFps[0].dev;
-  enrolledFPs = withFps[0].fps;
+  console.log(`[Hikvision Bio Sync] Found ${enrolledFPs.length} fingerprint(s) for ${userName || donorId} on ${donorDevice.name} (${donorDevice.ipAddress}) under ID ${donorId}.`);
 
-  console.log(`[Hikvision Bio Sync] Found ${enrolledFPs.length} fingerprint(s) for ${userName || bioId} on ${donorDevice.name} (${donorDevice.ipAddress}).`);
+  // Target IDs to clone to: both the donorId AND the primary employeeNo
+  const targetIds = Array.from(new Set([donorId, String(employeeNo).trim()].filter(Boolean)));
 
-  // 2. Clone to all target devices that have fewer fingerprints
+  // 3. Clone to all other target devices
   let clonedCount = 0;
-  for (const check of fpChecks) {
-    const targetDev = check.dev;
+  for (const targetDev of devices) {
     if (targetDev.id === donorDevice.id) continue;
 
-    // Check if target already has all fingerprints
-    if (check.fps && check.fps.length >= enrolledFPs.length) continue;
+    for (const syncId of targetIds) {
+      // Ensure user profile exists first on target terminal with full door permissions
+      await pushUserToHikvision(targetDev, {
+        biometricId: syncId,
+        name: userName || `User ${syncId}`,
+      });
 
-    for (const fp of enrolledFPs) {
-      const ok = await pushHikvisionFingerprint(targetDev, bioId, fp);
-      if (ok) {
-        console.log(`[Hikvision Bio Sync] Cloned FP (ID: ${fp.fingerPrintID}) for ${userName || bioId} -> ${targetDev.name} (${targetDev.ipAddress})`);
-        clonedCount++;
+      // Push each fingerprint template
+      for (const fp of enrolledFPs) {
+        const ok = await pushHikvisionFingerprint(targetDev, syncId, fp);
+        if (ok) {
+          console.log(`[Hikvision Bio Sync] Cloned FP (ID: ${fp.fingerPrintID}) for ${userName || syncId} -> ${targetDev.name} (${targetDev.ipAddress})`);
+          clonedCount++;
+        }
       }
     }
   }
@@ -883,6 +992,7 @@ async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "
   return {
     found: true,
     donorDevice: donorDevice.name,
+    actualId: donorId,
     enrolledCount: enrolledFPs.length,
     clonedCount,
   };
@@ -891,6 +1001,7 @@ async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "
 module.exports = {
   parseHikvisionEvent,
   pushUserToHikvision,
+  deleteUserFromHikvision,
   startHikvisionStream,
   initHikvisionStreams,
   fetchHikvisionUsers,

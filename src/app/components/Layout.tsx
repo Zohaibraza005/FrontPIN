@@ -6,6 +6,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { useTour } from '../contexts/TourContext';
 import {
   LayoutDashboard,
+  LayoutGrid,
   Clock,
   Calendar,
   FolderKanban,
@@ -76,58 +77,75 @@ import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import { cn } from './ui/utils';
 
-const menuItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-  { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
-  { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
-  // { icon: FolderKanban, label: 'Projects', path: '/projects', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PROJECT' },
-  // { icon: CheckSquare, label: 'Tasks', path: '/tasks', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'TASK' },
-  // { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'INVOICE' },
-  { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
-  { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
+const menuSections = [
   {
-    icon: Users,
-    label: 'Employee',
-    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
-    module: 'EMPLOYEE',
-    children: [
-      { label: 'All Employees', path: '/employees' },
-      { label: 'Add Employee', path: '/employees/add', canCreateModule: 'EMPLOYEE' },
-      { label: 'Roles', path: '/roles', roles: ['ADMIN'] },
-    ],
-  },
-  {
-    icon: UserCheck,
-    label: 'Visitor',
-    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
-    module: 'VISITOR',
-    children: [
-      { label: 'All Visitors', path: '/visitors' },
-      { label: 'Add Visitor', path: '/visitors/add' },
-    ],
-  },
-  { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
-  // { icon: MapPin, label: 'Locations', path: '/locations', roles: ['ADMIN'] },
-  // { icon: MapPin, label: 'Departments', path: '/departments', roles: ['ADMIN'] },
-  // { icon: UserPlus, label: 'Recruitment', path: '/jobs', roles: ['ADMIN'] },
-  { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
-  {
-    icon: Cog,
-    label: 'Organization',
-    roles: ['ADMIN', 'SUPERVISOR', 'USER'],
-    module: 'ORGANIZATION',
-    children: [
-      { label: 'Settings', path: '/organization', roles: ['ADMIN'] },
-      { label: 'Departments', path: '/departments' },
-      { label: 'Locations', path: '/locations' },
-      { label: 'Entities', path: '/entities' },
-      // you can add more later: Settings, Billing, Branches, etc.
+    title: 'OVERVIEW',
+    items: [
+      { icon: LayoutGrid, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
+      { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
     ]
   },
-
-  // { icon: Cog, label: 'Organization', path: '/organization', roles: ['ADMIN'] },
-  // { icon: Package, label: 'Assets', path: '/assets', roles: ['ADMIN'] },
+  {
+    title: 'PEOPLE',
+    items: [
+      {
+        icon: Users,
+        label: 'Employee',
+        roles: ['ADMIN', 'SUPERVISOR', 'USER'],
+        module: 'EMPLOYEE',
+        children: [
+          { label: 'All Employees', path: '/employees' },
+          { label: 'Add Employee', path: '/employees/add', canCreateModule: 'EMPLOYEE' },
+          { label: 'Roles', path: '/roles', roles: ['ADMIN'] },
+        ],
+      },
+      {
+        icon: UserCheck,
+        label: 'Visitor',
+        roles: ['ADMIN', 'SUPERVISOR', 'USER'],
+        module: 'VISITOR',
+        children: [
+          { label: 'All Visitors', path: '/visitors' },
+          { label: 'Add Visitor', path: '/visitors/add' },
+        ],
+      },
+    ]
+  },
+  {
+    title: 'TIME & ATTENDANCE',
+    items: [
+      { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
+      { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
+      { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
+      { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
+    ]
+  },
+  {
+    title: 'FINANCE',
+    items: [
+      { icon: DollarSign, label: 'Payroll', path: '/payroll', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'PAYROLL' },
+    ]
+  },
+  {
+    title: 'COMPANY',
+    items: [
+      {
+        icon: Cog,
+        label: 'Organization',
+        roles: ['ADMIN', 'SUPERVISOR', 'USER'],
+        module: 'ORGANIZATION',
+        children: [
+          { label: 'Settings', path: '/organization', roles: ['ADMIN'] },
+          { label: 'Departments', path: '/departments' },
+          { label: 'Locations', path: '/locations' },
+          { label: 'Entities', path: '/entities' },
+        ]
+      },
+    ]
+  }
 ];
+
+const menuItems = menuSections.flatMap(s => s.items);
 
 const getLocation = (): Promise<{ lat: number; lng: number }> => {
   return new Promise((resolve) => {
@@ -182,30 +200,32 @@ const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-          isActive
-            ? "bg-blue-50 text-blue-700"
-            : "text-gray-700 hover:bg-gray-100"
+          "flex w-full items-center justify-between gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold transition-all group",
+          isChildActive
+            ? "text-gray-900"
+            : "text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
         )}
       >
-        <div className="flex items-center gap-3">
-          <Icon className="size-5 shrink-0" />
-          {sidebarOpen && <span>{item.label}</span>}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="size-8 rounded-xl bg-gray-100 text-gray-500 group-hover:bg-gray-200/70 group-hover:text-gray-700 flex items-center justify-center shrink-0 transition-colors">
+            <Icon className="size-4 shrink-0" />
+          </div>
+          {sidebarOpen && <span className="text-[13px] font-semibold text-gray-700 truncate">{item.label}</span>}
         </div>
         {sidebarOpen && (
-          isOpen ? (
-            <ChevronDown className="size-4 opacity-70" />
-          ) : (
-            <ChevronRight className="size-4 opacity-70" />
-          )
+          <ChevronDown
+            className={cn(
+              "size-4 text-gray-400 transition-transform duration-200 shrink-0",
+              !isOpen && "-rotate-90"
+            )}
+          />
         )}
       </button>
 
-      {/* Submenu */}
+      {/* Submenu with vertical guide line matching design */}
       {isOpen && sidebarOpen && (
-        <div className="ml-8 mt-1 space-y-1 pb-2">
+        <div className="ml-6 pl-3 my-1 border-l border-gray-200/90 space-y-0.5">
           {item.children.map((child: any) => {
-            const ChildIcon = child.icon;
             const isExact = location.pathname === child.path;
             const hasMoreSpecificChild = item.children.some(
               (other: any) =>
@@ -221,14 +241,13 @@ const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
                 key={child.path}
                 to={child.path}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "block px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors",
                   childActive
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    ? "bg-gray-100 text-gray-900 font-bold"
+                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
                 )}
                 onClick={onNavigate}
               >
-                {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
                 <span>{child.label}</span>
               </Link>
             );
@@ -818,46 +837,50 @@ export const Layout: React.FC = () => {
     return null;
   }
 
-  const filteredMenuItems = menuItems.filter(item => {
-    // 1. Check if the user's role is allowed for this item
-    if (item.roles && !item.roles.includes(user.role)) {
-      return false;
-    }
-
-    // 2. ADMIN role bypasses privilege restrictions
-    if (user.role === 'ADMIN') {
-      return true;
-    }
-
-    // 3. Check specific module privileges if defined
-    if (item.module) {
-      const privileges = user.privileges || [];
-      const priv = privileges.find((p: any) => p.module === item.module);
-      if (priv) {
-        return Boolean(priv.canRead);
+  const filteredSections = menuSections.map(section => {
+    const filteredItems = section.items.filter(item => {
+      // 1. Check if the user's role is allowed for this item
+      if (item.roles && !item.roles.includes(user.role)) {
+        return false;
       }
-      
-      // Default fallback when privilege record is missing in DB/session
-      const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE', 'VISITOR'];
-      return defaultVisibleModules.includes(item.module);
-    }
 
-    return true;
-  }).map(item => {
-    if (item.children) {
-      const filteredChildren = item.children.filter((child: any) => {
-        if (user.role === 'ADMIN') return true;
-        if (child.roles && !child.roles.includes(user.role)) return false;
-        if (child.canCreateModule) {
-          const priv = (user.privileges || []).find((p: any) => p.module === child.canCreateModule);
-          if (priv && !priv.canCreate) return false;
-        }
+      // 2. ADMIN role bypasses privilege restrictions
+      if (user.role === 'ADMIN') {
         return true;
-      });
-      return { ...item, children: filteredChildren };
-    }
-    return item;
-  });
+      }
+
+      // 3. Check specific module privileges if defined
+      if (item.module) {
+        const privileges = user.privileges || [];
+        const priv = privileges.find((p: any) => p.module === item.module);
+        if (priv) {
+          return Boolean(priv.canRead);
+        }
+        
+        // Default fallback when privilege record is missing in DB/session
+        const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE', 'VISITOR'];
+        return defaultVisibleModules.includes(item.module);
+      }
+
+      return true;
+    }).map(item => {
+      if (item.children) {
+        const filteredChildren = item.children.filter((child: any) => {
+          if (user.role === 'ADMIN') return true;
+          if (child.roles && !child.roles.includes(user.role)) return false;
+          if (child.canCreateModule) {
+            const priv = (user.privileges || []).find((p: any) => p.module === child.canCreateModule);
+            if (priv && !priv.canCreate) return false;
+          }
+          return true;
+        });
+        return { ...item, children: filteredChildren };
+      }
+      return item;
+    });
+
+    return { ...section, items: filteredItems };
+  }).filter(section => section.items.length > 0);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -895,66 +918,120 @@ export const Layout: React.FC = () => {
             </Button>
           </div>
 
-          {/* SCROLLABLE AREA – this MUST grow and scroll */}
+          {/* SCROLLABLE AREA */}
           <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full px-3 py-4">
-              <nav className="space-y-1 min-h-[200px]">
-                {filteredMenuItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive =
-                    location.pathname === item.path ||
-                    (item.path && location.pathname.startsWith(item.path)) ||
-                    (item.children?.some(child => location.pathname === child.path || location.pathname.startsWith(child.path)));
+            <ScrollArea className="h-full px-3 py-2">
+              <nav className="space-y-4">
+                {filteredSections.map((section) => (
+                  <div key={section.title} className="space-y-1">
+                    {sidebarOpen ? (
+                      <p className="px-3 pt-2.5 pb-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider select-none">
+                        {section.title}
+                      </p>
+                    ) : (
+                      <div className="my-2 border-t border-gray-100" />
+                    )}
 
-                  // Has children → render as collapsible
-                  if (item.children && item.children.length > 0) {
-                    return (
-                      <CollapsibleSidebarItem
-                        key={item.label}
-                        item={item}
-                        sidebarOpen={sidebarOpen}
-                        isActive={isActive}
-                        onNavigate={() => setMobileMenuOpen(false)}
-                      />
-                    );
-                  }
+                    {section.items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive =
+                        item.path === '/'
+                          ? location.pathname === '/'
+                          : (location.pathname === item.path ||
+                             (item.path && location.pathname.startsWith(item.path + '/')) ||
+                             (item.children?.some((child: any) => location.pathname === child.path || location.pathname.startsWith(child.path + '/'))));
 
+                      // Has children → render as collapsible
+                      if (item.children && item.children.length > 0) {
+                        return (
+                          <CollapsibleSidebarItem
+                            key={item.label}
+                            item={item}
+                            sidebarOpen={sidebarOpen}
+                            isActive={isActive}
+                            onNavigate={() => setMobileMenuOpen(false)}
+                          />
+                        );
+                      }
 
-                  // Normal menu item (no children)
-                  return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-100"
-                      )}
-                      onClick={() => setMobileMenuOpen(false)}
-                    >
-                      <Icon className="size-5 shrink-0" />
-                      {sidebarOpen && <span>{item.label}</span>}
-                    </Link>
-                  );
-                })}
+                      // Normal menu item (no children)
+                      return (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          className={cn(
+                            "relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold transition-all group",
+                            isActive
+                              ? "bg-blue-50/80 text-blue-600 font-bold"
+                              : "text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
+                          )}
+                          onClick={() => setMobileMenuOpen(false)}
+                        >
+                          {/* Active left indicator pill matching Image 1 */}
+                          {isActive && (
+                            <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-blue-600 rounded-r-full" />
+                          )}
+                          <div
+                            className={cn(
+                              "size-8 rounded-xl flex items-center justify-center shrink-0 transition-colors",
+                              isActive
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "bg-gray-100 text-gray-500 group-hover:bg-gray-200/70 group-hover:text-gray-700"
+                            )}
+                          >
+                            <Icon className="size-4 shrink-0" />
+                          </div>
+                          {sidebarOpen && <span className="text-[13px] font-semibold">{item.label}</span>}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ))}
               </nav>
 
-              {/* Extra padding at bottom so last item isn't hidden under logout */}
-              <div className="h-16" />
+              {/* Extra padding at bottom so last item isn't hidden under profile card */}
+              <div className="h-4" />
             </ScrollArea>
           </div>
 
-          {/* Fixed bottom – logout always visible */}
-          <div className="border-t border-gray-200 p-3 sm:p-4 shrink-0 bg-white">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 gap-3"
-              onClick={logout}
-            >
-              <LogOut className="size-5" />
-              {sidebarOpen && <span>Logout</span>}
-            </Button>
+          {/* Fixed bottom – user profile card with logout matching Image 1 & 2 */}
+          <div className="p-3 shrink-0 border-t border-gray-100 bg-white">
+            {sidebarOpen ? (
+              <div className="flex items-center justify-between p-2 rounded-2xl bg-gray-50/90 border border-gray-100">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="size-9 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shrink-0 shadow-xs">
+                    {(user?.firstName?.[0] || 'A').toUpperCase()}
+                  </div>
+                  <div className="min-w-0 text-left">
+                    <p className="text-xs font-bold text-gray-900 leading-tight truncate">
+                      {user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Admin User'}
+                    </p>
+                    <p className="text-[11px] font-medium text-gray-500 truncate capitalize">
+                      {user?.role === 'ADMIN' ? 'Admin' : (user?.role?.toLowerCase() || 'Admin')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  title="Logout"
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={logout}
+                  title={`Logout (${user?.firstName || 'User'})`}
+                  className="size-9 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-xs hover:opacity-90"
+                >
+                  {(user?.firstName?.[0] || 'A').toUpperCase()}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -997,10 +1074,12 @@ export const Layout: React.FC = () => {
             <h2 className="text-xl font-semibold text-gray-900">
               {(() => {
                 const match = menuItems.find(item =>
-                  location.pathname.startsWith(item.path || "") ||
-                  item.children?.some(child =>
-                    location.pathname.startsWith(child.path)
-                  )
+                  item.path === '/'
+                    ? location.pathname === '/'
+                    : ((item.path && location.pathname.startsWith(item.path)) ||
+                       item.children?.some(child =>
+                         location.pathname === child.path || (child.path && location.pathname.startsWith(child.path))
+                       ))
                 );
                 return match?.label || "Dashboard";
               })()}

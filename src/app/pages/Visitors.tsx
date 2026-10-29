@@ -42,6 +42,11 @@ import {
   FileText,
   Cpu,
   X,
+  UserPlus,
+  Briefcase,
+  DollarSign,
+  KeyRound,
+  Loader2,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
@@ -128,20 +133,66 @@ export const Visitors: React.FC = () => {
   const [visitorToDelete, setVisitorToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Punch Logs Modal
+  const [punchLogsModalOpen, setPunchLogsModalOpen] = useState(false);
+  const [punchLogs, setPunchLogs] = useState<any[]>([]);
+  const [loadingPunchLogs, setLoadingPunchLogs] = useState(false);
+  const [punchLogsSearch, setPunchLogsSearch] = useState('');
+  const [selectedVisitorLogs, setSelectedVisitorLogs] = useState<any[]>([]);
+  const [loadingSelectedVisitorLogs, setLoadingSelectedVisitorLogs] = useState(false);
+
   // Edit Modal
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // Convert to Employee Modal
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [convertingVisitor, setConvertingVisitor] = useState<any>(null);
+  const [isConverting, setIsConverting] = useState(false);
+  const [convertStep, setConvertStep] = useState<1 | 2>(1);
+  const [convertForm, setConvertForm] = useState<any>({
+    firstName: '',
+    lastName: '',
+    username: '',
+    email: '',
+    phoneNumber: '',
+    nationalId: '',
+    password: '',
+    pin: '',
+    employeeId: '',
+    biometricId: '',
+    companyId: '',
+    departmentId: '',
+    supervisorId: '',
+    role: 'USER',
+    designation: '',
+    employmentStatus: 'Permanent',
+    joiningDate: new Date().toISOString().split('T')[0],
+    workMode: 'On-site',
+    payoutType: 'monthly',
+    rate: 50000,
+    currency: 'PKR',
+    cycleDate: 1,
+    allowExtraHours: true,
+    maxExtraHours: 2,
+  });
 
   // Machine sync state
   const [isPushingMachine, setIsPushingMachine] = useState(false);
   const [pushingId, setPushingId] = useState<number | null>(null);
   const [isSyncingMachine, setIsSyncingMachine] = useState(false);
 
+  const selectedDateRef = React.useRef(selectedDate);
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
   const handleSyncVisitors = async () => {
     try {
       setIsSyncingMachine(true);
-      const res = await visitorAPI.syncVisitorPunches();
+      const targetDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined;
+      const res = await visitorAPI.syncVisitorPunches(targetDateStr);
       if (res && res.success) {
         if (res.count > 0) {
           toast.success(res.message || `Synced ${res.count} visitor punch(es) from machine!`);
@@ -156,8 +207,8 @@ export const Visitors: React.FC = () => {
       toast.error(err?.message || "Error connecting to biometric machine");
     } finally {
       setIsSyncingMachine(false);
-      fetchVisitors(true);
-      fetchStats();
+      fetchVisitors(true, selectedDate);
+      fetchStats(selectedDate);
       window.dispatchEvent(new CustomEvent("visitor-updated"));
     }
   };
@@ -173,7 +224,7 @@ export const Visitors: React.FC = () => {
       const res = await deviceService.pushVisitors(visitorId);
       if (res && res.success) {
         toast.success(res.message || `${visitorName || 'Visitors'} pushed to biometric machine successfully!`);
-        fetchVisitors(true);
+        fetchVisitors(true, selectedDate);
       } else {
         toast.error(res?.message || 'Failed to push visitor(s) to machine');
       }
@@ -191,21 +242,26 @@ export const Visitors: React.FC = () => {
   }, [searchQuery, filterStatus, filterLocation, filterDepartment, selectedDate]);
 
   useEffect(() => {
-    fetchVisitors();
-    fetchStats();
+    fetchVisitors(false, selectedDate);
+    fetchStats(selectedDate);
+  }, [selectedDate]);
+
+  useEffect(() => {
+    fetchVisitors(false, selectedDate);
+    fetchStats(selectedDate);
     fetchLocations();
     fetchDepartments();
     fetchEmployees();
 
     // 🔄 Real-time polling every 5 seconds for live visitor updates
     const pollInterval = setInterval(() => {
-      fetchVisitors(true);
-      fetchStats();
+      fetchVisitors(true, selectedDateRef.current);
+      fetchStats(selectedDateRef.current);
     }, 5000);
 
     const handleUpdate = () => {
-      fetchVisitors(true);
-      fetchStats();
+      fetchVisitors(true, selectedDateRef.current);
+      fetchStats(selectedDateRef.current);
     };
 
     window.addEventListener("visitor-updated", handleUpdate);
@@ -218,10 +274,15 @@ export const Visitors: React.FC = () => {
     };
   }, []);
 
-  const fetchVisitors = async (silent = false) => {
+  const fetchVisitors = async (silent = false, dateToUse?: Date | null) => {
     try {
       if (!silent) setLoading(true);
-      const res = await visitorAPI.getVisitors();
+      const d = dateToUse !== undefined ? dateToUse : selectedDate;
+      const params: any = {};
+      if (d) {
+        params.date = format(d, 'yyyy-MM-dd');
+      }
+      const res = await visitorAPI.getVisitors(params);
       if (res && res.success) {
         setVisitors(res.data || []);
       }
@@ -232,14 +293,59 @@ export const Visitors: React.FC = () => {
     }
   };
 
-  const fetchStats = async () => {
+  const fetchStats = async (dateToUse?: Date | null) => {
     try {
-      const res = await visitorAPI.getStats();
+      const d = dateToUse !== undefined ? dateToUse : selectedDate;
+      const params: any = {};
+      if (d) {
+        params.date = format(d, 'yyyy-MM-dd');
+      }
+      const res = await visitorAPI.getStats(params);
       if (res && res.success && res.stats) {
         setStats(res.stats);
       }
     } catch (err) {
       // ignore
+    }
+  };
+
+  const openPunchLogsModal = async (vId?: number) => {
+    setPunchLogsModalOpen(true);
+    fetchPunchLogs(vId);
+  };
+
+  const fetchPunchLogs = async (vId?: number) => {
+    try {
+      setLoadingPunchLogs(true);
+      const params: any = {};
+      if (selectedDate) {
+        params.date = format(selectedDate, 'yyyy-MM-dd');
+      }
+      if (vId) {
+        params.visitorId = vId;
+      }
+      const res = await visitorAPI.getVisitorLogs(params);
+      if (res && res.success) {
+        setPunchLogs(res.data || []);
+      }
+    } catch (err) {
+      toast.error('Failed to load visitor punch logs');
+    } finally {
+      setLoadingPunchLogs(false);
+    }
+  };
+
+  const fetchVisitorHistory = async (visitorId: number) => {
+    try {
+      setLoadingSelectedVisitorLogs(true);
+      const res = await visitorAPI.getVisitorLogs({ visitorId });
+      if (res && res.success) {
+        setSelectedVisitorLogs(res.data || []);
+      }
+    } catch (e) {
+      setSelectedVisitorLogs([]);
+    } finally {
+      setLoadingSelectedVisitorLogs(false);
     }
   };
 
@@ -303,15 +409,15 @@ export const Visitors: React.FC = () => {
     if (!visitorToDelete) return;
     try {
       setIsDeleting(true);
-      await visitorAPI.deleteVisitor(visitorToDelete.id);
-      toast.success('Visitor record deleted successfully');
+      const res = await visitorAPI.deleteVisitor(visitorToDelete.id);
+      toast.success(res?.message || 'Visitor record deleted and removed from biometric machines');
       setDeleteModalOpen(false);
       setVisitorToDelete(null);
-      fetchVisitors();
-      fetchStats();
+      fetchVisitors(false, selectedDate);
+      fetchStats(selectedDate);
       window.dispatchEvent(new CustomEvent("visitor-updated"));
-    } catch (err) {
-      toast.error('Failed to delete visitor');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete visitor');
     } finally {
       setIsDeleting(false);
     }
@@ -423,6 +529,91 @@ export const Visitors: React.FC = () => {
     }
   };
 
+  const openConvertModal = (v: any) => {
+    const parts = (v.fullName || '').trim().split(/\s+/);
+    const fName = parts[0] || '';
+    const lName = parts.slice(1).join(' ') || '';
+    const baseUser = v.email ? v.email.split('@')[0] : `${fName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`;
+    const suggestedUsername = baseUser.replace(/[^a-zA-Z0-9_]/g, '');
+    const suggestedEmpId = `EMP-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    setConvertingVisitor(v);
+    setConvertStep(1);
+    setConvertForm({
+      firstName: fName,
+      lastName: lName,
+      username: suggestedUsername,
+      email: v.email || '',
+      phoneNumber: v.phone || '',
+      nationalId: v.nationalId || '',
+      password: '',
+      pin: '',
+      employeeId: suggestedEmpId,
+      biometricId: v.badgeNumber || '',
+      companyId: v.companyId ? String(v.companyId) : (locations[0]?.id ? String(locations[0].id) : ''),
+      departmentId: v.departmentId ? String(v.departmentId) : '',
+      supervisorId: v.hostId ? String(v.hostId) : '',
+      role: 'USER',
+      designation: v.purpose && v.purpose !== 'Meeting' ? v.purpose : 'Staff Member',
+      employmentStatus: 'Permanent',
+      joiningDate: new Date().toISOString().split('T')[0],
+      workMode: 'On-site',
+      payoutType: 'monthly',
+      rate: 50000,
+      currency: 'PKR',
+      cycleDate: 1,
+      allowExtraHours: true,
+      maxExtraHours: 2,
+    });
+    setConvertModalOpen(true);
+  };
+
+  const handleConvertVisitor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!convertingVisitor) return;
+
+    if (!convertForm.username) {
+      toast.error('Please enter a username');
+      return;
+    }
+    if (!convertForm.email) {
+      toast.error('Please enter an email address for employee login');
+      return;
+    }
+    if (!convertForm.password) {
+      toast.error('Please set an initial login password for the employee');
+      return;
+    }
+    if (!convertForm.designation) {
+      toast.error('Please specify a designation / job title');
+      return;
+    }
+    if (!convertForm.companyId) {
+      toast.error('Please select an office / branch location');
+      return;
+    }
+
+    try {
+      setIsConverting(true);
+      const res = await visitorAPI.convertToEmployee(convertingVisitor.id, convertForm);
+      if (res && res.success) {
+        toast.success(res.message || `${convertingVisitor.fullName} successfully converted to Employee!`);
+        setConvertModalOpen(false);
+        setConvertingVisitor(null);
+        fetchVisitors(true);
+        fetchStats();
+        window.dispatchEvent(new CustomEvent('visitor-updated'));
+      } else {
+        toast.error(res?.message || 'Failed to convert visitor to employee');
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Error occurred while converting visitor');
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
   // Filter Visitors
   const filteredVisitors = useMemo(() => {
     return visitors.filter((v) => {
@@ -459,44 +650,9 @@ export const Visitors: React.FC = () => {
         !filterDepartment ||
         String(v.departmentId || '') === String(filterDepartment);
 
-      // Date Filter
-      let matchesDate = true;
-      if (selectedDate) {
-        const targetStr = format(selectedDate, 'yyyy-MM-dd');
-        const parseDateSafely = (d?: string | Date | null) => {
-          if (!d) return '';
-          try {
-            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-              return d;
-            }
-            return format(new Date(d), 'yyyy-MM-dd');
-          } catch {
-            return '';
-          }
-        };
-
-        const createdDate = parseDateSafely(v.createdAt);
-        const checkInDate = parseDateSafely(v.checkInTime);
-        const startDateStr = parseDateSafely(v.startDate);
-        const expectedDateStr = parseDateSafely(v.expectedDate);
-        const checkOutDate = parseDateSafely(v.checkOutTime);
-
-        const isCurrentlyCheckedInToday =
-          targetStr === format(new Date(), 'yyyy-MM-dd') && v.status === 'CHECKED_IN';
-
-        matchesDate = (
-          targetStr === createdDate ||
-          targetStr === checkInDate ||
-          targetStr === startDateStr ||
-          targetStr === expectedDateStr ||
-          targetStr === checkOutDate ||
-          isCurrentlyCheckedInToday
-        );
-      }
-
-      return matchesStatus && matchesLocation && matchesDept && matchesDate;
+      return matchesStatus && matchesLocation && matchesDept;
     });
-  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment, selectedDate]);
+  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment]);
 
   // Pagination calculations
   const totalVisitors = filteredVisitors.length;
@@ -566,6 +722,13 @@ export const Visitors: React.FC = () => {
             Cancelled
           </span>
         );
+      case 'CONVERTED':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+            <UserCheck className="size-3 text-purple-600" />
+            Converted to Employee
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
@@ -619,6 +782,16 @@ export const Visitors: React.FC = () => {
 
           <Button
             variant="outline"
+            onClick={() => openPunchLogsModal()}
+            className="w-full sm:w-auto border-indigo-200 text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 hover:text-indigo-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
+            title="View Real-Time Biometric Punch Logs for Visitors"
+          >
+            <Clock className="size-4 text-indigo-600" />
+            <span>Visitor Logs</span>
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={() => handlePushToMachine()}
             disabled={isPushingMachine}
             className="w-full sm:w-auto border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
@@ -662,10 +835,14 @@ export const Visitors: React.FC = () => {
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">Today Present</p>
+                <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">
+                  {selectedDate ? `Present on ${format(selectedDate, 'dd MMM yyyy')}` : 'Today Present'}
+                </p>
               </div>
-              <h3 className="text-2xl font-bold text-emerald-700 mt-1">{stats.checkedIn ?? stats.today ?? 0}</h3>
-              <p className="text-xs text-emerald-600 mt-0.5">Present in company today</p>
+              <h3 className="text-2xl font-bold text-emerald-700 mt-1">{stats.checkedIn ?? 0}</h3>
+              <p className="text-xs text-emerald-600 mt-0.5">
+                {stats.checkedOut ? `${stats.checkedOut} checked out` : (selectedDate ? `Checked in on ${format(selectedDate, 'dd MMM')}` : 'Present in company today')}
+              </p>
             </div>
             <div className="size-11 rounded-xl bg-emerald-100/70 text-emerald-700 flex items-center justify-center border border-emerald-200">
               <LogIn className="size-5" />
@@ -732,8 +909,11 @@ export const Visitors: React.FC = () => {
             value={filterStatus}
             onValueChange={setFilterStatus}
             options={[
-              { value: 'all', label: 'Total Visitors' },
-              { value: 'CHECKED_IN', label: 'Today Present' },
+              { value: 'all', label: 'All Visitors' },
+              { value: 'CHECKED_IN', label: 'Checked In' },
+              { value: 'EXPECTED', label: 'Expected' },
+              { value: 'CHECKED_OUT', label: 'Checked Out' },
+              { value: 'CONVERTED', label: 'Converted to Employee' },
             ]}
           />
 
@@ -957,12 +1137,32 @@ export const Visitors: React.FC = () => {
 
                     {/* Check-In */}
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <span className="size-2 rounded-full bg-emerald-500 shrink-0" />
-                        <span className="text-xs font-semibold text-gray-900 font-mono">
-                          {formatTime(v.checkInTime || v.createdAt)}
-                        </span>
-                      </div>
+                      {v.checkInTime ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="size-2 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="text-xs font-semibold text-gray-900 font-mono">
+                              {formatTime(v.checkInTime)}
+                            </span>
+                          </div>
+                          {v.punches && v.punches.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openPunchLogsModal(v.id)}
+                              className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                              title="Click to view real-time punch logs"
+                            >
+                              <Clock className="size-2.5" />
+                              <span>{v.punches.length} punch{v.punches.length > 1 ? 'es' : ''}</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="size-2 rounded-full bg-amber-400 shrink-0" />
+                          <span className="text-gray-400 font-medium text-xs">Not Checked In</span>
+                        </div>
+                      )}
                     </TableCell>
 
                     {/* Check-Out */}
@@ -975,7 +1175,7 @@ export const Visitors: React.FC = () => {
                           </span>
                         </div>
                       ) : (
-                        <span className="text-gray-400 font-semibold text-sm pl-2">—</span>
+                        <span className="text-gray-400 font-medium text-xs pl-2">—</span>
                       )}
                     </TableCell>
 
@@ -1035,6 +1235,7 @@ export const Visitors: React.FC = () => {
                           variant="ghost"
                           onClick={() => {
                             setSelectedVisitor(v);
+                            fetchVisitorHistory(v.id);
                             setViewModalOpen(true);
                           }}
                           className="h-8 w-8 text-gray-500 hover:text-blue-600 rounded-lg"
@@ -1042,6 +1243,28 @@ export const Visitors: React.FC = () => {
                         >
                           <Eye className="size-4" />
                         </Button>
+
+                        {/* Convert to Employee */}
+                        {v.status !== 'CONVERTED' && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => openConvertModal(v)}
+                                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg"
+                                  title="Convert to Employee"
+                                >
+                                  <UserPlus className="size-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                <p>Convert to Employee</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
 
                         {/* Edit */}
                         <Button
@@ -1239,6 +1462,7 @@ export const Visitors: React.FC = () => {
                             variant="outline"
                             onClick={() => {
                               setSelectedVisitor(v);
+                              fetchVisitorHistory(v.id);
                               setViewModalOpen(true);
                             }}
                             className="h-8 w-8 text-gray-600 hover:text-blue-600 hover:bg-blue-50 border-gray-200 rounded-xl"
@@ -1248,6 +1472,23 @@ export const Visitors: React.FC = () => {
                         </TooltipTrigger>
                         <TooltipContent side="top">View Pass</TooltipContent>
                       </Tooltip>
+
+                      {/* Convert to Employee */}
+                      {v.status !== 'CONVERTED' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => openConvertModal(v)}
+                              className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200 rounded-xl"
+                            >
+                              <UserPlus className="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">Convert to Employee</TooltipContent>
+                        </Tooltip>
+                      )}
 
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1301,6 +1542,10 @@ export const Visitors: React.FC = () => {
                       <LogIn className="size-3.5" />
                       <span>Check In</span>
                     </Button>
+                  ) : v.status === 'CONVERTED' ? (
+                    <Badge variant="outline" className="text-xs text-purple-700 bg-purple-50 border-purple-200 px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1">
+                      <UserCheck className="size-3" /> Converted
+                    </Badge>
                   ) : (
                     <Badge variant="outline" className="text-xs text-gray-500 bg-gray-50 border-gray-200 px-2.5 py-1 rounded-lg font-medium">
                       Checked Out
@@ -1408,10 +1653,78 @@ export const Visitors: React.FC = () => {
                   <p className="text-gray-700 mt-1 whitespace-pre-wrap">{selectedVisitor.notes}</p>
                 </div>
               )}
+
+              {/* Real-Time Visitor Biometric Punch History */}
+              <div className="bg-gray-50/80 p-3 rounded-xl border border-gray-100 col-span-2">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-700 font-semibold text-xs flex items-center gap-1.5">
+                    <Clock className="size-3.5 text-blue-600" />
+                    Real-Time Biometric Punch Logs ({selectedVisitorLogs.length})
+                  </span>
+                  {selectedVisitorLogs.length > 0 && (
+                    <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                      Live Machine Logs
+                    </Badge>
+                  )}
+                </div>
+
+                {loadingSelectedVisitorLogs ? (
+                  <div className="py-3 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
+                    <Loader2 className="size-3.5 animate-spin text-blue-600" />
+                    <span>Loading punch history...</span>
+                  </div>
+                ) : selectedVisitorLogs.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-1 italic">
+                    No biometric machine punches recorded yet for this visitor.
+                  </p>
+                ) : (
+                  <div className="max-h-44 overflow-y-auto divide-y divide-gray-100 border border-gray-100 rounded-xl bg-white shadow-2xs">
+                    {selectedVisitorLogs.map((log: any) => (
+                      <div key={log.id} className="p-2.5 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`size-2 rounded-full ${
+                              log.punchType === 'CHECK_IN' ? 'bg-emerald-500' : 'bg-slate-400'
+                            }`}
+                          />
+                          <div>
+                            <span className="font-semibold text-gray-800">
+                              {log.punchType === 'CHECK_IN' ? 'Check In' : 'Check Out'}
+                            </span>
+                            <span className="text-[10px] text-gray-500 ml-2 font-mono">
+                              {formatDateTime(log.punchTime)}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-medium text-gray-600 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-lg">
+                          {log.device || 'Gate Terminal'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end shrink-0">
+          <div className="p-3.5 sm:p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between shrink-0">
+            <div>
+              {selectedVisitor?.status !== 'CONVERTED' && (
+                <Button
+                  size="sm"
+                  type="button"
+                  onClick={() => {
+                    const v = selectedVisitor;
+                    setViewModalOpen(false);
+                    openConvertModal(v);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs h-9 px-3.5 flex items-center gap-1.5"
+                >
+                  <UserPlus className="size-3.5" />
+                  <span>Convert to Employee</span>
+                </Button>
+              )}
+            </div>
             <Button
               size="sm"
               onClick={() => setViewModalOpen(false)}
@@ -1762,7 +2075,7 @@ export const Visitors: React.FC = () => {
               <DialogTitle className="text-lg font-bold text-gray-900">Delete Visitor Record</DialogTitle>
               <p className="text-xs text-gray-500 mt-1">
                 Are you sure you want to delete visitor entry for <strong>{visitorToDelete?.fullName}</strong>?
-                This action cannot be undone.
+                This will also automatically remove this visitor and their access rights from all biometric machines.
               </p>
             </div>
           </div>
@@ -1785,6 +2098,569 @@ export const Visitors: React.FC = () => {
               {isDeleting ? 'Deleting...' : 'Delete Record'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── CONVERT VISITOR TO EMPLOYEE MODAL ───────────────────────── */}
+      <Dialog open={convertModalOpen} onOpenChange={setConvertModalOpen}>
+        <DialogContent className="sm:max-w-3xl w-[96vw] max-h-[92vh] flex flex-col rounded-3xl p-0 overflow-hidden shadow-2xl border border-gray-100 [&>button]:text-white [&>button]:hover:text-white/80 [&>button]:top-5 [&>button]:right-5">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-indigo-900 p-5 sm:p-6 text-white shrink-0 relative flex items-center justify-between">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-semibold tracking-wide uppercase mb-1.5">
+                <Briefcase className="size-3" /> Move Visitor to Permanent Employee
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+                Convert {convertingVisitor?.fullName}
+              </h2>
+              <p className="text-emerald-100 text-xs sm:text-sm mt-0.5">
+                Complete employee credentials & job details to activate permanent staff profile.
+              </p>
+            </div>
+          </div>
+
+          {/* Stepper Tabs */}
+          <div className="flex border-b border-gray-100 bg-gray-50/70 px-6 py-2.5 gap-3 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setConvertStep(1)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl transition-all cursor-pointer ${
+                convertStep === 1
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-gray-600 hover:bg-gray-200/60'
+              }`}
+            >
+              <span className="size-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">1</span>
+              <span>Account & Personal Info</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setConvertStep(2)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl transition-all cursor-pointer ${
+                convertStep === 2
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-gray-600 hover:bg-gray-200/60'
+              }`}
+            >
+              <span className="size-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">2</span>
+              <span>Job, Branch & Compensation</span>
+            </button>
+          </div>
+
+          {/* Form Body */}
+          <form onSubmit={handleConvertVisitor} className="flex-1 flex flex-col overflow-hidden">
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto max-h-[58vh]">
+              {convertStep === 1 && (
+                <div className="space-y-4">
+                  {/* Visitor Info Banner */}
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl flex items-center gap-3">
+                    <div className="size-12 rounded-xl bg-white border border-emerald-200 overflow-hidden flex items-center justify-center shrink-0">
+                      {convertingVisitor?.photo ? (
+                        <img
+                          src={convertingVisitor.photo}
+                          alt={convertingVisitor.fullName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <User className="size-6 text-emerald-600" />
+                      )}
+                    </div>
+                    <div className="text-xs">
+                      <p className="font-bold text-gray-900 text-sm">{convertingVisitor?.fullName}</p>
+                      <p className="text-gray-600 mt-0.5">
+                        Phone: {convertingVisitor?.phone || 'N/A'} • CNIC: {convertingVisitor?.nationalId || 'N/A'}
+                      </p>
+                      <p className="text-emerald-700 font-medium text-[11px] mt-0.5">
+                        ✓ Photo & visitor logs will be preserved and linked to new employee record
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">First Name *</Label>
+                      <Input
+                        required
+                        value={convertForm.firstName}
+                        onChange={(e) => setConvertForm({ ...convertForm, firstName: e.target.value })}
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Last Name</Label>
+                      <Input
+                        value={convertForm.lastName}
+                        onChange={(e) => setConvertForm({ ...convertForm, lastName: e.target.value })}
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Username *</Label>
+                      <Input
+                        required
+                        value={convertForm.username}
+                        onChange={(e) => setConvertForm({ ...convertForm, username: e.target.value })}
+                        placeholder="e.g. zohaib123"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Email Address *</Label>
+                      <Input
+                        type="email"
+                        required
+                        value={convertForm.email}
+                        onChange={(e) => setConvertForm({ ...convertForm, email: e.target.value })}
+                        placeholder="employee@company.com"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Phone Number</Label>
+                      <Input
+                        value={convertForm.phoneNumber}
+                        onChange={(e) => setConvertForm({ ...convertForm, phoneNumber: e.target.value })}
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">National ID / CNIC</Label>
+                      <Input
+                        value={convertForm.nationalId}
+                        onChange={(e) => setConvertForm({ ...convertForm, nationalId: e.target.value })}
+                        placeholder="e.g. 42101-xxxxxxx-x"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Login Password *</Label>
+                      <Input
+                        type="text"
+                        required
+                        value={convertForm.password}
+                        onChange={(e) => setConvertForm({ ...convertForm, password: e.target.value })}
+                        placeholder="Set employee password"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Attendance PIN (Optional)</Label>
+                      <Input
+                        type="password"
+                        maxLength={6}
+                        value={convertForm.pin}
+                        onChange={(e) => setConvertForm({ ...convertForm, pin: e.target.value })}
+                        placeholder="e.g. 1234"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Employee ID / Code</Label>
+                      <Input
+                        value={convertForm.employeeId}
+                        onChange={(e) => setConvertForm({ ...convertForm, employeeId: e.target.value })}
+                        placeholder="e.g. EMP-105"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Biometric / Badge ID</Label>
+                      <Input
+                        value={convertForm.biometricId}
+                        onChange={(e) => setConvertForm({ ...convertForm, biometricId: e.target.value })}
+                        placeholder="Machine enrollment ID"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">System Role</Label>
+                      <select
+                        value={convertForm.role}
+                        onChange={(e) => setConvertForm({ ...convertForm, role: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="USER">User (Standard Employee)</option>
+                        <option value="SUPERVISOR">Supervisor / Manager</option>
+                        <option value="ADMIN">System Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {convertStep === 2 && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Office / Branch Location *</Label>
+                      <select
+                        required
+                        value={convertForm.companyId}
+                        onChange={(e) => setConvertForm({ ...convertForm, companyId: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="">Select Branch</option>
+                        {locations.map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Department</Label>
+                      <select
+                        value={convertForm.departmentId}
+                        onChange={(e) => setConvertForm({ ...convertForm, departmentId: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="">Select Department</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Designation / Job Title *</Label>
+                      <Input
+                        required
+                        value={convertForm.designation}
+                        onChange={(e) => setConvertForm({ ...convertForm, designation: e.target.value })}
+                        placeholder="e.g. Sales Executive / Support Agent"
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Reporting Supervisor</Label>
+                      <select
+                        value={convertForm.supervisorId}
+                        onChange={(e) => setConvertForm({ ...convertForm, supervisorId: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="">No Supervisor (Direct)</option>
+                        {employees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.firstName} {emp.lastName} ({emp.employeeId || emp.username})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Employment Status</Label>
+                      <select
+                        value={convertForm.employmentStatus}
+                        onChange={(e) => setConvertForm({ ...convertForm, employmentStatus: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="Permanent">Permanent</option>
+                        <option value="Probation">Probation</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Internship">Internship</option>
+                        <option value="Part-time">Part-time</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Work Mode</Label>
+                      <select
+                        value={convertForm.workMode}
+                        onChange={(e) => setConvertForm({ ...convertForm, workMode: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="On-site">On-site</option>
+                        <option value="Remote">Remote</option>
+                        <option value="Hybrid">Hybrid</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Joining Date</Label>
+                      <Input
+                        type="date"
+                        value={convertForm.joiningDate}
+                        onChange={(e) => setConvertForm({ ...convertForm, joiningDate: e.target.value })}
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Base Salary / Rate</Label>
+                      <div className="flex gap-2 mt-1">
+                        <Input
+                          type="number"
+                          value={convertForm.rate}
+                          onChange={(e) => setConvertForm({ ...convertForm, rate: Number(e.target.value) })}
+                          className="h-9 rounded-xl text-xs flex-1"
+                        />
+                        <select
+                          value={convertForm.currency}
+                          onChange={(e) => setConvertForm({ ...convertForm, currency: e.target.value })}
+                          className="w-24 h-9 rounded-xl border border-gray-200 px-2 text-xs bg-white text-gray-800"
+                        >
+                          <option value="PKR">PKR</option>
+                          <option value="USD">USD</option>
+                          <option value="EUR">EUR</option>
+                          <option value="GBP">GBP</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Payout Frequency</Label>
+                      <select
+                        value={convertForm.payoutType}
+                        onChange={(e) => setConvertForm({ ...convertForm, payoutType: e.target.value })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="hourly">Hourly</option>
+                        <option value="daily">Daily</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold text-gray-700">Salary Cycle Day</Label>
+                      <select
+                        value={convertForm.cycleDate}
+                        onChange={(e) => setConvertForm({ ...convertForm, cycleDate: Number(e.target.value) })}
+                        className="mt-1 w-full h-9 rounded-xl border border-gray-200 px-3 text-xs bg-white text-gray-800"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={d}>
+                            {d} of every month
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConvertModalOpen(false)}
+                className="rounded-xl text-xs h-9 px-4"
+              >
+                Cancel
+              </Button>
+
+              <div className="flex items-center gap-2">
+                {convertStep === 1 ? (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (!convertForm.username) {
+                        toast.error('Please enter a username');
+                        return;
+                      }
+                      if (!convertForm.email) {
+                        toast.error('Please enter an email address');
+                        return;
+                      }
+                      if (!convertForm.password) {
+                        toast.error('Please enter a password');
+                        return;
+                      }
+                      setConvertStep(2);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs h-9 px-4"
+                  >
+                    Next: Job & Salary ➜
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setConvertStep(1)}
+                      className="rounded-xl text-xs h-9 px-3"
+                    >
+                      ← Back
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={isConverting}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs h-9 px-4 flex items-center gap-1.5"
+                    >
+                      {isConverting ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>Converting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="size-3.5" />
+                          <span>Complete Conversion</span>
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── REAL-TIME VISITOR PUNCH LOGS DIALOG ──────────────────── */}
+      <Dialog open={punchLogsModalOpen} onOpenChange={setPunchLogsModalOpen}>
+        <DialogContent className="sm:max-w-3xl w-[95vw] max-h-[85vh] flex flex-col rounded-2xl p-0 overflow-hidden shadow-2xl border-0">
+          <div className="bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 p-5 text-white flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center text-white border border-white/20">
+                <Clock className="size-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Visitor Biometric Punch Logs</h3>
+                <p className="text-xs text-indigo-100 mt-0.5">
+                  {selectedDate ? `Real-time punches recorded on ${format(selectedDate, 'dd MMMM yyyy')}` : 'All real-time visitor machine punches'}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchPunchLogs()}
+              disabled={loadingPunchLogs}
+              className="h-8 text-xs text-white hover:bg-white/20 rounded-xl border border-white/20 flex items-center gap-1.5"
+            >
+              <RefreshCw className={`size-3.5 ${loadingPunchLogs ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Search bar inside logs modal */}
+          <div className="p-4 border-b border-gray-100 bg-gray-50/60 flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search logs by visitor name, badge #, or device..."
+                value={punchLogsSearch}
+                onChange={(e) => setPunchLogsSearch(e.target.value)}
+                className="pl-9 h-9 rounded-xl border-gray-200 bg-white text-xs"
+              />
+            </div>
+            {selectedDate && (
+              <Badge variant="outline" className="text-xs bg-indigo-50 text-indigo-700 border-indigo-200 py-1.5 px-3 rounded-xl shrink-0">
+                {format(selectedDate, 'dd MMM yyyy')}
+              </Badge>
+            )}
+          </div>
+
+          {/* Logs List / Table */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {loadingPunchLogs ? (
+              <div className="py-16 text-center text-gray-500 flex flex-col items-center justify-center gap-2">
+                <Loader2 className="size-6 animate-spin text-blue-600" />
+                <p className="text-xs font-medium">Fetching real-time visitor punches...</p>
+              </div>
+            ) : (() => {
+              const q = punchLogsSearch.toLowerCase().trim();
+              const filtered = punchLogs.filter((log) => {
+                if (!q) return true;
+                const vName = (log.visitorName || '').toLowerCase();
+                const bNo = (log.badgeNumber || '').toLowerCase();
+                const dev = (log.device || '').toLowerCase();
+                const type = (log.punchType || '').toLowerCase();
+                return vName.includes(q) || bNo.includes(q) || dev.includes(q) || type.includes(q);
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-16 text-center text-gray-400">
+                    <Clock className="size-10 mx-auto text-gray-300 stroke-1" />
+                    <p className="mt-3 text-sm font-semibold text-gray-600">No Visitor Punches Found</p>
+                    <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                      {selectedDate
+                        ? `No biometric or manual punches were logged for ${format(selectedDate, 'dd MMM yyyy')}.`
+                        : 'No visitor machine events have been recorded yet.'}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="border border-gray-100 rounded-xl overflow-hidden bg-white shadow-2xs">
+                  <Table>
+                    <TableHeader className="bg-gray-50/80">
+                      <TableRow className="border-b border-gray-100 text-xs text-gray-500 uppercase">
+                        <TableHead className="py-3 font-semibold">Punch Time</TableHead>
+                        <TableHead className="font-semibold">Visitor</TableHead>
+                        <TableHead className="font-semibold">Badge #</TableHead>
+                        <TableHead className="font-semibold">Action</TableHead>
+                        <TableHead className="font-semibold">Device / Gate</TableHead>
+                        <TableHead className="font-semibold">Method</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="divide-y divide-gray-100 text-xs">
+                      {filtered.map((log) => (
+                        <TableRow key={log.id} className="hover:bg-blue-50/20">
+                          <TableCell className="font-mono font-semibold text-gray-900 py-3">
+                            {formatDateTime(log.punchTime)}
+                          </TableCell>
+                          <TableCell className="font-semibold text-gray-800">
+                            {log.visitorName}
+                          </TableCell>
+                          <TableCell className="font-mono text-gray-600">
+                            {log.badgeNumber || '—'}
+                          </TableCell>
+                          <TableCell>
+                            {log.punchType === 'CHECK_IN' ? (
+                              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-semibold">
+                                Check In
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-[11px] font-semibold">
+                                Check Out
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-gray-600 font-medium">
+                            {log.device || 'Gate'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-[10px] bg-gray-50 text-gray-600">
+                              {log.method || 'Biometric'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="p-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium pl-2">
+              Showing {punchLogs.length} punch log(s)
+            </span>
+            <Button
+              size="sm"
+              onClick={() => setPunchLogsModalOpen(false)}
+              className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs h-8 px-4"
+            >
+              Close
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -422,6 +422,36 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
               </View>
             </View>
           </View>
+
+          {/* Row 3 - Pay Period & Cycle */}
+          <View style={pdfStyles.infoRow}>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Pay Period:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>
+                  {payroll?.periodStart && payroll?.periodEnd
+                    ? `${moment(payroll.periodStart).format("DD MMM YYYY")} – ${moment(payroll.periodEnd).format("DD MMM YYYY")}`
+                    : `${salaryMonth} ${salaryYear}`}
+                </Text>
+              </View>
+            </View>
+            <View style={pdfStyles.infoCell}>
+              <Text style={pdfStyles.infoLabel}>Payroll Cycle:</Text>
+              <View style={pdfStyles.infoValueContainer}>
+                <Text style={pdfStyles.infoValueText}>
+                  {(() => {
+                    const cycleDate = Number(payroll?.employee?.payroll?.cycleDate) || 1;
+                    const payoutType = payroll?.employee?.payroll?.payoutType || payroll?.payoutType || 'monthly';
+                    const typeLabel = payoutType.charAt(0).toUpperCase() + payoutType.slice(1);
+                    if (cycleDate <= 1) {
+                      return `1st of Month (${typeLabel})`;
+                    }
+                    return `Day ${cycleDate} of Month (${typeLabel})`;
+                  })()}
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
 
         {/* Earnings & Deductions Table */}
@@ -760,26 +790,49 @@ export const PayrollDetail = () => {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-500">Hiring Date</p>
-                    <p>
-                      {(payroll.employee?.hiringDate || payroll.employee?.jobInfo?.hiringDate)
-                        ? moment(payroll.employee?.hiringDate || payroll.employee?.jobInfo?.hiringDate).format('DD MMM YYYY')
+                    <p className="text-gray-500">Joining Date</p>
+                    <p className="font-semibold text-gray-900">
+                      {(() => {
+                        const effectiveDate = payroll.employee?.jobInfo?.joiningDate || payroll.employee?.joiningDate || payroll.employee?.jobInfo?.hiringDate || payroll.employee?.hiringDate;
+                        return effectiveDate ? moment(effectiveDate).format('DD MMM YYYY') : '—';
+                      })()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Pay Period</p>
+                    <p className="font-semibold text-gray-900">
+                      {payroll.periodStart && payroll.periodEnd
+                        ? `${moment(payroll.periodStart).format('DD MMM YYYY')} – ${moment(payroll.periodEnd).format('DD MMM YYYY')}`
                         : '—'}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-500">Payroll Cycle</p>
-                    <p>1st to 30th (Monthly)</p>
+                    <p className="font-semibold text-gray-900">
+                      {(() => {
+                        const cycleDate = Number(payroll.employee?.payroll?.cycleDate) || 1;
+                        const payoutType = payroll.employee?.payroll?.payoutType || payroll.payoutType || 'monthly';
+                        const typeLabel = payoutType.charAt(0).toUpperCase() + payoutType.slice(1);
+                        if (cycleDate <= 1) {
+                          return `Day 1 (${typeLabel})`;
+                        }
+                        return `Day ${cycleDate} (${typeLabel})`;
+                      })()}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-500">Location</p>
-                    <p>{payroll.employee?.company?.name || payroll.employee?.location?.name || 'Main Office'}</p>
+                    <p className="font-semibold text-gray-900">{payroll.employee?.company?.name || payroll.employee?.location?.name || 'Main Office'}</p>
                   </div>
                   <div>
                     <p className="text-gray-500">Department</p>
-                    <p>{payroll.employee?.department?.title || 'General'}</p>
+                    <p className="font-semibold text-gray-900">{payroll.employee?.department?.title || 'General'}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Payout Type</p>
+                    <p className="font-semibold text-gray-900 capitalize">{payroll.payoutType || payroll.employee?.payroll?.payoutType || 'Monthly'}</p>
                   </div>
                 </div>
               </div>

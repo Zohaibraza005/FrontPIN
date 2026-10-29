@@ -919,8 +919,34 @@ export const visitorAPI = {
       method: 'DELETE',
     });
   },
-  syncVisitorPunches: async () => {
+  convertToEmployee: async (id: number | string, data: any) => {
+    return apiCall(`/visitors/${id}/convert-to-employee`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+  getVisitorLogs: async (filters?: any) => {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          params.append(k, String(v));
+        }
+      });
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return apiCall(`/visitors/logs${query}`);
+  },
+  syncVisitorPunches: async (date?: string) => {
     return apiCall('/visitors/sync-punches', {
+      method: 'POST',
+      body: JSON.stringify(date ? { date } : {}),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+  resetStuckVisitors: async () => {
+    return apiCall('/visitors/reset-stuck', {
       method: 'POST',
     });
   },
