@@ -1287,6 +1287,8 @@ exports.getAttendanceReport = async (req, res) => {
     const {
       view = "daily",
       date,
+      startDate: requestedStartDate,
+      endDate: requestedEndDate,
       departmentId,
       companyId,
       locationId,
@@ -1299,19 +1301,42 @@ exports.getAttendanceReport = async (req, res) => {
     let startDate;
     let endDate;
 
-    if (view === "daily") {
+    if (requestedStartDate || requestedEndDate) {
+      if (!requestedStartDate || !requestedEndDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Both startDate and endDate are required.",
+        });
+      }
+
+      const requestedStart = moment(requestedStartDate);
+      const requestedEnd = moment(requestedEndDate);
+      if (!requestedStart.isValid() || !requestedEnd.isValid() || requestedEnd.isBefore(requestedStart, "day")) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid date range is required.",
+        });
+      }
+
+      startDate = requestedStart.startOf("day").toDate();
+      endDate = requestedEnd.endOf("day").toDate();
+    } else if (view === "daily") {
       startDate = baseDate.clone().startOf("day").toDate();
       endDate = baseDate.clone().endOf("day").toDate();
-    }
-
-    if (view === "weekly") {
+    } else if (view === "weekly") {
       startDate = baseDate.clone().startOf("isoWeek").toDate();
       endDate = baseDate.clone().endOf("isoWeek").toDate();
-    }
-
-    if (view === "monthly") {
+    } else if (view === "monthly") {
       startDate = baseDate.clone().startOf("month").toDate();
       endDate = baseDate.clone().endOf("month").toDate();
+    } else if (view === "yearly") {
+      startDate = baseDate.clone().startOf("year").toDate();
+      endDate = baseDate.clone().endOf("year").toDate();
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "A supported attendance report view is required.",
+      });
     }
 
     /* 🔍 Employee Filtering */
@@ -2985,6 +3010,5 @@ exports.removeDayOverride = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to remove day override" });
   }
 };
-
 
 

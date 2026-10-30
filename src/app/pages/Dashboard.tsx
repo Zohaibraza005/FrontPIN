@@ -137,8 +137,12 @@ export const Dashboard: React.FC = () => {
   const DATE_KEY = "dashboard-selected-date";
   const LOCATION_KEY = "dashboard-selected-location";
 
-  // ── Initialize with today's local date for real-time live attendance ──
+  // ── Initialize with stored date or today's local date ──
   const getInitialDate = () => {
+    const saved = localStorage.getItem(DATE_KEY);
+    if (saved && moment(saved, "YYYY-MM-DD", true).isValid()) {
+      return saved;
+    }
     return moment().format("YYYY-MM-DD");
   };
 
@@ -411,8 +415,10 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.removeItem(DATE_KEY);
-  }, []);
+    if (selectedDate) {
+      localStorage.setItem(DATE_KEY, selectedDate);
+    }
+  }, [selectedDate]);
 
   useEffect(() => {
     localStorage.setItem("selectedLocation", selectedLocation);
@@ -479,7 +485,7 @@ export const Dashboard: React.FC = () => {
           date: formattedDate,
           location,
         });
-        setWeeklyTimeSheetData(weeklyAttendance.data)
+        setWeeklyTimeSheetData(weeklyAttendance?.data || []);
 
         const graphData = await dashboardAPI.getAdminGraphs({
           date: formattedDate,
@@ -511,6 +517,14 @@ export const Dashboard: React.FC = () => {
           date: formattedDate,
           location,
         });
+
+        const weeklyTimesheetRes = await dashboardAPI.getWeeklyTimesheet({
+          date: formattedDate,
+          location,
+        }).catch(() => null);
+        if (weeklyTimesheetRes?.data) {
+          setWeeklyTimeSheetData(weeklyTimesheetRes.data);
+        }
 
         setStats(statsData.stats || {});
         setAttendanceData(statsData.attendanceWidget || []);
@@ -587,23 +601,24 @@ export const Dashboard: React.FC = () => {
       return st === status;
     });
   };
-  const chartData = weeklyDummyData.map(item => ({
+  const chartData = (weeklyDummyData || []).map((item: any) => ({
     day: item.day,
-    working:   Number(item.workingHours),
-    break:     Number(item.breakHours),
-    overtime:  Number(item.overtimeHours),
+    date: item.date,
+    workingHours: Number(item.workingHours) || 0,
+    breakHours: Number(item.breakHours) || 0,
+    overtimeHours: Number(item.overtimeHours) || 0,
   }));
 
-  const totalWeeklyWorkingHours = (weeklyDummyData || []).reduce(
-    (sum: number, d: any) => sum + (Number(d.workingHours) || 0),
+  const totalWeeklyWorkingHours = chartData.reduce(
+    (sum: number, d: any) => sum + (d.workingHours || 0),
     0
   );
-  const totalWeeklyOvertimeHours = (weeklyDummyData || []).reduce(
-    (sum: number, d: any) => sum + (Number(d.overtimeHours) || 0),
+  const totalWeeklyOvertimeHours = chartData.reduce(
+    (sum: number, d: any) => sum + (d.overtimeHours || 0),
     0
   );
-  const activeWorkingDaysCount = (weeklyDummyData || []).filter(
-    (d: any) => (Number(d.workingHours) || 0) > 0
+  const activeWorkingDaysCount = chartData.filter(
+    (d: any) => (d.workingHours || 0) > 0
   ).length;
   const avgWorkingDayHours = totalWeeklyWorkingHours > 0 
     ? totalWeeklyWorkingHours / (activeWorkingDaysCount > 0 ? activeWorkingDaysCount : 5) 
@@ -1092,19 +1107,27 @@ export const Dashboard: React.FC = () => {
               <div className="mt-8">
                 <Card className="border border-gray-200/80 shadow-xs rounded-2xl overflow-hidden bg-white">
                   <CardHeader className="p-5 pb-3 bg-white">
-                    <CardTitle className="text-base sm:text-lg font-bold text-gray-900">
-                      Weekly Timesheet Overview
-                    </CardTitle>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Working hours & overtime from attendance · checked-out shifts only
-                    </p>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <CardTitle className="text-base sm:text-lg font-bold text-gray-900">
+                          Weekly Timesheet Overview
+                        </CardTitle>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Real-time working hours & overtime from attendance & live shifts
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Live Real-Time
+                      </span>
+                    </div>
 
                     <div className="flex items-center gap-2 flex-wrap mt-2.5">
                       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-50 border border-gray-200/80 text-xs font-medium text-gray-700">
                         <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                         <span>
-                          {weeklyDummyData?.[0]?.date && weeklyDummyData?.[6]?.date
-                            ? `${moment(weeklyDummyData[0].date).format("D MMM")} – ${moment(weeklyDummyData[6].date).format("D MMM YYYY")}`
+                          {chartData?.[0]?.date && chartData?.[6]?.date
+                            ? `${moment(chartData[0].date).format("D MMM")} – ${moment(chartData[6].date).format("D MMM YYYY")}`
                             : `${moment(selectedDate).startOf("isoWeek").format("D MMM")} – ${moment(selectedDate).endOf("isoWeek").format("D MMM YYYY")}`}
                         </span>
                       </div>
@@ -1164,7 +1187,7 @@ export const Dashboard: React.FC = () => {
                     <div className="h-[340px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={weeklyDummyData}
+                          data={chartData}
                           margin={{ top: 10, right: 15, left: -10, bottom: 0 }}
                           barGap={6}
                         >
@@ -1183,6 +1206,8 @@ export const Dashboard: React.FC = () => {
                             tickLine={false}
                             tick={{ fill: '#64748b', fontSize: 12 }}
                             tickFormatter={(value) => `${value}h`}
+                            domain={[0, (dataMax: number) => Math.max(Math.ceil((dataMax || 0) * 1.15), 5)]}
+                            allowDecimals={false}
                           />
                           <YAxis 
                             yAxisId="right"
@@ -1191,6 +1216,8 @@ export const Dashboard: React.FC = () => {
                             tickLine={false}
                             tick={{ fill: '#8b5cf6', fontSize: 12 }}
                             tickFormatter={(value) => `${value}h`}
+                            domain={[0, (dataMax: number) => Math.max(Math.ceil((dataMax || 0) * 1.2), 5)]}
+                            allowDecimals={false}
                           />
                           <Tooltip 
                             contentStyle={{ 

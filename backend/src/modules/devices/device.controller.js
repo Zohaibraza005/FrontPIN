@@ -364,20 +364,29 @@ async function findEmployee(biometricId, employeeName) {
  * Prioritizes database configuration (direction), and falls back to device name matching.
  */
 function getDeviceDirection(deviceName, deviceTag, configuredDirection = null) {
-  if (configuredDirection === "CHECK_IN" || configuredDirection === "CHECK_OUT") {
-    return configuredDirection;
-  }
-
   const combined = `${deviceName || ""} ${deviceTag || ""}`.toLowerCase();
 
-  // Dedicated Check-In terminals fallback
-  if (/\b(gate\s*pass|gate\s*1)\b/i.test(combined)) {
+  // 1. Dedicated Attendance Terminals (Gate 1 & Gate Pass are strictly Check-In)
+  if (
+    /\b(gate[\s_-]*(pass|1|01))\b/i.test(combined) ||
+    combined.includes("gate pass") ||
+    combined.includes("gate 1")
+  ) {
     return "CHECK_IN";
   }
 
-  // Dedicated Check-Out terminals fallback
-  if (/\b(gate\s*2|gate\s*3)\b/i.test(combined)) {
+  // 2. Dedicated Attendance Terminals (Gate 2 & Gate 3 are strictly Check-Out)
+  if (
+    /\b(gate[\s_-]*(2|02|3|03))\b/i.test(combined) ||
+    combined.includes("gate 2") ||
+    combined.includes("gate 3")
+  ) {
     return "CHECK_OUT";
+  }
+
+  // 3. Fallback to configured direction in DB
+  if (configuredDirection === "CHECK_IN" || configuredDirection === "CHECK_OUT") {
+    return configuredDirection;
   }
 
   if (configuredDirection === "AUTO") {
@@ -532,19 +541,24 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       moment(matchedVisitor.checkInTime).tz(timezone).format("YYYY-MM-DD") === todayStr;
 
     let newStatus = "CHECKED_IN";
+    let punchType = "CHECK_IN";
 
     if (deviceDir === "CHECK_IN") {
       newStatus = "CHECKED_IN";
+      punchType = "CHECK_IN";
       console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
     } else if (deviceDir === "CHECK_OUT") {
       newStatus = "CHECKED_OUT";
+      punchType = "CHECK_OUT";
       console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
     } else {
       if (isAlreadyCheckedIn) {
         newStatus = "CHECKED_OUT";
+        punchType = "CHECK_OUT";
         console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_OUT via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
       } else {
         newStatus = "CHECKED_IN";
+        punchType = "CHECK_IN";
         console.log(`[Visitor Biometric Punch] Visitor ${matchedVisitor.fullName} CHECKED_IN via ${deviceName || brand} at ${pTime.format("HH:mm:ss")}`);
       }
     }
@@ -554,7 +568,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       visitorId: matchedVisitor.id,
       organizationId: matchedVisitor.organizationId,
       punchTime: punchDate,
-      punchType: newStatus,
+      punchType: punchType,
       device: deviceName ? `${brand} (${deviceName})` : brand,
       method: method || brand || "BIOMETRIC",
       timezone,

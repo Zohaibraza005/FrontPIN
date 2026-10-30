@@ -1430,6 +1430,7 @@ export const organizationAPI = {
     name: string;
     phone: string;
     email: string;
+    password: string;
     emergencyContact?: string;
     address?: string;
     totalEmployees?: number;

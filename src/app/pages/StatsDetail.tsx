@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { dashboardAPI, locationAPI, departmentAPI } from "../services/api";
+import { dashboardAPI, locationAPI, departmentAPI, attendanceAPI } from "../services/api";
 import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useAuth } from "../contexts/AuthContext";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -36,6 +38,8 @@ import {
   LogOut,
   UserCheck,
   AlertTriangle,
+  AlertCircle,
+  Loader2,
   RefreshCw,
   Search,
   MapPin,
@@ -73,6 +77,12 @@ export const StatsDetails: React.FC = () => {
   // Modal Dialog state
   const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Edit Attendance Modal state
+  const { user } = useAuth();
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<any | null>(null);
+  const [isSavingAttendance, setIsSavingAttendance] = useState(false);
 
   const selectedDate = searchParams.get("date") || new Date().toISOString().split("T")[0];
   const selectedLocation = searchParams.get("location") || localStorage.getItem("selectedLocation") || "ALL";
@@ -232,6 +242,71 @@ export const StatsDetails: React.FC = () => {
   const handleViewClick = (employee: any) => {
     setSelectedEmployee(employee);
     setDialogOpen(true);
+  };
+
+  const handleEditClick = (item: any) => {
+    let statusUpper = "PRESENT";
+    const st = (item.status || "").toLowerCase();
+    if (st === "present" || st === "working") statusUpper = "PRESENT";
+    else if (st === "tardy" || st === "late" || item.isLate) statusUpper = "TARDY";
+    else if (st === "absent") statusUpper = "ABSENT";
+    else if (st === "on_leave" || st === "leave") statusUpper = "LEAVE";
+    else if (st === "off_day" || st === "off") statusUpper = "OFF_DAY";
+
+    setEditingRecord({
+      id: item.attendanceId || null,
+      employeeId: item.id,
+      employeeName: item.name || "N/A",
+      empCode: item.empCode || item.employeeId || "",
+      date: selectedDate,
+      checkInTime: item.checkInTime || null,
+      checkOutTime: item.checkOutTime || null,
+      status: statusUpper,
+      totalWorkedMinutes: item.totalWorkedMinutes || 0,
+      totalBreakMinutes: item.totalBreakMinutes || 0,
+      overtimeHours: item.overtimeHours || 0,
+      overtimeMinutes: item.overtimeMinutes || 0,
+      punches: item.punches || [],
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!editingRecord) return;
+    if (user?.role === "USER" || user?.role === "employee") {
+      toast.error("You do not have permission to edit timesheets.");
+      return;
+    }
+
+    try {
+      setIsSavingAttendance(true);
+      const payload = {
+        employeeId: editingRecord.employeeId,
+        date: editingRecord.date,
+        checkInTime: editingRecord.checkInTime,
+        checkOutTime: editingRecord.checkOutTime,
+        status: editingRecord.status,
+      };
+
+      if (editingRecord.id) {
+        await attendanceAPI.updateAttendance(editingRecord.id, payload);
+      } else {
+        await attendanceAPI.createAttendance(payload);
+      }
+
+      toast.success("Attendance saved successfully");
+      setEditModalOpen(false);
+      fetchData(false);
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.message ||
+        err?.data?.message ||
+        err?.message ||
+        "Failed to save attendance"
+      );
+    } finally {
+      setIsSavingAttendance(false);
+    }
   };
 
   const formatTime = (isoString: string | null) => {
@@ -776,10 +851,10 @@ export const StatsDetails: React.FC = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 px-2 text-[11px] font-medium text-blue-600 hover:text-blue-700 border-blue-200 hover:bg-blue-50/60 rounded-md gap-1 shadow-2xs transition-colors"
+                                className="h-7 px-2 text-[11px] font-medium text-blue-600 hover:text-blue-700 border-blue-200 hover:bg-blue-50/60 rounded-md gap-1 shadow-2xs transition-colors cursor-pointer"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate("/attendance");
+                                  handleEditClick(item);
                                 }}
                               >
                                 <Pencil className="w-3 h-3 text-blue-500" />
@@ -909,6 +984,20 @@ export const StatsDetails: React.FC = () => {
                           );
                         }
                       })()}
+                      {isAttendanceCategory && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-2 text-[11px] font-medium text-blue-600 hover:text-blue-700 border-blue-200 hover:bg-blue-50/60 rounded-md gap-1 shadow-2xs transition-colors cursor-pointer"
+                          onClick={() => {
+                            setDialogOpen(false);
+                            handleEditClick(selectedEmployee);
+                          }}
+                        >
+                          <Pencil className="w-3 h-3 text-blue-500" />
+                          Edit
+                        </Button>
+                      )}
                     </div>
                     <DialogDescription className="text-xs text-gray-500 font-medium mt-1 flex items-center gap-2 flex-wrap">
                       <span className="inline-flex items-center gap-1">
@@ -1190,6 +1279,327 @@ export const StatsDetails: React.FC = () => {
                 </div>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Attendance Dialog ── */}
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6">
+          {editingRecord && (
+            <>
+              <DialogHeader className="border-b pb-3">
+                <DialogTitle className="text-xl font-bold flex items-center justify-between">
+                  <div>
+                    <span>Edit Attendance Record</span>
+                    <p className="text-xs text-gray-500 font-normal mt-0.5">
+                      {editingRecord.employeeName} {editingRecord.empCode ? `(${editingRecord.empCode})` : ""}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs font-semibold">
+                    {format(new Date(editingRecord.date), "MMM d, yyyy")}
+                  </Badge>
+                </DialogTitle>
+                {(user?.role === "USER" || user?.role === "employee") && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 mt-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>You do not have permission to edit timesheets.</span>
+                  </div>
+                )}
+              </DialogHeader>
+
+              <div className="space-y-4 mt-4">
+                {/* Check In */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Check In Time
+                  </label>
+                  <Input
+                    type="time"
+                    className="rounded-lg shadow-sm"
+                    value={
+                      editingRecord.checkInTime
+                        ? format(new Date(editingRecord.checkInTime), "HH:mm")
+                        : ""
+                    }
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setEditingRecord((prev: any) => ({
+                          ...prev,
+                          checkInTime: null,
+                          totalWorkedMinutes: 0,
+                        }));
+                        return;
+                      }
+                      const [hours, minutes] = e.target.value.split(":");
+                      const [y, m, d] = (editingRecord.date.slice(0, 10)).split("-").map(Number);
+                      const newDate = new Date(y, m - 1, d, Number(hours), Number(minutes), 0, 0);
+
+                      const inIso = newDate.toISOString();
+                      setEditingRecord((prev: any) => {
+                        let worked = 0;
+                        if (prev.checkOutTime) {
+                          const inT = newDate.getTime();
+                          const outT = new Date(prev.checkOutTime).getTime();
+                          if (outT > inT) {
+                            worked = Math.max(
+                              0,
+                              Math.floor((outT - inT) / 60000) - (prev.totalBreakMinutes || 0)
+                            );
+                          }
+                        }
+                        return {
+                          ...prev,
+                          checkInTime: inIso,
+                          totalWorkedMinutes: worked,
+                        };
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Check Out */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Check Out Time
+                  </label>
+                  <Input
+                    type="time"
+                    className="rounded-lg shadow-sm"
+                    value={
+                      editingRecord.checkOutTime
+                        ? format(new Date(editingRecord.checkOutTime), "HH:mm")
+                        : ""
+                    }
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setEditingRecord((prev: any) => ({
+                          ...prev,
+                          checkOutTime: null,
+                          totalWorkedMinutes: 0,
+                        }));
+                        return;
+                      }
+                      const [hours, minutes] = e.target.value.split(":");
+                      const [y, m, d] = (editingRecord.date.slice(0, 10)).split("-").map(Number);
+                      const newDate = new Date(y, m - 1, d, Number(hours), Number(minutes), 0, 0);
+
+                      const outIso = newDate.toISOString();
+                      setEditingRecord((prev: any) => {
+                        let worked = 0;
+                        if (prev.checkInTime) {
+                          const inT = new Date(prev.checkInTime).getTime();
+                          const outT = newDate.getTime();
+                          if (outT > inT) {
+                            worked = Math.max(
+                              0,
+                              Math.floor((outT - inT) / 60000) - (prev.totalBreakMinutes || 0)
+                            );
+                          }
+                        }
+                        return {
+                          ...prev,
+                          checkOutTime: outIso,
+                          totalWorkedMinutes: worked,
+                        };
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Hours Breakdown */}
+                {(() => {
+                  const otHours = Number(editingRecord.overtimeHours) || 0;
+                  const otMins = editingRecord.overtimeMinutes
+                    ? Number(editingRecord.overtimeMinutes)
+                    : Math.round(otHours * 60);
+                  return (
+                    <div
+                      className={`grid ${
+                        otMins > 0 ? "grid-cols-3" : "grid-cols-2"
+                      } gap-3 bg-gray-50 dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200/80 dark:border-gray-800`}
+                    >
+                      <div>
+                        <span className="text-xs text-gray-500 font-medium block">Total Worked</span>
+                        <span className="text-base font-extrabold text-gray-900 dark:text-gray-100">
+                          {formatMinutes(editingRecord.totalWorkedMinutes)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-500 font-medium block">Break Time</span>
+                        <span className="text-base font-extrabold text-gray-900 dark:text-gray-100">
+                          {formatMinutes(editingRecord.totalBreakMinutes)}
+                        </span>
+                      </div>
+                      {otMins > 0 && (
+                        <div>
+                          <span className="text-xs text-purple-600 dark:text-purple-400 font-semibold block">
+                            Overtime
+                          </span>
+                          <span className="text-base font-extrabold text-purple-700 dark:text-purple-300">
+                            {formatMinutes(otMins)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Status Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Attendance Status
+                  </label>
+                  <Select
+                    value={editingRecord.status}
+                    onValueChange={(statusVal) => {
+                      setEditingRecord((prev: any) => {
+                        let cIn = prev.checkInTime;
+                        let cOut = prev.checkOutTime;
+                        let worked = prev.totalWorkedMinutes || 0;
+
+                        if (
+                          statusVal === "ABSENT" ||
+                          statusVal === "OFF_DAY" ||
+                          statusVal === "OFF" ||
+                          statusVal === "LEAVE"
+                        ) {
+                          cIn = null;
+                          cOut = null;
+                          worked = 0;
+                        }
+
+                        return {
+                          ...prev,
+                          status: statusVal,
+                          checkInTime: cIn,
+                          checkOutTime: cOut,
+                          totalWorkedMinutes: worked,
+                        };
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="rounded-lg shadow-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="PRESENT">Present</SelectItem>
+                      <SelectItem value="TARDY">Tardy</SelectItem>
+                      <SelectItem value="ABSENT">Absent</SelectItem>
+                      <SelectItem value="LEAVE">Leave</SelectItem>
+                      <SelectItem value="OFF_DAY">Off Day</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  disabled={user?.role === "USER" || user?.role === "employee" || isSavingAttendance}
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-md transition-all mt-2 cursor-pointer flex items-center justify-center gap-2"
+                  onClick={handleSaveAttendance}
+                >
+                  {isSavingAttendance ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
+                </Button>
+
+                {/* Daily Attendance Punches */}
+                {(() => {
+                  const displayPunches = editingRecord.punches || [];
+                  return (
+                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Punch Logs ({displayPunches.length})</span>
+                        </h4>
+                        <span className="text-[11px] text-gray-400 font-mono">
+                          Real-time Device Logs
+                        </span>
+                      </div>
+
+                      {displayPunches.length > 0 ? (
+                        <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
+                          <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-52 overflow-y-auto">
+                            {displayPunches.map((punch: any, idx: number) => {
+                              const isCheckIn = punch.type === "CHECK_IN";
+                              const isCheckOut = punch.type === "CHECK_OUT";
+
+                              return (
+                                <div
+                                  key={punch.id || idx}
+                                  className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
+                                >
+                                  {/* Punch # and Direction */}
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                      #{idx + 1}
+                                    </span>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Badge
+                                          variant="outline"
+                                          className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
+                                            isCheckIn
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300"
+                                              : isCheckOut
+                                              ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300"
+                                              : "bg-gray-50 text-gray-700 border-gray-300"
+                                          }`}
+                                        >
+                                          {isCheckIn ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowDownRight className="w-3 h-3 text-emerald-600" />
+                                              IN
+                                            </span>
+                                          ) : isCheckOut ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowUpRight className="w-3 h-3 text-blue-600" />
+                                              OUT
+                                            </span>
+                                          ) : (
+                                            punch.type
+                                          )}
+                                        </Badge>
+                                        <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                          {punch.device || "Biometric Terminal"}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+                                        <span className="capitalize">{punch.method || "Biometric"}</span>
+                                        {punch.ip && <span>• IP: {punch.ip}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Timestamp */}
+                                  <div className="text-right shrink-0">
+                                    <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-mono">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-400 text-xs italic py-4 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+                          No raw biometric punches recorded for this date.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </>
           )}
         </DialogContent>
       </Dialog>

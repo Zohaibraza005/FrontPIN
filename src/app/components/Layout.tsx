@@ -82,7 +82,15 @@ const menuSections = [
     title: 'OVERVIEW',
     items: [
       { icon: LayoutGrid, label: 'Dashboard', path: '/', roles: ['ADMIN', 'SUPERVISOR', 'USER'] },
-      { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
+    ]
+  },
+   {
+    title: 'TIME & ATTENDANCE',
+    items: [
+      { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
+      { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
+      { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
+      { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
     ]
   },
   {
@@ -111,15 +119,7 @@ const menuSections = [
       },
     ]
   },
-  {
-    title: 'TIME & ATTENDANCE',
-    items: [
-      { icon: Clock, label: 'Attendance', path: '/attendance', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'ATTENDANCE' },
-      { icon: Calendar, label: 'Schedule', path: '/schedule', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'SCHEDULE' },
-      { icon: Umbrella, label: 'Leave', path: '/leave', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'LEAVE' },
-      { icon: Timer, label: 'Overtime', path: '/overtime', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'OVERTIME' },
-    ]
-  },
+ 
   {
     title: 'FINANCE',
     items: [
@@ -129,6 +129,7 @@ const menuSections = [
   {
     title: 'COMPANY',
     items: [
+      { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['ADMIN', 'SUPERVISOR', 'USER'], module: 'REPORT' },
       {
         icon: Cog,
         label: 'Organization',
@@ -139,6 +140,7 @@ const menuSections = [
           { label: 'Departments', path: '/departments' },
           { label: 'Locations', path: '/locations' },
           { label: 'Entities', path: '/entities' },
+
         ]
       },
     ]

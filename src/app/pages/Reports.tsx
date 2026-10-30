@@ -9,6 +9,7 @@ import {
   endOfYear,
   eachDayOfInterval,
   isAfter,
+  parseISO,
   startOfDay,
 } from "date-fns";
 import {
@@ -119,8 +120,8 @@ export const Reports: React.FC = () => {
       return { start, end, view: "yearly" };
     }
     if (dateRange === "custom" && startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = parseISO(startDate);
+      const end = parseISO(endDate);
       return { start, end, view: "custom" };
     }
     // Default or "all"

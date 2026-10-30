@@ -467,9 +467,6 @@ const getWeeklyTimesheet = async (req, res) => {
     const weekStart = refDate.startOf('week');     // Luxon → Monday by default
     const weekEnd   = refDate.endOf('week');
 
-    const weekStartUTC = weekStart.toJSDate();
-    const weekEndUTC   = weekEnd.toJSDate();
-
     // ── 4. Location / company filter ──
     let companyWhere = {};
     const location = req.query.location;
@@ -506,102 +503,186 @@ const getWeeklyTimesheet = async (req, res) => {
       where: {
         organizationId,
         deletedAt: null,
+        NOT: { role: "ADMIN" },
         ...companyWhere,
         ...supervisorFilter,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        company: {
+          select: { timezone: true },
+        },
+      },
     });
-
 
     const employeeIds = employees.map(e => e.id);
 
     if (employeeIds.length === 0) {
+      const emptyData = [];
+      for (let i = 0; i < 7; i++) {
+        const d = weekStart.plus({ days: i });
+        emptyData.push({
+          day: d.toFormat('EEE'),
+          date: d.toISODate(),
+          workingHours: 0,
+          breakHours: 0,
+          overtimeHours: 0,
+        });
+      }
       return res.json({
+        success: true,
         weekStart: weekStart.toISODate(),
         weekEnd: weekEnd.toISODate(),
         timezone: tz,
-        data: [],
+        location: location || "ALL",
+        data: emptyData,
         message: "No employees found for this filter",
       });
     }
 
-    // ── A. Activity-based breakdown (most accurate) ──
-    const activities = await prisma.activityLog.groupBy({
-      by: ['type'],
-      where: {
-        employeeId: { in: employeeIds },
-        startTime: { gte: weekStartUTC, lte: weekEndUTC },
-      },
-      _sum: { durationMinutes: true },
-    });
+    // Extended search boundary to cover UTC / timezone day offsets safely
+    const searchStartUTC = weekStart.minus({ days: 1 }).toJSDate();
+    const searchEndUTC = weekEnd.plus({ days: 1 }).toJSDate();
 
-    // ── B. Approved overtime ──
-    const ot = await prisma.overtime.groupBy({
-      by: ['date'],
-      where: {
-        employeeId: { in: employeeIds },
-        status: "APPROVED",
-        date: { gte: weekStartUTC, lte: weekEndUTC },
-      },
-      _sum: { hours: true },
-    });
+    // Query Attendances, Activities, and approved Overtimes concurrently
+    const [attendances, activities, overtimes] = await Promise.all([
+      prisma.attendance.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          OR: [
+            { date: { gte: searchStartUTC, lte: searchEndUTC } },
+            { checkInTime: { gte: searchStartUTC, lte: searchEndUTC } },
+          ],
+        },
+        include: {
+          punches: {
+            orderBy: { punchTime: "asc" },
+          },
+        },
+      }),
+      prisma.activityLog.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          startTime: { gte: searchStartUTC, lte: searchEndUTC },
+        },
+        select: {
+          employeeId: true,
+          type: true,
+          startTime: true,
+          durationMinutes: true,
+        },
+      }),
+      prisma.overtime.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          status: "APPROVED",
+          date: { gte: searchStartUTC, lte: searchEndUTC },
+        },
+        select: {
+          employeeId: true,
+          date: true,
+          hours: true,
+        },
+      }),
+    ]);
 
-    // ── C. Attendance fallback (if needed) ──
-    const attendanceSummary = await prisma.attendance.groupBy({
-      by: ['date'],
-      where: {
-        employeeId: { in: employeeIds },
-        date: { gte: weekStartUTC, lte: weekEndUTC },
-      },
-      _sum: {
-        totalWorkedMinutes: true,
-        totalBreakMinutes: true,
-      },
-    });
-
-    // ── Build 7-day array ──
+    const todayStr = DateTime.now().setZone(tz).toFormat("yyyy-MM-dd");
     const data = [];
+
     for (let i = 0; i < 7; i++) {
       const day = weekStart.plus({ days: i });
-      const dayUTC = day.toJSDate();
+      const targetDateStr = day.toFormat("yyyy-MM-dd");
       const dayName = day.toFormat('EEE'); // Mon, Tue, ...
 
-      // Find matching records
-      const dayActivities = activities.filter(a => {
-        // You may need to group activities by date first if you want per-day precision
-        // For simplicity we sum whole week here → adjust if needed
-        return true; // ← improve later
+      // Match Attendances belonging to this day in employee's timezone
+      const dayAttendances = attendances.filter((att) => {
+        const emp = employees.find((e) => e.id === att.employeeId);
+        const empTz = emp?.company?.timezone || tz;
+        let attDateStr = null;
+        if (att.date) {
+          attDateStr = moment(att.date).tz(empTz).format("YYYY-MM-DD");
+        } else if (att.checkInTime) {
+          attDateStr = moment(att.checkInTime).tz(empTz).format("YYYY-MM-DD");
+        }
+        return attDateStr === targetDateStr;
       });
 
-      // Better: query per day if volume is high
-      const dayWorkingMin = await prisma.activityLog.aggregate({
-        where: {
-          employeeId: { in: employeeIds },
-          type: { not: "BREAK" },
-          startTime: { gte: dayUTC, lt: day.plus({ days: 1 }).toJSDate() },
-        },
-        _sum: { durationMinutes: true },
-      });
+      let totalDayWorkedMinutes = 0;
+      let totalDayBreakMinutes = 0;
+      let totalDayOvertimeMinutes = 0;
 
-      const dayBreakMin = await prisma.activityLog.aggregate({
-        where: {
-          employeeId: { in: employeeIds },
-          type: "BREAK",
-          startTime: { gte: dayUTC, lt: day.plus({ days: 1 }).toJSDate() },
-        },
-        _sum: { durationMinutes: true },
-      });
+      for (const att of dayAttendances) {
+        let workedMins = att.totalWorkedMinutes ?? 0;
+        let effectiveCheckIn = att.checkInTime;
+        let effectiveCheckOut = att.checkOutTime;
 
-      const dayOvertime = ot.find(o => 
-        DateTime.fromJSDate(o.date).toISODate() === day.toISODate()
-      )?._sum?.hours || 0;
+        if (!effectiveCheckIn && att.punches?.length > 0) {
+          const firstIn = att.punches.find((p) => p.type === "CHECK_IN");
+          if (firstIn) effectiveCheckIn = firstIn.punchTime;
+        }
+        if (!effectiveCheckOut && att.punches?.length > 0) {
+          const lastOut = [...att.punches].reverse().find((p) => p.type === "CHECK_OUT");
+          if (lastOut) effectiveCheckOut = lastOut.punchTime;
+        }
+
+        if (effectiveCheckIn && effectiveCheckOut && (!workedMins || workedMins === 0)) {
+          const inMs = new Date(effectiveCheckIn).getTime();
+          const outMs = new Date(effectiveCheckOut).getTime();
+          if (outMs > inMs) {
+            workedMins = Math.max(0, Math.floor((outMs - inMs) / 60000) - (att.totalBreakMinutes || 0));
+          }
+        } else if (effectiveCheckIn && !effectiveCheckOut && targetDateStr === todayStr) {
+          // Real-time live attendance tracking for currently on-shift employees
+          const inMs = new Date(effectiveCheckIn).getTime();
+          const nowMs = Date.now();
+          if (nowMs > inMs) {
+            workedMins = Math.max(0, Math.floor((nowMs - inMs) / 60000) - (att.totalBreakMinutes || 0));
+          }
+        }
+
+        // Cap worked minutes per employee shift to 15 hours (900 mins) to prevent anomalous timestamps
+        workedMins = Math.min(900, Math.max(0, workedMins));
+
+        totalDayWorkedMinutes += workedMins;
+        totalDayBreakMinutes += att.totalBreakMinutes || 0;
+
+        const attOtMins = att.overtimeMinutes
+          ? Number(att.overtimeMinutes)
+          : att.overtimeHours
+          ? Math.round(Number(att.overtimeHours) * 60)
+          : 0;
+        totalDayOvertimeMinutes += Math.max(0, attOtMins);
+      }
+
+      // Check desktop activities if tracked
+      const dayActivities = activities.filter((a) => {
+        if (!a.startTime) return false;
+        return moment(a.startTime).tz(tz).format("YYYY-MM-DD") === targetDateStr;
+      });
+      const actWorkingMins = dayActivities
+        .filter((a) => a.type !== "BREAK")
+        .reduce((sum, a) => sum + (Number(a.durationMinutes) || 0), 0);
+      const actBreakMins = dayActivities
+        .filter((a) => a.type === "BREAK")
+        .reduce((sum, a) => sum + (Number(a.durationMinutes) || 0), 0);
+
+      const finalWorkedMinutes = Math.max(totalDayWorkedMinutes, actWorkingMins);
+      const finalBreakMinutes = Math.max(totalDayBreakMinutes, actBreakMins);
+
+      // Approved overtime from Overtime table for this date
+      const dayApprovedOts = overtimes.filter((o) => {
+        if (!o.date) return false;
+        return moment(o.date).tz(tz).format("YYYY-MM-DD") === targetDateStr;
+      });
+      const extraOtHours = dayApprovedOts.reduce((sum, o) => sum + (Number(o.hours) || 0), 0);
+      const totalOtHours = (totalDayOvertimeMinutes / 60) + extraOtHours;
 
       data.push({
         day: dayName,
-        date: day.toISODate(),
-        workingHours:  Number((dayWorkingMin._sum.durationMinutes || 0) / 60).toFixed(2),
-        breakHours:    Number((dayBreakMin._sum.durationMinutes   || 0) / 60).toFixed(2),
-        overtimeHours: Number(dayOvertime).toFixed(2),
+        date: targetDateStr,
+        workingHours: parseFloat((finalWorkedMinutes / 60).toFixed(1)),
+        breakHours: parseFloat((finalBreakMinutes / 60).toFixed(1)),
+        overtimeHours: parseFloat(totalOtHours.toFixed(1)),
       });
     }
 

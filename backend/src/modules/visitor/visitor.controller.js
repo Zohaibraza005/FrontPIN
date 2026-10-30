@@ -86,8 +86,8 @@ exports.getVisitors = async (req, res) => {
       vObj.punches = punches;
 
       if (punches.length > 0) {
-        const inPunches = punches.filter((p) => p.punchType === "CHECK_IN");
-        const outPunches = punches.filter((p) => p.punchType === "CHECK_OUT");
+        const inPunches = punches.filter((p) => p.punchType === "CHECK_IN" || p.punchType === "CHECKED_IN");
+        const outPunches = punches.filter((p) => p.punchType === "CHECK_OUT" || p.punchType === "CHECKED_OUT");
 
         const firstIn = inPunches.length > 0 ? inPunches[0] : punches[0];
         const lastOut = outPunches.length > 0 ? outPunches[outPunches.length - 1] : null;
@@ -97,7 +97,7 @@ exports.getVisitors = async (req, res) => {
 
         // If last punch of the day was CHECK_OUT, status is CHECKED_OUT
         const latestPunch = punches[punches.length - 1];
-        if (latestPunch.punchType === "CHECK_OUT") {
+        if (latestPunch.punchType === "CHECK_OUT" || latestPunch.punchType === "CHECKED_OUT") {
           vObj.status = "CHECKED_OUT";
         } else {
           vObj.status = "CHECKED_IN";
@@ -167,7 +167,7 @@ exports.getVisitorStats = async (req, res) => {
     for (const [vId, punches] of Object.entries(punchesByVisitor)) {
       if (punches && punches.length > 0) {
         const latest = punches[punches.length - 1];
-        if (latest.punchType === "CHECK_OUT") {
+        if (latest.punchType === "CHECK_OUT" || latest.punchType === "CHECKED_OUT") {
           checkedOutCount++;
         } else {
           checkedInCount++;
@@ -214,16 +214,21 @@ exports.getVisitorStats = async (req, res) => {
 exports.getVisitorLogs = async (req, res) => {
   try {
     const orgId = req.user.orgId || req.user.organizationId;
-    const { date, visitorId, limit } = req.query;
+    const { date, visitorId, limit, last24Hours } = req.query;
 
     const timezone = "Asia/Karachi";
     const dateStr = date ? moment(date).tz(timezone).format("YYYY-MM-DD") : null;
+    const isLast24Hours =
+      last24Hours === "true" ||
+      last24Hours === true ||
+      (visitorId && !date && last24Hours !== "false");
 
     const logs = await visitorLogService.getVisitorLogs({
       organizationId: orgId,
       date: dateStr,
       visitorId: visitorId ? parseInt(visitorId) : null,
       limit: limit ? parseInt(limit) : 200,
+      last24Hours: isLast24Hours,
     });
 
     res.json({ success: true, data: logs });

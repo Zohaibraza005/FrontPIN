@@ -62,6 +62,8 @@ export const Register: React.FC = () => {
     if (!form.name.trim()) return "Organization name is required";
     if (!form.email.trim()) return "Email is required";
     if (!form.phone.trim()) return "Phone number is required";
+    if (form.password.length < 6) return "Password must be at least 6 characters";
+    if (form.password !== form.confirmPassword) return "Passwords do not match";
     
     return "";
   };
@@ -82,6 +84,7 @@ export const Register: React.FC = () => {
         name: form.name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
+        password: form.password,
         emergencyContact: form.emergencyContact.trim() || undefined,
         address: form.address.trim() || undefined,
         totalEmployees: form.totalEmployees ? Number(form.totalEmployees) : undefined,
@@ -90,15 +93,10 @@ export const Register: React.FC = () => {
       });
 
 
-      toast.success("Organization registered successfully!");
-      alert(
-        "Your organization has been registered.\n\n" +
-        "After verification, login credentials will be sent to your email."
-      );
-
+      toast.success("Organization created. Sign in with your email and password.");
       navigate("/login");
     } catch (err: any) {
-      const msg = err.response?.data?.message || "Registration failed. Please try again.";
+      const msg = err.data?.message || err.message || "Registration failed. Please try again.";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -167,6 +165,40 @@ export const Register: React.FC = () => {
                 value={form.email}
                 onChange={(e) => handleChange("email", e.target.value)}
                 placeholder="admin@yourcompany.com"
+                className="h-11"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Admin Password *</Label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={form.password}
+                  onChange={(e) => handleChange("password", e.target.value)}
+                  placeholder="At least 6 characters"
+                  autoComplete="new-password"
+                  className="h-11 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Confirm Password *</Label>
+              <Input
+                type="password"
+                value={form.confirmPassword}
+                onChange={(e) => handleChange("confirmPassword", e.target.value)}
+                placeholder="Re-enter your password"
+                autoComplete="new-password"
                 className="h-11"
               />
             </div>

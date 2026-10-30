@@ -24,7 +24,7 @@ function getDateRange(filter, startDate, endDate) {
       break;
     case "custom":
       start = moment(startDate);
-      end = moment(endDate);
+      end = moment(endDate).endOf("day");
       break;
     default:
       start = moment("2000-01-01");

@@ -969,64 +969,125 @@ exports.registerOrganization = async (req, res) => {
       name,
       phone,
       email,
+      password,
       emergencyContact,
       address,
       totalEmployees,
       category,
-      
+      timeZone,
     } = req.body;
 
-    // 🔹 Basic Validation
-    if (!name || !email || !phone) {
+    const organizationName = typeof name === "string" ? name.trim() : "";
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    const phoneNumber = typeof phone === "string" ? phone.trim() : "";
+    const cleanPassword = typeof password === "string" ? password : "";
+    const employeeCount = totalEmployees === undefined || totalEmployees === ""
+      ? null
+      : Number(totalEmployees);
+
+    if (!organizationName || !phoneNumber || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({
-        message: "Name, email and phone are required",
+        success: false,
+        message: "A valid organization name, email and phone are required.",
       });
     }
 
-    // 🔹 Check if email already used
-    const existingOrg = await prisma.organization.findFirst({
-      where: {
-        email: email,
-        deletedAt: null,
-      },
-    });
-
-    if (existingOrg) {
+    if (cleanPassword.length < 6) {
       return res.status(400).json({
-        message: "Organization with this email already exists",
+        success: false,
+        message: "Password must be at least 6 characters.",
       });
     }
 
-    // 🔹 Create Organization
-    const organization = await prisma.organization.create({
-      data: {
-        name,
-        phone,
-        email,
-        emergencyContact,
-        address,
-        totalEmployees: totalEmployees
-          ? Number(totalEmployees)
-          : null,
-        category,
-        subscriptionPackage: "BASIC", // default plan
-        status: "PENDING", // waiting for admin approval
-      },
+    if (employeeCount !== null && (!Number.isInteger(employeeCount) || employeeCount < 1)) {
+      return res.status(400).json({
+        success: false,
+        message: "Total employees must be a positive whole number.",
+      });
+    }
+
+    const [existingOrg, existingEmployee] = await Promise.all([
+      prisma.organization.findFirst({
+        where: {
+          email: normalizedEmail,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+      prisma.employee.findFirst({
+        where: {
+          OR: [
+            { email: normalizedEmail },
+            { username: normalizedEmail },
+          ],
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    if (existingOrg || existingEmployee) {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this email already exists.",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(cleanPassword, 10);
+    const created = await prisma.$transaction(async (transaction) => {
+      const organization = await transaction.organization.create({
+        data: {
+          name: organizationName,
+          phone: phoneNumber,
+          email: normalizedEmail,
+          emergencyContact: typeof emergencyContact === "string" ? emergencyContact.trim() || null : null,
+          address: typeof address === "string" ? address.trim() || null : null,
+          totalEmployees: employeeCount,
+          category: typeof category === "string" ? category.trim() || null : null,
+          orgTimeZone: typeof timeZone === "string" ? timeZone.trim() || null : null,
+        },
+      });
+
+      const company = await transaction.company.create({
+        data: {
+          name: "Head Office",
+          address: typeof address === "string" ? address.trim() || null : null,
+          timezone: typeof timeZone === "string" ? timeZone.trim() || null : null,
+          organizationId: organization.id,
+        },
+      });
+
+      const admin = await transaction.employee.create({
+        data: {
+          firstName: organizationName,
+          lastName: "Admin",
+          username: normalizedEmail,
+          email: normalizedEmail,
+          password: passwordHash,
+          role: "ADMIN",
+          canLogin: true,
+          organizationId: organization.id,
+          companyId: company.id,
+        },
+        select: { id: true, email: true },
+      });
+
+      return { organization, admin };
     });
 
     return res.status(201).json({
-      message:
-        "Organization registered successfully. After verification, credentials will be sent via email.",
+      success: true,
+      message: "Organization and admin account created. You can now sign in with your email and password.",
       data: {
-        id: organization.id,
-        name: organization.name,
-        status: organization.status,
+        id: created.organization.id,
+        name: created.organization.name,
+        email: created.admin.email,
       },
     });
-
   } catch (error) {
     console.error("Register Organization Error:", error);
     return res.status(500).json({
+      success: false,
       message: "Failed to register organization",
     });
   }
@@ -1488,5 +1549,4 @@ exports.getNextBiometricId = async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching next biometric ID" });
   }
 };
-
 

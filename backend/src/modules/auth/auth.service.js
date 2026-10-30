@@ -16,17 +16,18 @@ function isEmail(str) {
 }
 
 async function login({ identifier, password }) {
+  const cleanIdentifier = identifier.trim();
 
   // 🔥 Flexible identifier search
   const user = await prisma.employee.findFirst({
     where: {
       deletedAt: null,
       OR: [
-        { email: identifier },
-        { username: identifier },
-        ...(isNaN(identifier) ? [] : [
-          { phoneNumber: identifier },
-          { nationalId: identifier },
+        { email: cleanIdentifier.toLowerCase() },
+        { username: cleanIdentifier.toLowerCase() },
+        ...(isNaN(cleanIdentifier) ? [] : [
+          { phoneNumber: cleanIdentifier },
+          { nationalId: cleanIdentifier },
         ]),
       ]
     },
@@ -243,4 +244,3 @@ async function getMe(userId) {
 }
 
 module.exports = { login, checkIdentifier, getMe };
-

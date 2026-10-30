@@ -338,9 +338,15 @@ export const Visitors: React.FC = () => {
   const fetchVisitorHistory = async (visitorId: number) => {
     try {
       setLoadingSelectedVisitorLogs(true);
-      const res = await visitorAPI.getVisitorLogs({ visitorId });
+      const res = await visitorAPI.getVisitorLogs({ visitorId, last24Hours: true });
       if (res && res.success) {
-        setSelectedVisitorLogs(res.data || []);
+        // Enforce strict last 24 hours filter
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const last24hLogs = (res.data || []).filter((log: any) => {
+          const t = new Date(log.punchTime).getTime();
+          return isNaN(t) || t >= cutoff;
+        });
+        setSelectedVisitorLogs(last24hLogs);
       }
     } catch (e) {
       setSelectedVisitorLogs([]);
@@ -1654,53 +1660,74 @@ export const Visitors: React.FC = () => {
                 </div>
               )}
 
-              {/* Real-Time Visitor Biometric Punch History */}
+              {/* Real-Time Visitor Biometric Punch History (Last 24 Hours) */}
               <div className="bg-gray-50/80 p-3 rounded-xl border border-gray-100 col-span-2">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-gray-700 font-semibold text-xs flex items-center gap-1.5">
                     <Clock className="size-3.5 text-blue-600" />
                     Real-Time Biometric Punch Logs ({selectedVisitorLogs.length})
                   </span>
-                  {selectedVisitorLogs.length > 0 && (
-                    <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-                      Live Machine Logs
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                      Last 24 Hours
+                    </span>
+                    {selectedVisitorLogs.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                        Live Machine Logs
+                      </Badge>
+                    )}
+                  </div>
                 </div>
 
                 {loadingSelectedVisitorLogs ? (
                   <div className="py-3 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
                     <Loader2 className="size-3.5 animate-spin text-blue-600" />
-                    <span>Loading punch history...</span>
+                    <span>Loading last 24h punches...</span>
                   </div>
                 ) : selectedVisitorLogs.length === 0 ? (
-                  <p className="text-xs text-gray-400 py-1 italic">
-                    No biometric machine punches recorded yet for this visitor.
+                  <p className="text-xs text-gray-400 py-2 italic text-center">
+                    No biometric machine punches recorded in the last 24 hours.
                   </p>
                 ) : (
                   <div className="max-h-44 overflow-y-auto divide-y divide-gray-100 border border-gray-100 rounded-xl bg-white shadow-2xs">
-                    {selectedVisitorLogs.map((log: any) => (
-                      <div key={log.id} className="p-2.5 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`size-2 rounded-full ${
-                              log.punchType === 'CHECK_IN' ? 'bg-emerald-500' : 'bg-slate-400'
-                            }`}
-                          />
-                          <div>
-                            <span className="font-semibold text-gray-800">
-                              {log.punchType === 'CHECK_IN' ? 'Check In' : 'Check Out'}
-                            </span>
-                            <span className="text-[10px] text-gray-500 ml-2 font-mono">
-                              {formatDateTime(log.punchTime)}
-                            </span>
+                    {selectedVisitorLogs.map((log: any) => {
+                      const devName = (log.device || '').toLowerCase();
+                      const isCheckIn =
+                        /\b(gate[\s_-]*(pass|1|01))\b/i.test(devName) ||
+                        devName.includes('gate pass') ||
+                        devName.includes('gate 1') ||
+                        log.punchType === 'CHECK_IN' ||
+                        log.punchType === 'CHECKED_IN';
+
+                      return (
+                        <div key={log.id} className="p-2.5 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`size-2 rounded-full ring-2 ${
+                                isCheckIn ? 'bg-emerald-500 ring-emerald-100' : 'bg-rose-500 ring-rose-100'
+                              }`}
+                            />
+                            <div>
+                              <span className={`font-semibold ${isCheckIn ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {isCheckIn ? 'Check In' : 'Check Out'}
+                              </span>
+                              <span className="text-[10px] text-gray-500 ml-2 font-mono">
+                                {formatDateTime(log.punchTime)}
+                              </span>
+                            </div>
                           </div>
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-lg border ${
+                              isCheckIn
+                                ? 'bg-emerald-50/60 text-emerald-800 border-emerald-200'
+                                : 'bg-rose-50/60 text-rose-800 border-rose-200'
+                            }`}
+                          >
+                            {log.device || (isCheckIn ? 'Gate 1 / Gate Pass' : 'Gate 2 / Gate 3')}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-medium text-gray-600 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-lg">
-                          {log.device || 'Gate Terminal'}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2622,15 +2649,24 @@ export const Visitors: React.FC = () => {
                             {log.badgeNumber || '—'}
                           </TableCell>
                           <TableCell>
-                            {log.punchType === 'CHECK_IN' ? (
-                              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-semibold">
-                                Check In
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-700 border-slate-200 text-[11px] font-semibold">
-                                Check Out
-                              </Badge>
-                            )}
+                            {(() => {
+                              const dev = (log.device || '').toLowerCase();
+                              const isCheckIn =
+                                /\b(gate[\s_-]*(pass|1|01))\b/i.test(dev) ||
+                                dev.includes('gate pass') ||
+                                dev.includes('gate 1') ||
+                                log.punchType === 'CHECK_IN' ||
+                                log.punchType === 'CHECKED_IN';
+                              return isCheckIn ? (
+                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-semibold">
+                                  Check In
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-rose-50 text-rose-700 border-rose-200 text-[11px] font-semibold">
+                                  Check Out
+                                </Badge>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="text-gray-600 font-medium">
                             {log.device || 'Gate'}
