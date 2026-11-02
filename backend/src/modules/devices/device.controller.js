@@ -76,8 +76,10 @@ function isOffDay(schedules, date, timezone = null) {
 /**
  * Helper to match a visitor by Badge Number, ID, Phone, National ID, or Full Name
  */
-async function findVisitor(biometricId, employeeName) {
+async function findVisitor(biometricId, employeeName, organizationId = null) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
+  const orgFilter = organizationId ? { organizationId } : {};
+
   if (bioIdStr) {
     try {
       const orConditions = [
@@ -103,6 +105,7 @@ async function findVisitor(biometricId, employeeName) {
       const visitor = await prisma.visitor.findFirst({
         where: {
           deletedAt: null,
+          ...orgFilter,
           OR: orConditions,
         },
         include: { company: true },
@@ -118,6 +121,7 @@ async function findVisitor(biometricId, employeeName) {
       let visitor = await prisma.visitor.findFirst({
         where: {
           deletedAt: null,
+          ...orgFilter,
           fullName: { equals: cleanName },
         },
         include: { company: true },
@@ -128,6 +132,7 @@ async function findVisitor(biometricId, employeeName) {
         visitor = await prisma.visitor.findFirst({
           where: {
             deletedAt: null,
+            ...orgFilter,
             OR: [
               { fullName: { contains: "Jaffar Raza" } },
               { fullName: { contains: "Jaffer Raza" } },
@@ -156,7 +161,7 @@ async function findVisitor(biometricId, employeeName) {
 /**
  * Helper to match an employee by Biometric ID, Employee ID, or Machine Name
  */
-async function findEmployee(biometricId, employeeName) {
+async function findEmployee(biometricId, employeeName, organizationId = null) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
 
   // Permanently removed biometric IDs should never match or restore
@@ -167,16 +172,18 @@ async function findEmployee(biometricId, employeeName) {
   }
 
   // 0. If this punch belongs to a visitor, NEVER treat it as an employee
-  const isVis = await findVisitor(biometricId, employeeName);
+  const isVis = await findVisitor(biometricId, employeeName, organizationId);
   if (isVis) {
     return null;
   }
+
+  const orgCondition = organizationId ? { organizationId } : { organizationId: { not: 1 } };
 
   // 1. Primary match by biometricId or employeeId
   if (bioIdStr) {
     const employee = await prisma.employee.findFirst({
       where: {
-        organizationId: { not: 1 },
+        ...orgCondition,
         OR: [
           { biometricId: bioIdStr },
           { employeeId: bioIdStr },
@@ -196,7 +203,7 @@ async function findEmployee(biometricId, employeeName) {
   if (employeeName && employeeName.trim()) {
     const cleanName = employeeName.trim().toLowerCase();
     const candidates = await prisma.employee.findMany({
-      where: { organizationId: { not: 1 }, deletedAt: null },
+      where: { ...orgCondition, deletedAt: null },
       include: {
         company: true,
         Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
@@ -239,7 +246,7 @@ async function findEmployee(biometricId, employeeName) {
   try {
     const deletedCandidates = await prisma.employee.findMany({
       where: {
-        organizationId: { not: 1 },
+        ...orgCondition,
         deletedAt: { not: null },
         OR: [
           bioIdStr ? { biometricId: bioIdStr } : null,
@@ -287,12 +294,15 @@ async function findEmployee(biometricId, employeeName) {
   if (bioIdStr) {
     try {
       // Double check it's not a visitor or visitor badge number (e.g. 90xxx)
-      const visitorCheck = await findVisitor(bioIdStr, employeeName);
+      const visitorCheck = await findVisitor(bioIdStr, employeeName, organizationId);
       if (visitorCheck || bioIdStr.startsWith("90")) {
         return null;
       }
       const existingBio = await prisma.employee.findFirst({
-        where: { biometricId: bioIdStr },
+        where: {
+          biometricId: bioIdStr,
+          ...orgCondition,
+        },
         include: {
           company: true,
           Schedule: { where: { deletedAt: null }, orderBy: { id: "desc" } },
@@ -324,10 +334,18 @@ async function findEmployee(biometricId, employeeName) {
       const username = `emp_${bioIdStr}_${uniqueSuffix}`;
       const email = `emp_${bioIdStr}_${uniqueSuffix}@frontpin.local`;
 
-      const firstComp = await prisma.company.findFirst({
-        where: { deletedAt: null },
-      });
-      const orgId = firstComp?.organizationId || 2;
+      let targetOrgId = organizationId;
+      let targetCompany = null;
+      if (targetOrgId) {
+        targetCompany = await prisma.company.findFirst({
+          where: { organizationId: targetOrgId, deletedAt: null },
+        });
+      } else {
+        targetCompany = await prisma.company.findFirst({
+          where: { deletedAt: null },
+        });
+        targetOrgId = targetCompany?.organizationId || 2;
+      }
 
       const newEmp = await prisma.employee.create({
         data: {
@@ -337,8 +355,8 @@ async function findEmployee(biometricId, employeeName) {
           email,
           biometricId: bioIdStr,
           employeeId: `BIO-${bioIdStr}`,
-          organizationId: orgId,
-          companyId: firstComp?.id || 1,
+          organizationId: targetOrgId,
+          companyId: targetCompany?.id || 1,
           canLogin: true,
           role: "USER",
         },
@@ -506,32 +524,41 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
  * 3. Store EVERY punch in AttendancePunch (deduplicating identical timestamps within 1 min).
  * 4. Calculate complete shift time from Check-In to Check-Out (up to 15 hours).
  */
-async function processBiometricPunch({ biometricId, punchTime, brand, deviceName, method, employeeName, direction }) {
+async function processBiometricPunch({ biometricId, punchTime, brand, deviceName, method, employeeName, direction, organizationId = null, companyId = null }) {
   if (!biometricId && !employeeName) {
     console.warn(`[Biometric Punch] Skipped - No biometricId or employeeName provided`);
     return { success: false, reason: "No identifier provided" };
   }
 
+  // Resolve organizationId and direction config from device if not provided directly
+  let resolvedOrgId = organizationId;
+  let deviceDirectionConfig = direction;
+
+  if (deviceName && (!resolvedOrgId || !deviceDirectionConfig)) {
+    try {
+      const dbDev = await prisma.biometricDevice.findFirst({
+        where: { name: deviceName, deletedAt: null },
+        select: { organizationId: true, direction: true },
+      });
+      if (dbDev) {
+        if (!resolvedOrgId && dbDev.organizationId) {
+          resolvedOrgId = dbDev.organizationId;
+        }
+        if (!deviceDirectionConfig && dbDev.direction) {
+          deviceDirectionConfig = dbDev.direction;
+        }
+      }
+    } catch (e) {}
+  }
+
   // 1. Match Visitor FIRST - Visitors must stay strictly in the Visitor section
-  const matchedVisitor = await findVisitor(biometricId, employeeName);
+  const matchedVisitor = await findVisitor(biometricId, employeeName, resolvedOrgId);
   if (matchedVisitor) {
     const timezone = matchedVisitor.company?.timezone || "Asia/Karachi";
     const pTime = punchTime ? moment(punchTime).tz(timezone) : moment().tz(timezone);
     const punchDate = pTime.toDate();
     const todayStr = pTime.format("YYYY-MM-DD");
 
-    let deviceDirectionConfig = direction;
-    if (!deviceDirectionConfig && deviceName) {
-      try {
-        const dbDev = await prisma.biometricDevice.findFirst({
-          where: { name: deviceName, deletedAt: null },
-          select: { direction: true },
-        });
-        if (dbDev?.direction) {
-          deviceDirectionConfig = dbDev.direction;
-        }
-      } catch (e) {}
-    }
     const deviceTag = deviceName ? `${brand} (${deviceName})` : brand;
     const deviceDir = getDeviceDirection(deviceName, deviceTag, deviceDirectionConfig);
 
@@ -584,7 +611,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   }
 
   // 2. Not a visitor -> Process as Employee
-  const employee = await findEmployee(biometricId, employeeName);
+  const employee = await findEmployee(biometricId, employeeName, resolvedOrgId);
   if (!employee) {
     console.warn(`[Biometric Punch] No Employee or Visitor matched with biometricId: ${biometricId} / Name: ${employeeName}`);
     return { success: false, reason: `Employee not found for Biometric ID: ${biometricId} / Name: ${employeeName}` };
@@ -597,18 +624,6 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   const deviceTag = deviceName ? `${brand} (${deviceName})` : brand;
   const punchMethod = method || brand;
 
-  let deviceDirectionConfig = direction;
-  if (!deviceDirectionConfig && deviceName) {
-    try {
-      const dbDev = await prisma.biometricDevice.findFirst({
-        where: { name: deviceName, deletedAt: null },
-        select: { direction: true },
-      });
-      if (dbDev?.direction) {
-        deviceDirectionConfig = dbDev.direction;
-      }
-    } catch (e) {}
-  }
   const deviceDir = getDeviceDirection(deviceName, deviceTag, deviceDirectionConfig);
 
   const todayDateString = pTime.format("YYYY-MM-DD");
@@ -1234,13 +1249,19 @@ exports.handleHikvisionEvent = async (req, res) => {
     
     if (eventData && eventData.biometricId) {
       let devName = "Hikvision Terminal";
+      let deviceOrgId = null;
+      let deviceCompanyId = null;
+      let deviceDir = null;
       const clientIp = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.ip || "").replace(/^.*:/, "");
       if (clientIp) {
         const foundDev = await prisma.biometricDevice.findFirst({
           where: { ipAddress: { contains: clientIp }, deletedAt: null },
         });
-        if (foundDev?.name) {
-          devName = foundDev.name;
+        if (foundDev) {
+          if (foundDev.name) devName = foundDev.name;
+          deviceOrgId = foundDev.organizationId;
+          deviceCompanyId = foundDev.companyId;
+          deviceDir = foundDev.direction;
         }
       }
 
@@ -1251,6 +1272,9 @@ exports.handleHikvisionEvent = async (req, res) => {
         deviceName: devName,
         method: eventData.method,
         employeeName: eventData.employeeName,
+        direction: deviceDir,
+        organizationId: deviceOrgId,
+        companyId: deviceCompanyId,
       });
     }
 
@@ -1270,12 +1294,22 @@ exports.handleHikvisionEvent = async (req, res) => {
 };
 
 /**
- * List all registered biometric devices
+ * List all registered biometric devices for the current organization
  */
 exports.getDevices = async (req, res) => {
   try {
+    const orgId = req.user?.orgId || req.user?.organizationId;
+    const companyId = req.user?.companyId;
+
+    const where = { deletedAt: null };
+    if (orgId) {
+      where.organizationId = orgId;
+    } else if (companyId) {
+      where.companyId = companyId;
+    }
+
     const devices = await prisma.biometricDevice.findMany({
-      where: { deletedAt: null },
+      where,
       orderBy: { id: "desc" },
     });
     return res.json({ success: true, data: devices });
@@ -1286,21 +1320,31 @@ exports.getDevices = async (req, res) => {
 };
 
 /**
- * Add a new device
+ * Add a new device for the current organization
  */
 exports.addDevice = async (req, res) => {
   try {
+    const orgId = req.user?.orgId || req.user?.organizationId;
     const { name, brand, ipAddress, port, username, password, companyId, direction } = req.body;
+
+    let targetCompanyId = companyId ? parseInt(companyId) : req.user?.companyId || null;
+    if (!targetCompanyId && orgId) {
+      const firstComp = await prisma.company.findFirst({
+        where: { organizationId: orgId, deletedAt: null },
+      });
+      if (firstComp) targetCompanyId = firstComp.id;
+    }
 
     const device = await prisma.biometricDevice.create({
       data: {
         name,
         brand,
-        ipAddress,
+        ipAddress: ipAddress ? ipAddress.trim() : "",
         port: port ? parseInt(port) : 4370,
         username,
         password,
-        companyId: companyId ? parseInt(companyId) : null,
+        organizationId: orgId || null,
+        companyId: targetCompanyId,
         direction: direction || "AUTO",
       },
     });
@@ -1322,7 +1366,20 @@ exports.addDevice = async (req, res) => {
 exports.updateDevice = async (req, res) => {
   try {
     const { id } = req.params;
+    const orgId = req.user?.orgId || req.user?.organizationId;
     const { name, brand, ipAddress, port, username, password, status, companyId, direction } = req.body;
+
+    const existingDevice = await prisma.biometricDevice.findFirst({
+      where: {
+        id: parseInt(id),
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
+    });
+
+    if (!existingDevice) {
+      return res.status(404).json({ success: false, message: "Device not found or unauthorized" });
+    }
 
     const updateData = {
       name,
@@ -1369,6 +1426,20 @@ exports.updateDevice = async (req, res) => {
 exports.deleteDevice = async (req, res) => {
   try {
     const { id } = req.params;
+    const orgId = req.user?.orgId || req.user?.organizationId;
+
+    const existingDevice = await prisma.biometricDevice.findFirst({
+      where: {
+        id: parseInt(id),
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
+    });
+
+    if (!existingDevice) {
+      return res.status(404).json({ success: false, message: "Device not found or unauthorized" });
+    }
+
     await prisma.biometricDevice.update({
       where: { id: parseInt(id) },
       data: { deletedAt: new Date() },
@@ -1386,11 +1457,17 @@ exports.deleteDevice = async (req, res) => {
 exports.testDeviceConnection = async (req, res) => {
   try {
     const { id } = req.params;
-    const device = await prisma.biometricDevice.findUnique({
-      where: { id: parseInt(id) },
+    const orgId = req.user?.orgId || req.user?.organizationId;
+
+    const device = await prisma.biometricDevice.findFirst({
+      where: {
+        id: parseInt(id),
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
     });
 
-    if (!device) return res.status(404).json({ success: false, message: "Device not found" });
+    if (!device) return res.status(404).json({ success: false, message: "Device not found or unauthorized" });
 
     let isOnline = false;
 
@@ -1427,6 +1504,9 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
         brand: "ZKTECO",
         deviceName: device.name,
         method: "FINGERPRINT",
+        direction: device.direction,
+        organizationId: device.organizationId,
+        companyId: device.companyId,
       });
       if (punchRes?.success) count++;
     }
@@ -1466,9 +1546,13 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
  * 3. Process sequentially so entry punches are always recorded before exit punches.
  * 4. Run autoCheckoutOverdueAttendances() after processing.
  */
-async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null) {
+async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null, orgId = null) {
+  const where = { deletedAt: null };
+  if (orgId) {
+    where.organizationId = orgId;
+  }
   const devices = await prismaInstance.biometricDevice.findMany({
-    where: { deletedAt: null },
+    where,
   });
 
   if (devices.length === 0) {
@@ -1571,11 +1655,16 @@ async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallbac
 exports.syncDeviceLogs = async (req, res) => {
   try {
     const { id } = req.params;
-    const device = await prisma.biometricDevice.findUnique({
-      where: { id: parseInt(id) },
+    const orgId = req.user?.orgId || req.user?.organizationId;
+    const device = await prisma.biometricDevice.findFirst({
+      where: {
+        id: parseInt(id),
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
     });
 
-    if (!device) return res.status(404).json({ success: false, message: "Device not found" });
+    if (!device) return res.status(404).json({ success: false, message: "Device not found or unauthorized" });
 
     const result = await syncSingleDevice(device, prisma, processBiometricPunch);
     return res.json({
@@ -1597,6 +1686,7 @@ exports.syncAllDevicesRoute = async (req, res) => {
     const moment = require("moment-timezone");
     const timezone = "Asia/Karachi";
     const targetDate = req.query.date || req.body?.date;
+    const orgId = req.user?.orgId || req.user?.organizationId;
     let startTime = null;
     let endTime = null;
 
@@ -1605,14 +1695,14 @@ exports.syncAllDevicesRoute = async (req, res) => {
       endTime = moment.tz(targetDate, timezone).add(1, "day").endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
     }
 
-    const summary = await syncAllActiveDevices(prisma, processBiometricPunch, startTime, endTime);
+    const summary = await syncAllActiveDevices(prisma, processBiometricPunch, startTime, endTime, orgId);
     return res.json({
       success: true,
       count: summary.count,
       devicesSynced: summary.devicesSynced,
       totalDevices: summary.totalDevices,
       message: summary.totalDevices === 0
-        ? "No biometric machines registered in system."
+        ? "No biometric machines registered for your organization."
         : `Synced ${summary.count} punches from ${summary.devicesSynced} machine(s) successfully!`,
       results: summary.results,
     });
@@ -1629,16 +1719,21 @@ exports.syncAllDevicesRoute = async (req, res) => {
 exports.pushUsersToDevices = async (req, res) => {
   try {
     const { employeeId, visitorId, type } = req.body;
+    const orgId = req.user?.orgId || req.user?.organizationId;
     const { pushUserToHikvision, syncBiometricsAcrossDevices, syncUserBiometricsAcrossDevices } = require("./hikvision.service");
 
     const activeDevices = await prisma.biometricDevice.findMany({
-      where: { brand: "HIKVISION", deletedAt: null },
+      where: {
+        brand: "HIKVISION",
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
     });
 
     if (activeDevices.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "No active Hikvision biometric devices found in system.",
+        message: "No active Hikvision biometric devices found for your organization.",
       });
     }
 
@@ -1646,13 +1741,20 @@ exports.pushUsersToDevices = async (req, res) => {
     if (visitorId || type === "visitor" || type === "visitors") {
       let visitors = [];
       if (visitorId) {
-        const vis = await prisma.visitor.findUnique({
-          where: { id: parseInt(visitorId) },
+        const vis = await prisma.visitor.findFirst({
+          where: {
+            id: parseInt(visitorId),
+            deletedAt: null,
+            ...(orgId ? { organizationId: orgId } : {}),
+          },
         });
         if (vis) visitors = [vis];
       } else {
         visitors = await prisma.visitor.findMany({
-          where: { deletedAt: null },
+          where: {
+            deletedAt: null,
+            ...(orgId ? { organizationId: orgId } : {}),
+          },
         });
       }
 
@@ -1750,13 +1852,21 @@ exports.pushUsersToDevices = async (req, res) => {
     // ── PUSH EMPLOYEES ─────────────────────────────────────────────
     let employees = [];
     if (employeeId) {
-      const emp = await prisma.employee.findUnique({
-        where: { id: parseInt(employeeId) },
+      const emp = await prisma.employee.findFirst({
+        where: {
+          id: parseInt(employeeId),
+          deletedAt: null,
+          ...(orgId ? { organizationId: orgId } : {}),
+        },
       });
       if (emp) employees = [emp];
     } else {
       employees = await prisma.employee.findMany({
-        where: { deletedAt: null, role: { not: "ADMIN" } },
+        where: {
+          deletedAt: null,
+          role: { not: "ADMIN" },
+          ...(orgId ? { organizationId: orgId } : {}),
+        },
       });
     }
 
@@ -1853,11 +1963,15 @@ exports.triggerBiometricsCrossSync = async (req, res) => {
  */
 exports.syncVisitorPunches = async (req, res) => {
   try {
+    const orgId = req.user?.orgId || req.user?.organizationId;
     const { fetchHikvisionAcsEvents } = require("./hikvision.service");
     const moment = require("moment-timezone");
 
     const visitors = await prisma.visitor.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
     });
 
     if (visitors.length === 0) {
@@ -1882,6 +1996,7 @@ exports.syncVisitorPunches = async (req, res) => {
         status: "ONLINE",
         deletedAt: null,
         NOT: { name: { contains: "Enrolling" } },
+        ...(orgId ? { organizationId: orgId } : {}),
       },
     });
 
@@ -1925,6 +2040,8 @@ exports.syncVisitorPunches = async (req, res) => {
               method: event.method || "HIKVISION",
               employeeName: empName,
               direction: device.direction,
+              organizationId: device.organizationId,
+              companyId: device.companyId,
             });
 
             if (punchResult?.success && punchResult.isVisitor) {

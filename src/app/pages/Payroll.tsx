@@ -44,6 +44,8 @@ const EARNINGS_TITLES = [
 const DEDUCTIONS_TITLES = [
   "Tardies",
   "Unpaid Days",
+  "Half Day Deduction",
+  "Unpaid Leaves",
   "Tax",
   "Advance",
   "Food Deduction",
@@ -656,11 +658,23 @@ export const Payroll: React.FC = () => {
 
       const generatedCount = res?.generated ?? 0;
       const skippedCount = res?.skipped ?? 0;
-      const skippedDuplicates = res?.skippedDuplicates ?? 0;
+      const skippedDuplicates = res?.skippedDuplicates ?? [];
+      const skippedMissingPayroll = res?.skippedMissingPayroll ?? [];
       const skippedHiring = res?.skippedHiring ?? [];
+      const skippedErrors = res?.skippedErrors ?? [];
 
       if (generatedCount > 0) {
         toast.success(`Successfully generated ${generatedCount} payroll record${generatedCount > 1 ? "s" : ""}!`);
+      }
+
+      if (skippedDuplicates.length > 0) {
+        const names = skippedDuplicates.map((s: any) => s.name).join(", ");
+        toast.info(`${skippedDuplicates.length} already generated: ${names}`);
+      }
+
+      if (skippedMissingPayroll.length > 0) {
+        const names = skippedMissingPayroll.map((s: any) => s.name).join(", ");
+        toast.error(`${skippedMissingPayroll.length} skipped (salary settings missing in profile): ${names}`);
       }
 
       if (skippedHiring.length > 0) {
@@ -673,12 +687,9 @@ export const Payroll: React.FC = () => {
         }
       }
 
-      if (generatedCount === 0 && skippedHiring.length === 0) {
-        if (skippedDuplicates > 0 || skippedCount > 0) {
-          toast.info(`Payroll already generated for ${skippedDuplicates || skippedCount} employee${(skippedDuplicates || skippedCount) > 1 ? "s" : ""}.`);
-        } else {
-          toast.info("No payroll records were generated.");
-        }
+      if (skippedErrors.length > 0) {
+        const names = skippedErrors.map((s: any) => s.name).join(", ");
+        toast.error(`${skippedErrors.length} failed: ${names}`);
       }
 
       setIncompleteWarningOpen(false);
@@ -691,13 +702,19 @@ export const Payroll: React.FC = () => {
       await loadAnalytics(selectedMonth!, selectedYear!);
 
     } catch (err: any) {
-      const errData = err?.response?.data;
-      if (errData?.skippedHiring?.length > 0) {
-        errData.skippedHiring.forEach((s: any) => {
-          toast.warning(s.message || `${s.name}'s hiring/joining date is ${s.date}. Payroll cannot be generated for this period.`);
-        });
+      const errData = err?.response?.data || err?.data;
+      if (errData?.message) {
+        toast.error(errData.message);
       } else {
-        toast.error(errData?.message || "Generation failed");
+        toast.error("Generation failed");
+      }
+      if (errData?.skippedMissingPayroll?.length > 0) {
+        const names = errData.skippedMissingPayroll.map((s: any) => s.name).join(", ");
+        toast.error(`Missing Salary Settings: ${names}`);
+      }
+      if (errData?.skippedDuplicates?.length > 0) {
+        const names = errData.skippedDuplicates.map((s: any) => s.name).join(", ");
+        toast.info(`Already Generated: ${names}`);
       }
     } finally {
       setLoading(false);
@@ -814,35 +831,80 @@ export const Payroll: React.FC = () => {
             )}
 
             {/* Summary notification */}
-            {generateResult && (
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-2">
-                <p className="font-bold text-emerald-950 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  Payroll Generation Complete
-                </p>
-                <div className="flex flex-wrap items-center gap-4 text-emerald-800 pt-1">
-                  <span>Generated Records: <strong>{generateResult.generated || 0}</strong></span>
-                  {(generateResult.skippedDuplicates > 0 || (!generateResult.skippedHiring?.length && generateResult.skipped > 0)) && (
-                    <span>Skipped Duplicates: <strong>{generateResult.skippedDuplicates || generateResult.skipped || 0}</strong></span>
+            {generateResult && (() => {
+              const dupCount = Array.isArray(generateResult.skippedDuplicates) 
+                ? generateResult.skippedDuplicates.length 
+                : (Number(generateResult.skippedDuplicates) || 0);
+              const missingCount = Array.isArray(generateResult.skippedMissingPayroll) 
+                ? generateResult.skippedMissingPayroll.length 
+                : 0;
+              const hiringCount = Array.isArray(generateResult.skippedHiring) 
+                ? generateResult.skippedHiring.length 
+                : 0;
+              const errorCount = Array.isArray(generateResult.skippedErrors) 
+                ? generateResult.skippedErrors.length 
+                : 0;
+
+              return (
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-2">
+                  <p className="font-bold text-emerald-950 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Payroll Generation Complete
+                  </p>
+                  <div className="flex flex-wrap items-center gap-4 text-emerald-800 pt-1">
+                    <span>Generated Records: <strong>{generateResult.generated || 0}</strong></span>
+                    {dupCount > 0 && (
+                      <span>Skipped (Already Generated): <strong>{dupCount}</strong></span>
+                    )}
+                    {missingCount > 0 && (
+                      <span className="text-rose-800 font-semibold">
+                        Missing Salary Settings: <strong>{missingCount}</strong>
+                      </span>
+                    )}
+                    {hiringCount > 0 && (
+                      <span className="text-amber-800 font-semibold">
+                        Skipped (Joining Date): <strong>{hiringCount}</strong>
+                      </span>
+                    )}
+                    {errorCount > 0 && (
+                      <span className="text-rose-800 font-semibold">
+                        Errors: <strong>{errorCount}</strong>
+                      </span>
+                    )}
+                  </div>
+                  {Array.isArray(generateResult.skippedDuplicates) && generateResult.skippedDuplicates.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-emerald-200 space-y-1">
+                      {generateResult.skippedDuplicates.map((s: any, idx: number) => (
+                        <p key={idx} className="text-emerald-900 text-2xs flex items-center gap-1">
+                          <AlertTriangle className="size-3 text-amber-600 shrink-0" />
+                          <span>{s.name}: {s.reason}</span>
+                        </p>
+                      ))}
+                    </div>
                   )}
-                  {generateResult.skippedHiring?.length > 0 && (
-                    <span className="text-amber-800 font-semibold">
-                      Skipped (Joining Date): <strong>{generateResult.skippedHiring.length}</strong>
-                    </span>
+                  {Array.isArray(generateResult.skippedMissingPayroll) && generateResult.skippedMissingPayroll.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-rose-200 space-y-1">
+                      {generateResult.skippedMissingPayroll.map((s: any, idx: number) => (
+                        <p key={idx} className="text-rose-900 text-2xs flex items-center gap-1">
+                          <AlertTriangle className="size-3 text-rose-600 shrink-0" />
+                          <span>{s.name}: {s.reason}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {hiringCount > 0 && (
+                    <div className="mt-2 pt-2 border-t border-amber-200 space-y-1">
+                      {generateResult.skippedHiring.map((s: any, idx: number) => (
+                        <p key={idx} className="text-amber-900 text-2xs flex items-center gap-1">
+                          <AlertTriangle className="size-3 text-amber-600 shrink-0" />
+                          <span>{s.message}</span>
+                        </p>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {generateResult.skippedHiring?.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-amber-200 space-y-1">
-                    {generateResult.skippedHiring.map((s: any, idx: number) => (
-                      <p key={idx} className="text-amber-900 text-2xs flex items-center gap-1">
-                        <AlertTriangle className="size-3 text-amber-600 shrink-0" />
-                        <span>{s.message}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             {/* Period Selection (Month & Year Grid) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

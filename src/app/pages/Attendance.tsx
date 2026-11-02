@@ -529,7 +529,24 @@ export const Attendance: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingMachine, setSyncingMachine] = useState(false);
+  const [hasDevices, setHasDevices] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  useEffect(() => {
+    const checkDevices = async () => {
+      try {
+        const res = await deviceService.getDevices();
+        if (res && res.success && Array.isArray(res.data)) {
+          setHasDevices(res.data.length > 0);
+        } else {
+          setHasDevices(false);
+        }
+      } catch (e) {
+        setHasDevices(false);
+      }
+    };
+    checkDevices();
+  }, []);
 
   // Day Override State
   const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false);
@@ -1194,6 +1211,10 @@ export const Attendance: React.FC = () => {
   };
 
   const handleSyncFromMachine = async () => {
+    if (!hasDevices) {
+      toast.error("No biometric device connected. Please add a device in Organization Settings -> Integrations first.");
+      return;
+    }
     try {
       setSyncingMachine(true);
       toast.loading("Connecting to machine & syncing punches...", { id: "sync-machine" });
@@ -1739,12 +1760,20 @@ export const Attendance: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            disabled={syncingMachine || refreshing}
+            disabled={syncingMachine || refreshing || !hasDevices}
             onClick={handleSyncFromMachine}
-            className="shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900 shadow-2xs rounded-xl"
-            title="Fetch real-time punches from machine and update attendance"
+            className={`shrink-0 h-9 px-3.5 text-xs font-semibold gap-2 shadow-2xs rounded-xl transition-all ${
+              !hasDevices
+                ? "border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-600 bg-gray-50/70 dark:bg-gray-900/40 cursor-not-allowed opacity-60"
+                : "border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-900"
+            }`}
+            title={
+              !hasDevices
+                ? "No biometric device connected. Connect a device in Organization Settings -> Integrations first."
+                : "Fetch real-time punches from machine and update attendance"
+            }
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncingMachine ? "animate-spin text-blue-600" : "text-gray-500"}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${syncingMachine ? "animate-spin text-blue-600" : (!hasDevices ? "text-gray-400" : "text-gray-500")}`} />
             <span>{syncingMachine ? "Syncing..." : "Sync From Machine"}</span>
           </Button>
 

@@ -152,10 +152,24 @@ exports.getNextEmployeeCode = async (req, res) => {
       maxNum = employees.filter(e => e.entityId === entityId).length;
     }
 
-    const nextNum = maxNum + 1;
-    // Format as TR-001 or TR-002 with hyphen
-    const paddedNum = String(nextNum).padStart(3, "0");
-    const nextCode = `${prefix}-${paddedNum}`;
+    let nextNum = maxNum + 1;
+    let paddedNum = String(nextNum).padStart(3, "0");
+    let nextCode = `${prefix}-${paddedNum}`;
+
+    // Ensure candidate nextCode does not clash with any globally existing employeeId
+    const globalExistingEmployees = await prisma.employee.findMany({
+      where: { employeeId: { startsWith: prefix } },
+      select: { employeeId: true },
+    });
+    const globalExistingSet = new Set(
+      globalExistingEmployees.map((e) => String(e.employeeId).trim().toUpperCase())
+    );
+
+    while (globalExistingSet.has(nextCode.toUpperCase())) {
+      nextNum++;
+      paddedNum = String(nextNum).padStart(3, "0");
+      nextCode = `${prefix}-${paddedNum}`;
+    }
 
     res.json({
       success: true,

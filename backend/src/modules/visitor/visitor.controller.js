@@ -401,8 +401,13 @@ exports.createVisitor = async (req, res) => {
     }
 
     // Auto-provision visitor to online biometric devices in background
+    const visOrgId = newVisitor.organizationId || req.user?.orgId || req.user?.organizationId;
     prisma.biometricDevice.findMany({
-      where: { brand: "HIKVISION", deletedAt: null },
+      where: {
+        brand: "HIKVISION",
+        deletedAt: null,
+        ...(visOrgId ? { organizationId: visOrgId } : {}),
+      },
     }).then((devices) => {
       const { pushUserToHikvision } = require("../devices/hikvision.service");
       for (const dev of devices) {
@@ -526,8 +531,13 @@ exports.updateVisitor = async (req, res) => {
     // Auto-update visitor details on active biometric devices in background
     if (fullName || badgeNumber) {
       const bioId = updated.badgeNumber || `9${String(updated.id).padStart(4, "0")}`;
+      const visOrgId = updated.organizationId || req.user?.orgId || req.user?.organizationId;
       prisma.biometricDevice.findMany({
-        where: { brand: "HIKVISION", deletedAt: null },
+        where: {
+          brand: "HIKVISION",
+          deletedAt: null,
+          ...(visOrgId ? { organizationId: visOrgId } : {}),
+        },
       }).then((devices) => {
         const { pushUserToHikvision } = require("../devices/hikvision.service");
         for (const dev of devices) {
@@ -660,8 +670,13 @@ exports.deleteVisitor = async (req, res) => {
 
     let deviceDeleteCount = 0;
     try {
+      const visOrgId = existing.organizationId || req.user?.orgId || req.user?.organizationId;
       const activeDevices = await prisma.biometricDevice.findMany({
-        where: { brand: "HIKVISION", deletedAt: null },
+        where: {
+          brand: "HIKVISION",
+          deletedAt: null,
+          ...(visOrgId ? { organizationId: visOrgId } : {}),
+        },
       });
 
       const { deleteUserFromHikvision } = require("../devices/hikvision.service");
@@ -949,8 +964,13 @@ exports.convertVisitorToEmployee = async (req, res) => {
     if (bioIdToPush) {
       try {
         const { pushUserToHikvision } = require("../devices/hikvision.service");
+        const targetOrgId = result.organizationId || req.user?.orgId || req.user?.organizationId;
         const activeDevices = await prisma.biometricDevice.findMany({
-          where: { brand: "HIKVISION", deletedAt: null },
+          where: {
+            brand: "HIKVISION",
+            deletedAt: null,
+            ...(targetOrgId ? { organizationId: targetOrgId } : {}),
+          },
         });
         activeDevices.forEach((device) => {
           pushUserToHikvision(device, {

@@ -1414,7 +1414,7 @@ exports.getAttendanceReport = async (req, res) => {
           gte: moment(startDate).startOf("day").toDate(),
           lte: moment(endDate).endOf("day").toDate()
         },
-        employee: { deletedAt: null }
+        employee: { deletedAt: null, ...(user.orgId ? { organizationId: user.orgId } : {}) }
       }
     });
 
@@ -1424,7 +1424,7 @@ exports.getAttendanceReport = async (req, res) => {
         status: "APPROVED",
         startDate: { lte: endDate },
         endDate: { gte: startDate },
-        employee: { deletedAt: null }
+        employee: { deletedAt: null, ...(user.orgId ? { organizationId: user.orgId } : {}) }
       },
       include: {
         leaveType: true
@@ -2579,7 +2579,7 @@ exports.exportAttendanceExcel = async (req, res) => {
         status: "APPROVED",
         startDate: { lte: endDate },
         endDate: { gte: startDate },
-        employee: { deletedAt: null },
+        employee: { deletedAt: null, ...(user.orgId ? { organizationId: user.orgId } : {}) },
       },
       include: { leaveType: true },
     });

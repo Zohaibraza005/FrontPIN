@@ -132,6 +132,23 @@ export const Employees: React.FC = () => {
   const [employeeToDelete, setEmployeeToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPushingMachine, setIsPushingMachine] = useState(false);
+  const [hasDevices, setHasDevices] = useState(false);
+
+  useEffect(() => {
+    const checkDevices = async () => {
+      try {
+        const res = await deviceService.getDevices();
+        if (res && res.success && Array.isArray(res.data)) {
+          setHasDevices(res.data.length > 0);
+        } else {
+          setHasDevices(false);
+        }
+      } catch (e) {
+        setHasDevices(false);
+      }
+    };
+    checkDevices();
+  }, []);
 
   // Employee Import state
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -141,6 +158,10 @@ export const Employees: React.FC = () => {
   const [isImportingEmployees, setIsImportingEmployees] = useState(false);
 
   const handlePushToMachine = async (employeeId?: number) => {
+    if (!hasDevices) {
+      toast.error('No biometric device connected. Please add a device in Organization Settings -> Integrations first.');
+      return;
+    }
     try {
       setIsPushingMachine(true);
       const res = await deviceService.pushUsers(employeeId);
@@ -605,11 +626,19 @@ export const Employees: React.FC = () => {
           <Button
             variant="outline"
             onClick={() => handlePushToMachine()}
-            disabled={isPushingMachine}
-            className="w-full sm:w-auto border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
-            title="Push all active employees to biometric machines"
+            disabled={isPushingMachine || !hasDevices}
+            className={`w-full sm:w-auto font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2 ${
+              !hasDevices
+                ? 'border-gray-200 text-gray-400 bg-gray-50/70 cursor-not-allowed opacity-60'
+                : 'border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800'
+            }`}
+            title={
+              !hasDevices
+                ? "No biometric device connected. Connect a device in Organization Settings -> Integrations first."
+                : "Push all active employees to biometric machines"
+            }
           >
-            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : 'text-sky-600'}`} />
+            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : (!hasDevices ? 'text-gray-400' : 'text-sky-600')}`} />
             <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
           </Button>
 
@@ -929,18 +958,28 @@ export const Employees: React.FC = () => {
 
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => handlePushToMachine(emp.id)}
-                                      disabled={isPushingMachine}
-                                      className="h-8 w-8 text-gray-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
-                                    >
-                                      <Cpu className="size-4" />
-                                    </Button>
+                                    <span>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handlePushToMachine(emp.id)}
+                                        disabled={isPushingMachine || !hasDevices}
+                                        className={`h-8 w-8 rounded-lg ${
+                                          !hasDevices
+                                            ? 'text-gray-300 cursor-not-allowed opacity-50'
+                                            : 'text-gray-600 hover:text-sky-600 hover:bg-sky-50'
+                                        }`}
+                                      >
+                                        <Cpu className="size-4" />
+                                      </Button>
+                                    </span>
                                   </TooltipTrigger>
                                   <TooltipContent side="top">
-                                    <p className="text-xs">Push {emp.firstName} to Machine</p>
+                                    <p className="text-xs">
+                                      {!hasDevices
+                                        ? "No biometric device connected"
+                                        : `Push ${emp.firstName} to Machine`}
+                                    </p>
                                   </TooltipContent>
                                 </Tooltip>
 
@@ -1107,9 +1146,17 @@ export const Employees: React.FC = () => {
                             variant="outline"
                             size="sm"
                             onClick={() => handlePushToMachine(emp.id)}
-                            disabled={isPushingMachine}
-                            className="text-xs text-sky-700 bg-sky-50/60 border-sky-200 hover:bg-sky-100 h-8 rounded-xl"
-                            title={`Push ${emp.firstName} to Machine`}
+                            disabled={isPushingMachine || !hasDevices}
+                            className={`text-xs h-8 rounded-xl ${
+                              !hasDevices
+                                ? 'border-gray-200 text-gray-400 bg-gray-50/70 cursor-not-allowed opacity-60'
+                                : 'text-sky-700 bg-sky-50/60 border-sky-200 hover:bg-sky-100'
+                            }`}
+                            title={
+                              !hasDevices
+                                ? "No biometric device connected"
+                                : `Push ${emp.firstName} to Machine`
+                            }
                           >
                             <Cpu className="size-3.5" />
                           </Button>

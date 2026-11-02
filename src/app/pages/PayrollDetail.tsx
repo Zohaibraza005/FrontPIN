@@ -45,9 +45,15 @@ import {
   CreditCard,
   CheckCircle2,
   Loader2,
+  CalendarDays,
+  RefreshCw,
+  AlertCircle,
+  Eye,
+  Table as TableIcon,
+  Coffee,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { API_URL, payrollAPI } from '../services/api';
+import { API_URL, payrollAPI, attendanceAPI } from '../services/api';
 
 const EARNINGS_TITLES = [
   "KPIs",
@@ -67,6 +73,8 @@ const EARNINGS_TITLES = [
 const DEDUCTIONS_TITLES = [
   "Tardies",
   "Unpaid Days",
+  "Half Day Deduction",
+  "Unpaid Leaves",
   "Tax",
   "Advance",
   "Food Deduction",
@@ -348,6 +356,8 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
   const defaultDeductionsTitles = [
     "Tardies",
     "Unpaid Days",
+    "Half Day Deduction",
+    "Unpaid Leaves",
     "Tax",
     "Advance",
     "Food Deduction",
@@ -476,6 +486,13 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
                   <Text style={pdfStyles.itemAmount}>{formatAmt(item.amount)}</Text>
                 </View>
               ))}
+              {/* Spacer rows so Earnings total aligns horizontally with Deductions total */}
+              {Array.from({ length: Math.max(0, deductionsList.length - earningsList.length) }).map((_, i) => (
+                <View key={`spacer-earn-${i}`} style={pdfStyles.itemRow}>
+                  <Text style={pdfStyles.itemTitle}> </Text>
+                  <Text style={pdfStyles.itemAmount}> </Text>
+                </View>
+              ))}
               <View style={pdfStyles.totalRow}>
                 <Text style={pdfStyles.totalTitle}>Total Earnings</Text>
                 <Text style={pdfStyles.totalAmount}>{formatAmt(totalEarnings)}</Text>
@@ -536,6 +553,72 @@ export const PayrollSlipPDF = ({ payroll }: { payroll: any }) => {
   );
 };
 
+const ATTENDANCE_STATUS_CONFIG: Record<string, { label: string; badge: string; cell: string; dot: string; letter: string }> = {
+  PRESENT: {
+    label: "Present",
+    letter: "P",
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800",
+    cell: "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+  },
+  LATE: {
+    label: "Tardy",
+    letter: "T",
+    badge: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800",
+    cell: "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300",
+    dot: "bg-amber-500",
+  },
+  TARDY: {
+    label: "Tardy",
+    letter: "T",
+    badge: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800",
+    cell: "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300",
+    dot: "bg-amber-500",
+  },
+  ABSENT: {
+    label: "Absent",
+    letter: "A",
+    badge: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800",
+    cell: "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300",
+    dot: "bg-rose-500",
+  },
+  LEAVE: {
+    label: "Leave",
+    letter: "L",
+    badge: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800",
+    cell: "bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 dark:bg-sky-950/50 dark:text-sky-300",
+    dot: "bg-sky-500",
+  },
+  OFF_DAY: {
+    label: "Off Day",
+    letter: "O",
+    badge: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-800",
+    cell: "bg-gray-50/80 text-gray-400 border border-gray-150 hover:bg-gray-100 dark:bg-gray-900/40 dark:text-gray-500",
+    dot: "bg-slate-400",
+  },
+  OFF: {
+    label: "Off Day",
+    letter: "O",
+    badge: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-800",
+    cell: "bg-gray-50/80 text-gray-400 border border-gray-150 hover:bg-gray-100 dark:bg-gray-900/40 dark:text-gray-500",
+    dot: "bg-slate-400",
+  },
+  UPCOMING: {
+    label: "Upcoming",
+    letter: "U",
+    badge: "bg-slate-50 text-slate-400 border-slate-200",
+    cell: "bg-gray-50 text-gray-400 border border-gray-100",
+    dot: "bg-gray-400",
+  },
+};
+
+const formatAttendanceMinutes = (mins: number) => {
+  if (!mins || isNaN(mins)) return "0h 0m";
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return `${h}h ${m}m`;
+};
+
 export const PayrollDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -554,6 +637,49 @@ export const PayrollDetail = () => {
   const [txnRef, setTxnRef] = useState('');
   const [payDate, setPayDate] = useState(moment().format('YYYY-MM-DD'));
   const [paying, setPaying] = useState(false);
+
+  // Attendance Breakdown Modal States
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [attendanceTab, setAttendanceTab] = useState<'list' | 'grid'>('list');
+  const [selectedDayRecord, setSelectedDayRecord] = useState<any | null>(null);
+
+  const fetchMonthlyAttendance = async (forceRefresh = false) => {
+    if (!payroll?.employeeId) return;
+    try {
+      setLoadingAttendance(true);
+      const startDate = moment(payroll.periodStart).startOf("month").format("YYYY-MM-DD");
+      const endDate = moment(payroll.periodStart).endOf("month").format("YYYY-MM-DD");
+      const res = await attendanceAPI.getAttendanceReport({
+        employeeId: payroll.employeeId,
+        startDate,
+        endDate,
+      });
+      const emp = (res?.employees || [])[0];
+      const records = (emp?.Attendance || emp?.attendance || []).slice();
+      records.sort((a: any, b: any) => new Date(a.reportDate || a.date || a.dateStr).getTime() - new Date(b.reportDate || b.date || b.dateStr).getTime());
+      setAttendanceRecords(records);
+      if (records.length > 0) {
+        setSelectedDayRecord(records[0]);
+      }
+      if (forceRefresh) {
+        toast.success("Attendance refreshed!");
+      }
+    } catch (err: any) {
+      console.error("Failed to load attendance report:", err);
+      toast.error(err?.response?.data?.message || err?.message || "Failed to load attendance details");
+    } finally {
+      setLoadingAttendance(false);
+    }
+  };
+
+  const handleOpenAttendanceModal = async () => {
+    setAttendanceModalOpen(true);
+    if (attendanceRecords.length === 0) {
+      await fetchMonthlyAttendance();
+    }
+  };
 
   const handleConfirmPay = async () => {
     if (!payroll) return;
@@ -701,7 +827,17 @@ export const PayrollDetail = () => {
             </div>
           </div>
           
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* View Attendance Button */}
+            <Button
+              variant="outline"
+              className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-semibold flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              onClick={handleOpenAttendanceModal}
+            >
+              <CalendarDays className="h-4 w-4 text-indigo-600" />
+              <span>View Attendance</span>
+            </Button>
+
             {payroll.status === "PAID" ? (
               <Button
                 variant="outline"
@@ -892,7 +1028,7 @@ export const PayrollDetail = () => {
             <CardTitle>Attendance Overview - {moment(payroll.periodStart).format('MMM YYYY')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="flex items-center gap-2">
@@ -924,6 +1060,17 @@ export const PayrollDetail = () => {
                   <span>{payroll.leaveDays} days</span>
                 </div>
                 <Progress value={leavePercent} className="h-2 bg-yellow-100" indicatorColor="bg-yellow-600" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-600" />
+                    Late / Tardy
+                  </span>
+                  <span>{payroll.lateDays || 0} days</span>
+                </div>
+                <Progress value={Math.min(100, ((payroll.lateDays || 0) / totalDays) * 100)} className="h-2 bg-amber-100" indicatorColor="bg-amber-600" />
               </div>
             </div>
 
@@ -1152,6 +1299,7 @@ export const PayrollDetail = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
         <Card className="border border-gray-200/80 shadow-2xs rounded-2xl overflow-hidden bg-white">
           <CardHeader className="bg-gray-50/60 px-6 py-4 border-b border-gray-100 flex flex-row items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -1349,6 +1497,406 @@ export const PayrollDetail = () => {
                 )}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* MONTHLY ATTENDANCE AUDIT MODAL */}
+        <Dialog open={attendanceModalOpen} onOpenChange={setAttendanceModalOpen}>
+          <DialogContent className="sm:max-w-5xl md:max-w-6xl xl:max-w-7xl w-[95vw] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-200">
+            {/* Header */}
+            <div className="px-6 sm:px-8 py-5 border-b border-gray-200/80 bg-gradient-to-r from-gray-50/90 via-white to-gray-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="size-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-200 shrink-0">
+                  <CalendarDays className="size-6" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <DialogTitle className="text-lg sm:text-xl font-extrabold text-gray-900 tracking-tight">
+                      Monthly Attendance Details
+                    </DialogTitle>
+                    <Badge variant="outline" className="text-xs bg-indigo-50/80 text-indigo-700 border-indigo-200 font-bold px-3 py-0.5 rounded-full">
+                      {moment(payroll.periodStart).format("MMMM YYYY")}
+                    </Badge>
+                  </div>
+                  <p className="text-xs sm:text-sm text-gray-500 font-medium mt-0.5 truncate">
+                    <span className="font-semibold text-gray-800">{payroll.employee.firstName} {payroll.employee.lastName}</span>
+                    <span className="text-gray-300 mx-2">•</span>
+                    <span>{payroll.employee.department?.title || 'Staff'}</span>
+                    <span className="text-gray-300 mx-2">•</span>
+                    <span>Pay Period: {moment(payroll.periodStart).startOf("month").format("DD MMM")} – {moment(payroll.periodStart).endOf("month").format("DD MMM YYYY")}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* View Switcher (with mr-10 to stay clear of shadcn X button) */}
+              <div className="flex items-center bg-gray-100/90 p-1 rounded-2xl border border-gray-200/90 gap-1 self-start sm:self-center mr-10 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAttendanceTab('list')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    attendanceTab === 'list'
+                      ? 'bg-white shadow-xs text-indigo-700'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <TableIcon className="size-3.5 text-indigo-600" />
+                  <span>Daily Table</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttendanceTab('grid')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    attendanceTab === 'grid'
+                      ? 'bg-white shadow-xs text-indigo-700'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <CalendarDays className="size-3.5 text-indigo-600" />
+                  <span>Calendar Strip</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Attendance Summary Strip (Professional Cards with Icons) */}
+            <div className="px-6 sm:px-8 py-3.5 bg-gray-50/50 border-b border-gray-200/70 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+              <div className="px-3.5 py-2.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">Present (P)</span>
+                  <span className="text-base sm:text-lg font-black text-emerald-800 leading-tight">
+                    {attendanceRecords.filter(r => r.status === 'PRESENT').length} <span className="text-xs font-semibold text-emerald-600">days</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <Clock className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 block">Tardy (T)</span>
+                  <span className="text-base sm:text-lg font-black text-amber-800 leading-tight">
+                    {attendanceRecords.filter(r => r.status === 'LATE' || r.status === 'TARDY' || r.isLate).length} <span className="text-xs font-semibold text-amber-600">days</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <XCircle className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 block">Absent (A)</span>
+                  <span className="text-base sm:text-lg font-black text-rose-800 leading-tight">
+                    {attendanceRecords.filter(r => r.status === 'ABSENT').length} <span className="text-xs font-semibold text-rose-600">days</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-2xl bg-sky-50/70 border border-sky-200/80 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
+                  <CalendarDays className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 block">Leave (L)</span>
+                  <span className="text-base sm:text-lg font-black text-sky-800 leading-tight">
+                    {attendanceRecords.filter(r => r.status === 'LEAVE').length} <span className="text-xs font-semibold text-sky-600">days</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-2xl bg-slate-100/80 border border-slate-200 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-slate-200/80 text-slate-700 flex items-center justify-center shrink-0">
+                  <Coffee className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Off Days (O)</span>
+                  <span className="text-base sm:text-lg font-black text-slate-800 leading-tight">
+                    {attendanceRecords.filter(r => r.status === 'OFF_DAY' || r.status === 'OFF').length} <span className="text-xs font-semibold text-slate-600">days</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 flex items-center gap-3">
+                <div className="size-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                  <Briefcase className="size-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 block">Total Worked</span>
+                  <span className="text-base sm:text-lg font-black text-indigo-900 leading-tight">
+                    {formatAttendanceMinutes(attendanceRecords.reduce((sum, r) => sum + (Number(r.totalWorkedMinutes) || 0), 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-5 min-h-[400px]">
+              {loadingAttendance ? (
+                <div className="py-28 flex flex-col items-center justify-center gap-3 text-gray-400">
+                  <Loader2 className="size-9 animate-spin text-indigo-600" />
+                  <p className="text-sm font-semibold text-gray-500">Fetching attendance records...</p>
+                </div>
+              ) : attendanceRecords.length === 0 ? (
+                <div className="py-24 flex flex-col items-center justify-center gap-3 text-gray-400">
+                  <AlertCircle className="size-10 text-gray-300" />
+                  <p className="text-sm font-semibold text-gray-600">No attendance records found for this period</p>
+                </div>
+              ) : attendanceTab === 'list' ? (
+                <div className="rounded-2xl border border-gray-200 overflow-hidden shadow-xs bg-white">
+                  <Table>
+                    <TableHeader className="bg-gray-50/90 border-b border-gray-200">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 uppercase tracking-wider">Date & Day</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 text-center uppercase tracking-wider">Status</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 uppercase tracking-wider">Shift Schedule</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 uppercase tracking-wider">Punch In</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 uppercase tracking-wider">Punch Out</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 text-right uppercase tracking-wider">Total Worked</TableHead>
+                        <TableHead className="py-3.5 px-4 text-xs font-bold text-gray-700 text-right uppercase tracking-wider">Overtime</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="divide-y divide-gray-100">
+                      {attendanceRecords.map((r, idx) => {
+                        const recDate = moment(r.date || r.reportDate || r.dateStr);
+                        const statusKey = String(r.status || 'ABSENT').toUpperCase();
+                        const cfg = ATTENDANCE_STATUS_CONFIG[statusKey] || ATTENDANCE_STATUS_CONFIG['ABSENT'];
+                        const isLateDay = r.isLate || r.lateMinutes > 0;
+                        const otMins = Number(r.overtimeMinutes) || (Number(r.overtimeHours) * 60) || 0;
+
+                        return (
+                          <TableRow key={r.id || idx} className="hover:bg-indigo-50/30 transition-colors odd:bg-white even:bg-gray-50/30">
+                            <TableCell className="py-3 px-4 font-medium text-xs text-gray-900">
+                              <div className="flex flex-col">
+                                <span className="font-bold text-gray-900 text-sm">{recDate.format("DD MMM YYYY")}</span>
+                                <span className="text-[11px] text-gray-400 font-semibold">{recDate.format("dddd")}</span>
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-center">
+                              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${cfg.badge}`}>
+                                <span className={`size-1.5 rounded-full ${cfg.dot}`} />
+                                {cfg.label}
+                              </span>
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-xs text-gray-600">
+                              {r.shiftStartTime && r.shiftEndTime ? (
+                                <span className="font-mono text-xs text-gray-700 bg-gray-100/90 px-2.5 py-1 rounded-lg border border-gray-200/70 font-semibold">
+                                  {r.shiftStartTime} – {r.shiftEndTime}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-xs">Standard Shift</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-xs">
+                              {r.checkInTime ? (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold font-mono text-sm text-gray-900">
+                                    {moment(r.checkInTime).format("hh:mm A")}
+                                  </span>
+                                  {isLateDay && (
+                                    <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                      +{r.lateMinutes || 0}m Late
+                                    </span>
+                                  )}
+                                  {r.checkInDevice && (
+                                    <span className="text-[11px] text-gray-400 truncate max-w-[130px]" title={r.checkInDevice}>
+                                      • {r.checkInDevice}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">—</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-xs">
+                              {r.checkOutTime ? (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold font-mono text-sm text-gray-900">
+                                    {moment(r.checkOutTime).format("hh:mm A")}
+                                  </span>
+                                  {r.autoClockedOut && (
+                                    <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Auto</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">—</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-xs text-right font-black text-gray-900 font-mono text-sm">
+                              {Number(r.totalWorkedMinutes) > 0 ? formatAttendanceMinutes(r.totalWorkedMinutes) : "—"}
+                            </TableCell>
+
+                            <TableCell className="py-3 px-4 text-xs text-right">
+                              {otMins > 0 ? (
+                                <span className="text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg font-bold font-mono text-xs border border-emerald-200">
+                                  +{formatAttendanceMinutes(otMins)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {/* Calendar Strip (Horizontal day boxes like Attendance timesheet) */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-3 pt-1">
+                    {attendanceRecords.map((r, idx) => {
+                      const recDate = moment(r.date || r.reportDate || r.dateStr);
+                      const statusKey = String(r.status || 'ABSENT').toUpperCase();
+                      const cfg = ATTENDANCE_STATUS_CONFIG[statusKey] || ATTENDANCE_STATUS_CONFIG['ABSENT'];
+                      const isSelected = selectedDayRecord?.id === r.id || (selectedDayRecord && (selectedDayRecord.date === r.date || selectedDayRecord.reportDate === r.reportDate));
+
+                      return (
+                        <button
+                          key={r.id || idx}
+                          type="button"
+                          onClick={() => setSelectedDayRecord(r)}
+                          className={`flex flex-col items-center justify-between p-2.5 rounded-2xl border min-w-[58px] min-h-[82px] transition-all cursor-pointer ${
+                            isSelected
+                              ? 'ring-2 ring-indigo-600 shadow-md bg-indigo-50/50 border-indigo-400 scale-[1.03]'
+                              : 'bg-white hover:bg-gray-50 border-gray-200 shadow-2xs'
+                          }`}
+                        >
+                          <span className="text-[10px] font-bold uppercase text-gray-400">
+                            {recDate.format("ddd")}
+                          </span>
+                          <span className="text-xs font-black text-gray-700">
+                            {recDate.format("D")}
+                          </span>
+                          <div className={`size-7 rounded-xl flex items-center justify-center font-black text-xs border ${cfg.cell}`}>
+                            {cfg.letter}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected Day Detail Card */}
+                  {selectedDayRecord && (() => {
+                    const selDate = moment(selectedDayRecord.date || selectedDayRecord.reportDate || selectedDayRecord.dateStr);
+                    const selStatus = String(selectedDayRecord.status || 'ABSENT').toUpperCase();
+                    const selCfg = ATTENDANCE_STATUS_CONFIG[selStatus] || ATTENDANCE_STATUS_CONFIG['ABSENT'];
+
+                    return (
+                      <div className="p-5 rounded-2xl border border-gray-200 bg-gray-50/70 shadow-xs space-y-4">
+                        <div className="flex items-center justify-between border-b border-gray-200/90 pb-3">
+                          <div className="flex items-center gap-3">
+                            <span className="text-base font-extrabold text-gray-900">
+                              {selDate.format("dddd, DD MMMM YYYY")}
+                            </span>
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-bold border ${selCfg.badge}`}>
+                              <span className={`size-1.5 rounded-full ${selCfg.dot}`} />
+                              {selCfg.label}
+                            </span>
+                          </div>
+                          {selectedDayRecord.isLate && (
+                            <span className="text-xs font-black text-amber-800 bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-300">
+                              Late Punch In: {selectedDayRecord.lateMinutes} minutes
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 text-xs">
+                          <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
+                            <span className="text-gray-400 text-[11px] font-bold uppercase block">Shift Schedule</span>
+                            <span className="font-bold text-gray-900 font-mono text-sm mt-1 block">
+                              {selectedDayRecord.shiftStartTime && selectedDayRecord.shiftEndTime
+                                ? `${selectedDayRecord.shiftStartTime} – ${selectedDayRecord.shiftEndTime}`
+                                : "Standard Schedule"}
+                            </span>
+                          </div>
+
+                          <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
+                            <span className="text-gray-400 text-[11px] font-bold uppercase block">Punch In Time</span>
+                            <span className="font-bold text-gray-900 font-mono text-sm mt-1 block">
+                              {selectedDayRecord.checkInTime ? moment(selectedDayRecord.checkInTime).format("hh:mm A") : "—"}
+                            </span>
+                            {selectedDayRecord.checkInDevice && (
+                              <span className="text-[11px] text-gray-400 block truncate mt-1">{selectedDayRecord.checkInDevice}</span>
+                            )}
+                          </div>
+
+                          <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
+                            <span className="text-gray-400 text-[11px] font-bold uppercase block">Punch Out Time</span>
+                            <span className="font-bold text-gray-900 font-mono text-sm mt-1 block">
+                              {selectedDayRecord.checkOutTime ? moment(selectedDayRecord.checkOutTime).format("hh:mm A") : "—"}
+                            </span>
+                            {selectedDayRecord.autoClockedOut && (
+                              <span className="text-[11px] text-gray-400 block mt-1">Auto System Checkout</span>
+                            )}
+                          </div>
+
+                          <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
+                            <span className="text-gray-400 text-[11px] font-bold uppercase block">Total Worked</span>
+                            <span className="font-bold text-gray-900 font-mono text-sm mt-1 block">
+                              {Number(selectedDayRecord.totalWorkedMinutes) > 0 ? formatAttendanceMinutes(selectedDayRecord.totalWorkedMinutes) : "0h 0m"}
+                            </span>
+                            {(Number(selectedDayRecord.overtimeMinutes) > 0 || Number(selectedDayRecord.overtimeHours) > 0) && (
+                              <span className="text-[11px] text-emerald-600 font-bold block mt-1">
+                                Overtime: {formatAttendanceMinutes(Number(selectedDayRecord.overtimeMinutes) || (Number(selectedDayRecord.overtimeHours) * 60))}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Raw punches if present */}
+                        {Array.isArray(selectedDayRecord.punches) && selectedDayRecord.punches.length > 0 && (
+                          <div className="pt-2 border-t border-gray-200/70">
+                            <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-2">
+                              Device Punch Logs ({selectedDayRecord.punches.length})
+                            </span>
+                            <div className="flex flex-wrap gap-2.5">
+                              {selectedDayRecord.punches.map((p: any, pIdx: number) => (
+                                <div key={p.id || pIdx} className="bg-white px-3 py-1.5 rounded-xl border border-gray-200 text-xs flex items-center gap-2 shadow-2xs">
+                                  <span className="font-extrabold text-indigo-700">{p.type}</span>
+                                  <span className="font-mono font-semibold text-gray-700">{moment(p.punchTime).format("hh:mm:ss A")}</span>
+                                  {p.device && <span className="text-gray-400 text-[11px]">({p.device})</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Dialog Footer */}
+            <div className="px-6 sm:px-8 py-3.5 border-t border-gray-200/80 bg-gray-50/70 flex items-center justify-between">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fetchMonthlyAttendance(true)}
+                disabled={loadingAttendance}
+                className="text-xs font-semibold text-gray-600 hover:text-gray-900 flex items-center gap-1.5 cursor-pointer rounded-xl"
+              >
+                <RefreshCw className={`size-3.5 ${loadingAttendance ? 'animate-spin' : ''}`} />
+                <span>Refresh Attendance</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAttendanceModalOpen(false)}
+                className="text-xs font-bold rounded-xl px-5 border-gray-300 hover:bg-gray-100"
+              >
+                Close
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

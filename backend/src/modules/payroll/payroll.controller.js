@@ -37,6 +37,7 @@ function calculatePayrollAttendance({
   let paidLeaves = 0;
   let unpaidLeaves = 0;
   let lateDays = 0;
+  let halfDays = 0;
 
   let cursor = periodStart.clone().startOf("day");
   const endCursor = periodEnd.clone().startOf("day");
@@ -77,7 +78,9 @@ function calculatePayrollAttendance({
       return attDate === dateStr;
     });
 
-    const isPresent = Boolean(att && (att.status === "PRESENT" || att.status === "HALF_DAY" || att.checkInTime));
+    const isHalfDay = Boolean(att && (att.status === "HALF_DAY" || att.isHalfDay));
+    const isLate = Boolean(att && (att.isLate || att.status === "TARDY" || att.status === "LATE"));
+    const isPresent = Boolean(att && (att.status === "PRESENT" || att.status === "HALF_DAY" || att.status === "TARDY" || att.status === "LATE" || att.checkInTime));
     const isExplicitAbsent = Boolean(att && att.status === "ABSENT");
 
     if (isWorkingDay) {
@@ -89,13 +92,17 @@ function calculatePayrollAttendance({
         } else {
           paidLeaves++;
         }
+      } else if (isHalfDay) {
+        presentDays++;
+        halfDays++;
+        if (isLate) lateDays++;
       } else if (isPresent) {
         presentDays++;
-        if (att && att.isLate) lateDays++;
+        if (isLate) lateDays++;
       } else if (isExplicitAbsent) {
         absentDays++;
       } else if (isPastOrToday) {
-        // Scheduled working day, but no biometric punch, no attendance row, and no leave!
+        // Scheduled working day, but no biometric punch, no attendance row, and no approved leave!
         // Unmarked attendance gap is correctly counted as ABSENT!
         absentDays++;
       } else {
@@ -103,9 +110,13 @@ function calculatePayrollAttendance({
       }
     } else {
       // Off-day / Weekend: NEVER count as absent!
-      if (isPresent) {
+      if (isHalfDay) {
         presentDays++;
-        if (att && att.isLate) lateDays++;
+        halfDays++;
+        if (isLate) lateDays++;
+      } else if (isPresent) {
+        presentDays++;
+        if (isLate) lateDays++;
       }
     }
 
@@ -116,6 +127,14 @@ function calculatePayrollAttendance({
     workingDays = Math.max(1, periodEnd.diff(periodStart, "days") + 1);
   }
 
+  // Quota check: excess paid leaves beyond monthly allowance convert to unpaid leaves
+  const maxMonthlyLeaves = Number(employee.payroll?.monthlyLeaves);
+  if (maxMonthlyLeaves >= 0 && paidLeaves > maxMonthlyLeaves) {
+    const excess = paidLeaves - maxMonthlyLeaves;
+    paidLeaves = maxMonthlyLeaves;
+    unpaidLeaves += excess;
+  }
+
   return {
     workingDays,
     presentDays,
@@ -123,7 +142,8 @@ function calculatePayrollAttendance({
     paidLeaves,
     unpaidLeaves,
     leaveDays: paidLeaves + unpaidLeaves,
-    lateDays
+    lateDays,
+    halfDays
   };
 }
 
@@ -260,7 +280,8 @@ exports.createPayroll = async (req, res) => {
       paidLeaves,
       unpaidLeaves,
       leaveDays,
-      lateDays
+      lateDays,
+      halfDays
     } = calculatePayrollAttendance({
       employee,
       periodStart,
@@ -270,16 +291,27 @@ exports.createPayroll = async (req, res) => {
       dayOverrides
     });
 
-    // 🔹 Salary Calculation
+    // 🔹 Salary & Deductions Calculation
     const numRate = Number(rate) || 0;
     let dailyRate = workingDays > 0 ? (numRate / workingDays) : (numRate / 30);
-    let absentDeduction = 0;
     let baseSalary = numRate;
+
+    // Deductions breakdown:
+    // 1. Absent Days (full daily rate per day)
+    const absentDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+
+    // 2. Unpaid Leaves (full daily rate per unpaid / excess leave day)
+    const unpaidLeaveDeduction = Math.round(unpaidLeaves * dailyRate * 100) / 100;
+
+    // 3. Half Day (0.5 daily rate per half day)
+    const halfDayDeduction = Math.round(halfDays * 0.5 * dailyRate * 100) / 100;
+
+    // 4. Tardies (Option B: 1/3 day = ~0.3333 daily rate per tardy)
+    const tardyDeduction = Math.round(lateDays * (dailyRate / 3) * 100) / 100;
 
     if (payoutType === "daily") {
       dailyRate = numRate;
       baseSalary = (presentDays + paidLeaves) * dailyRate;
-      absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
     } else if (payoutType === "hourly") {
       const totalMinutes = attendances.reduce(
         (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
@@ -287,15 +319,13 @@ exports.createPayroll = async (req, res) => {
       );
       const hoursWorked = totalMinutes / 60;
       baseSalary = numRate * hoursWorked;
-    } else {
-      // Monthly: calculate absent deduction based on dailyRate
-      absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
     }
 
+    const totalAttendanceDeductions = absentDeduction + unpaidLeaveDeduction + halfDayDeduction + tardyDeduction;
     // Gross salary is the earnings before deductions: base + overtime + bonus
     const grossSalary = Math.max(0, baseSalary + overtimeAmount + Number(bonus || 0));
-    // Net salary is gross salary minus absent deduction and extra deductions
-    const netSalary = Math.max(0, grossSalary - absentDeduction - Number(deductions || 0));
+    // Net salary is gross salary minus attendance deductions and extra deductions
+    const netSalary = Math.max(0, grossSalary - totalAttendanceDeductions - Number(deductions || 0));
 
     const payroll = await prisma.payroll.create({
       data: {
@@ -345,14 +375,53 @@ exports.createPayroll = async (req, res) => {
       });
     }
 
-    // Add absent / unpaid days deduction component if employee had absences
+    // Add absent days deduction component
     if (Number(absentDeduction) > 0) {
       await prisma.payrollComponent.create({
         data: {
           payrollId: payroll.id,
           type: "DEDUCTION",
           title: "Unpaid Days",
-          amount: Math.round(Number(absentDeduction) * 100) / 100,
+          amount: absentDeduction,
+          createdById: req.user.id
+        }
+      });
+    }
+
+    // Add unpaid leaves deduction component
+    if (Number(unpaidLeaveDeduction) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "DEDUCTION",
+          title: "Unpaid Leaves",
+          amount: unpaidLeaveDeduction,
+          createdById: req.user.id
+        }
+      });
+    }
+
+    // Add half day deduction component
+    if (Number(halfDayDeduction) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "DEDUCTION",
+          title: "Half Day Deduction",
+          amount: halfDayDeduction,
+          createdById: req.user.id
+        }
+      });
+    }
+
+    // Add tardies deduction component (1/3 day per tardy)
+    if (Number(tardyDeduction) > 0) {
+      await prisma.payrollComponent.create({
+        data: {
+          payrollId: payroll.id,
+          type: "DEDUCTION",
+          title: "Tardies",
+          amount: tardyDeduction,
           createdById: req.user.id
         }
       });
@@ -443,11 +512,23 @@ exports.generateBulkPayroll = async (req, res) => {
 
     let generated = 0;
     let skipped = 0;
-    let skippedDuplicates = 0;
+    const skippedMissingPayroll = [];
+    const skippedDuplicates = [];
     const skippedHiring = [];
+    const skippedErrors = [];
 
     for (const emp of employees) {
-      if (!emp.payroll) continue;
+      const empName = `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || `Employee #${emp.id}`;
+
+      if (!emp.payroll) {
+        skippedMissingPayroll.push({
+          employeeId: emp.id,
+          name: empName,
+          reason: "Salary/Payroll settings not configured in profile"
+        });
+        skipped++;
+        continue;
+      }
 
       const cycleDate = Number(emp.payroll.cycleDate) || 1;
       let periodStart, periodEnd;
@@ -510,7 +591,11 @@ exports.generateBulkPayroll = async (req, res) => {
       });
 
       if (existing) {
-        skippedDuplicates++;
+        skippedDuplicates.push({
+          employeeId: emp.id,
+          name: empName,
+          reason: `Payroll already generated for ${periodStart.format("DD MMM")} – ${periodEnd.format("DD MMM YYYY")}`
+        });
         skipped++;
         continue;
       }
@@ -571,7 +656,8 @@ exports.generateBulkPayroll = async (req, res) => {
         paidLeaves,
         unpaidLeaves,
         leaveDays,
-        lateDays
+        lateDays,
+        halfDays
       } = calculatePayrollAttendance({
         employee: emp,
         periodStart,
@@ -582,19 +668,29 @@ exports.generateBulkPayroll = async (req, res) => {
       });
 
       //////////////////////////////////////////////////////
-      // SALARY LOGIC
+      // SALARY LOGIC & DEDUCTIONS BREAKDOWN
       //////////////////////////////////////////////////////
 
       const rate = Number(emp.payroll.rate) || 0;
       const payoutType = emp.payroll.payoutType || "monthly";
       let dailyRate = workingDays > 0 ? (rate / workingDays) : (rate / 30);
-      let absentDeduction = 0;
       let baseSalary = rate;
+
+      // 1. Absent Days (full daily rate per day)
+      const absentDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+
+      // 2. Unpaid Leaves (full daily rate per unpaid / excess leave day)
+      const unpaidLeaveDeduction = Math.round(unpaidLeaves * dailyRate * 100) / 100;
+
+      // 3. Half Day (0.5 daily rate per half day)
+      const halfDayDeduction = Math.round(halfDays * 0.5 * dailyRate * 100) / 100;
+
+      // 4. Tardies (Option B: 1/3 day = ~0.3333 daily rate per tardy)
+      const tardyDeduction = Math.round(lateDays * (dailyRate / 3) * 100) / 100;
 
       if (payoutType === "daily") {
         dailyRate = rate;
         baseSalary = (presentDays + paidLeaves) * dailyRate;
-        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
       } else if (payoutType === "hourly") {
         const totalMinutes = attendance.reduce(
           (sum, a) => sum + (Number(a.totalWorkedMinutes) || 0),
@@ -602,13 +698,11 @@ exports.generateBulkPayroll = async (req, res) => {
         );
         const totalHours = totalMinutes / 60;
         baseSalary = totalHours * rate;
-      } else {
-        // Monthly: calculate absent deduction based on dailyRate
-        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
       }
 
+      const totalAttendanceDeductions = absentDeduction + unpaidLeaveDeduction + halfDayDeduction + tardyDeduction;
       const grossSalary = Math.max(0, baseSalary + overtimeAmount);
-      const netSalary = Math.max(0, grossSalary - absentDeduction);
+      const netSalary = Math.max(0, grossSalary - totalAttendanceDeductions);
 
       //////////////////////////////////////////////////////
       // CREATE PAYROLL
@@ -654,7 +748,43 @@ exports.generateBulkPayroll = async (req, res) => {
             payrollId: payroll.id,
             type: "DEDUCTION",
             title: "Unpaid Days",
-            amount: Math.round(Number(absentDeduction) * 100) / 100,
+            amount: absentDeduction,
+            createdById: user.id
+          }
+        });
+      }
+
+      if (Number(unpaidLeaveDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Unpaid Leaves",
+            amount: unpaidLeaveDeduction,
+            createdById: user.id
+          }
+        });
+      }
+
+      if (Number(halfDayDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Half Day Deduction",
+            amount: halfDayDeduction,
+            createdById: user.id
+          }
+        });
+      }
+
+      if (Number(tardyDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Tardies",
+            amount: tardyDeduction,
             createdById: user.id
           }
         });
@@ -671,14 +801,30 @@ exports.generateBulkPayroll = async (req, res) => {
       generated++;
     }
 
-    // If no payroll was generated and employees were skipped because of hiring/joining date
-    if (generated === 0 && skippedHiring.length > 0 && skippedDuplicates === 0) {
+    // If no payroll was generated, provide clear detailed reasons
+    if (generated === 0) {
+      const reasons = [];
+      if (skippedDuplicates.length > 0) {
+        reasons.push(`${skippedDuplicates.length} employee(s) already generated: ${skippedDuplicates.map(s => s.name).slice(0, 5).join(", ")}${skippedDuplicates.length > 5 ? '...' : ''}`);
+      }
+      if (skippedMissingPayroll.length > 0) {
+        reasons.push(`${skippedMissingPayroll.length} employee(s) missing salary settings: ${skippedMissingPayroll.map(s => s.name).slice(0, 5).join(", ")}${skippedMissingPayroll.length > 5 ? '...' : ''}`);
+      }
+      if (skippedHiring.length > 0) {
+        reasons.push(`${skippedHiring.length} employee(s) joined after period: ${skippedHiring.map(s => s.name).slice(0, 5).join(", ")}${skippedHiring.length > 5 ? '...' : ''}`);
+      }
+      if (skippedErrors.length > 0) {
+        reasons.push(`${skippedErrors.length} employee(s) failed with calculation error: ${skippedErrors.map(s => s.name).slice(0, 5).join(", ")}`);
+      }
+
       return res.status(400).json({
-        message: skippedHiring.length === 1
-          ? skippedHiring[0].message
-          : `Selected employees were hired/joined after this payroll period:\n${skippedHiring.map(s => `• ${s.message}`).join("\n")}`,
+        success: false,
+        message: reasons.length > 0 ? reasons.join(" | ") : "No payroll records were generated.",
+        skippedMissingPayroll,
+        skippedDuplicates,
         skippedHiring,
-        skippedDuplicates
+        skippedErrors,
+        totalTargeted: employees.length
       });
     }
 
@@ -686,11 +832,12 @@ exports.generateBulkPayroll = async (req, res) => {
       success: true,
       generated,
       skipped,
+      totalTargeted: employees.length,
+      skippedMissingPayroll,
       skippedDuplicates,
+      skippedDuplicatesCount: skippedDuplicates.length,
       skippedHiring,
-      warningMessage: skippedHiring.length > 0
-        ? (skippedHiring.length === 1 ? skippedHiring[0].message : `${skippedHiring.length} employees were skipped because their joining date is after this period.`)
-        : null
+      skippedErrors
     });
 
   } catch (err) {
@@ -780,9 +927,10 @@ exports.getPayrolls = async (req, res) => {
         },
         components: true
       },
-      orderBy: {
-        periodStart: "desc"
-      }
+      orderBy: [
+        { periodStart: "desc" },
+        { createdAt: "desc" }
+      ]
     });
 
     const formatted = payrolls.map(p => {
@@ -1660,7 +1808,8 @@ exports.generateRunPayrolls = async (req, res) => {
         paidLeaves,
         unpaidLeaves,
         leaveDays,
-        lateDays
+        lateDays,
+        halfDays
       } = calculatePayrollAttendance({
         employee: emp,
         periodStart,
@@ -1674,22 +1823,31 @@ exports.generateRunPayrolls = async (req, res) => {
       const rate = Number(emp.payroll.rate) || 0;
       const payoutType = emp.payroll.payoutType || "monthly";
       let dailyRate = workingDays > 0 ? (rate / workingDays) : (rate / 30);
-      let absentDeduction = 0;
       let baseSalary = rate;
+
+      // 1. Absent Days (full daily rate per day)
+      const absentDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+
+      // 2. Unpaid Leaves (full daily rate per unpaid / excess leave day)
+      const unpaidLeaveDeduction = Math.round(unpaidLeaves * dailyRate * 100) / 100;
+
+      // 3. Half Day (0.5 daily rate per half day)
+      const halfDayDeduction = Math.round(halfDays * 0.5 * dailyRate * 100) / 100;
+
+      // 4. Tardies (Option B: 1/3 day = ~0.3333 daily rate per tardy)
+      const tardyDeduction = Math.round(lateDays * (dailyRate / 3) * 100) / 100;
 
       if (payoutType === "daily") {
         dailyRate = rate;
         baseSalary = (presentDays + paidLeaves) * dailyRate;
-        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
       } else if (payoutType === "hourly") {
         const totalMinutes = attendance.reduce((sum, a) => sum + (Number(a.totalWorkedMinutes) || 0), 0);
         baseSalary = (totalMinutes / 60) * rate;
-      } else {
-        absentDeduction = (absentDays + unpaidLeaves) * dailyRate;
       }
 
+      const totalAttendanceDeductions = absentDeduction + unpaidLeaveDeduction + halfDayDeduction + tardyDeduction;
       const grossSalary = Math.max(0, baseSalary + overtimeAmount);
-      const netSalary = Math.max(0, grossSalary - absentDeduction);
+      const netSalary = Math.max(0, grossSalary - totalAttendanceDeductions);
 
       const payroll = await prisma.payroll.create({
         data: {
@@ -1732,7 +1890,43 @@ exports.generateRunPayrolls = async (req, res) => {
             payrollId: payroll.id,
             type: "DEDUCTION",
             title: "Unpaid Days",
-            amount: Math.round(Number(absentDeduction) * 100) / 100,
+            amount: absentDeduction,
+            createdById: req.user.id
+          }
+        });
+      }
+
+      if (Number(unpaidLeaveDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Unpaid Leaves",
+            amount: unpaidLeaveDeduction,
+            createdById: req.user.id
+          }
+        });
+      }
+
+      if (Number(halfDayDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Half Day Deduction",
+            amount: halfDayDeduction,
+            createdById: req.user.id
+          }
+        });
+      }
+
+      if (Number(tardyDeduction) > 0) {
+        await prisma.payrollComponent.create({
+          data: {
+            payrollId: payroll.id,
+            type: "DEDUCTION",
+            title: "Tardies",
+            amount: tardyDeduction,
             createdById: req.user.id
           }
         });

@@ -10,6 +10,7 @@ import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import { Pencil, Plus, Trash2, Eye, AlertTriangle, RefreshCw, Cpu, Server, Wifi, WifiOff, CheckCircle2, ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Briefcase } from "lucide-react";
 import { locationAPI, organizationAPI, leaveAPI, invoiceCompanyAPI, API_URL } from "../services/api";
+import { useOrganization } from "../contexts/OrganizationContext";
 import { deviceService, BiometricDevice } from "../services/device.service";
 import ReactSelect from 'react-select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "../components/ui/dialog";
@@ -18,6 +19,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 
 const ALL_TIMEZONES = Intl.supportedValuesOf('timeZone');
 export default function Organization() {
+  const { setOrganizationTitle, updateOrganizationTitle, revertOrganizationTitle } = useOrganization();
+  const savedTitleRef = React.useRef("");
 
   const [editMode, setEditMode] = useState(false);
   const [zkConfig, setZkConfig] = useState(null);
@@ -316,8 +319,12 @@ export default function Organization() {
       const location = await locationAPI.getLocations();
       setLocations(location.data)
 
+      const orgName = res.name || "";
+      savedTitleRef.current = orgName;
+      updateOrganizationTitle(orgName);
+
       setForm({
-        title: res.name,
+        title: orgName,
         phone: res.phone || "",
         email: res.email || "",
         emergencyContact: res.emergencyContact || "",
@@ -451,6 +458,8 @@ export default function Organization() {
         timeZone: form.orgTimeZone,
       });
 
+      savedTitleRef.current = form.title || "";
+      updateOrganizationTitle(form.title || "");
       toast.success("Organization profile updated successfully!");
       setEditMode(false);
 
@@ -458,6 +467,18 @@ export default function Organization() {
       toast.error("Failed to update organization profile");
     }
   };
+
+  const handleCancel = () => {
+    setForm((prev) => ({ ...prev, title: savedTitleRef.current }));
+    revertOrganizationTitle();
+    setEditMode(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      revertOrganizationTitle();
+    };
+  }, [revertOrganizationTitle]);
 
   const handleTestConnect = async () => {
     if (!ip || !port || !zkLocation) {
@@ -540,7 +561,10 @@ export default function Organization() {
               <CardTitle className="text-base font-semibold text-gray-900 dark:text-gray-100">Organization Profile</CardTitle>
 
               {!editMode && (
-                <Button variant="outline" size="sm" onClick={() => setEditMode(true)} className="h-9 px-3.5 text-xs font-semibold gap-1.5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300">
+                <Button variant="outline" size="sm" onClick={() => {
+                  savedTitleRef.current = form.title || "";
+                  setEditMode(true);
+                }} className="h-9 px-3.5 text-xs font-semibold gap-1.5 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:border-blue-900 dark:text-blue-300">
                   <Pencil className="h-3.5 w-3.5" />
                   Edit
                 </Button>
@@ -557,7 +581,11 @@ export default function Organization() {
                     className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 disabled:opacity-100 disabled:bg-gray-50 dark:disabled:bg-gray-900 disabled:text-gray-900 disabled:cursor-default"
                     disabled={!editMode}
                     value={form.title}
-                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm({ ...form, title: val });
+                      setOrganizationTitle(val);
+                    }}
                   />
                 </div>
 
@@ -775,7 +803,7 @@ export default function Organization() {
 
               {editMode && (
                 <div className="flex justify-end gap-3 pt-4">
-                  <Button variant="outline" onClick={() => setEditMode(false)}>
+                  <Button variant="outline" onClick={handleCancel}>
                     Cancel
                   </Button>
 

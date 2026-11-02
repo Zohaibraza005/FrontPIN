@@ -453,6 +453,8 @@ function startHikvisionStream(device, processPunchCallback) {
                         method: eventObj?.currentVerifyMode || "HIKVISION_FACE",
                         employeeName: eventObj?.name ? String(eventObj.name).trim() : null,
                         direction: device.direction,
+                        organizationId: device.organizationId,
+                        companyId: device.companyId,
                       }).catch((err) => console.error("Error processing stream punch:", err));
                     }
                   }
@@ -622,6 +624,8 @@ async function syncHikvisionDeviceLogs(device, processPunchCallback, startTime =
         method: ev.verifyMode || "HIKVISION_FACE",
         employeeName: ev.name,
         direction: device.direction,
+        organizationId: device.organizationId,
+        companyId: device.companyId,
       });
       if (res?.success) processedCount++;
     }
@@ -775,84 +779,97 @@ async function pushHikvisionFingerprint(device, employeeNo, fp) {
  */
 async function syncBiometricsAcrossDevices(prisma) {
   try {
-    const devices = await prisma.biometricDevice.findMany({
+    const allDevices = await prisma.biometricDevice.findMany({
       where: { brand: "HIKVISION", deletedAt: null, status: { not: "OFFLINE" } },
     });
 
-    if (devices.length < 2) {
+    if (allDevices.length < 2) {
       console.log("[Hikvision Cross-Sync] 1 or no devices registered. Single device active.");
       return { success: true, message: "Sync complete." };
     }
 
-    console.log(`[Hikvision Cross-Sync] Starting biometrics cross-sync across ${devices.length} devices...`);
-
-    // 1️⃣ Fetch enrolled users from all active terminals
-    const deviceUserMap = new Map();
-    const allUsersMap = new Map();
-
-    for (const dev of devices) {
-      const uList = await fetchHikvisionUsers(dev);
-      deviceUserMap.set(dev.id, uList);
-      console.log(`[Hikvision Cross-Sync] ${dev.name} (${dev.ipAddress}) has ${uList.length} user(s), ${uList.filter(u => (u.numOfFP || 0) > 0).length} with FP.`);
-      uList.forEach((u) => {
-        const empNo = String(u.employeeNo).trim();
-        if (empNo && !allUsersMap.has(empNo)) {
-          allUsersMap.set(empNo, {
-            employeeNo: empNo,
-            name: u.name || `User ${empNo}`,
-            userType: u.userType || "normal",
-            Valid: u.Valid,
-            sourceDevice: dev,
-          });
-        }
-      });
+    // Group devices strictly by organizationId so cross-sync ONLY happens within each organization!
+    const orgDevicesMap = new Map();
+    for (const dev of allDevices) {
+      const orgKey = dev.organizationId || 0;
+      if (!orgDevicesMap.has(orgKey)) orgDevicesMap.set(orgKey, []);
+      orgDevicesMap.get(orgKey).push(dev);
     }
 
-    // 2️⃣ Cross-push missing user profiles so all terminals contain every user
-    let pushedUsers = 0;
-    for (const [employeeNo, uInfo] of allUsersMap.entries()) {
+    let totalPushedUsers = 0;
+    let totalPushedFPs = 0;
+
+    for (const [orgId, devices] of orgDevicesMap.entries()) {
+      if (devices.length < 2) continue;
+
+      console.log(`[Hikvision Cross-Sync] Starting biometrics cross-sync for Org ${orgId} across ${devices.length} devices...`);
+
+      // 1️⃣ Fetch enrolled users from all active terminals in this org
+      const deviceUserMap = new Map();
+      const allUsersMap = new Map();
+
       for (const dev of devices) {
-        const devUsers = deviceUserMap.get(dev.id) || [];
-        const exists = devUsers.some((u) => String(u.employeeNo).trim() === employeeNo);
-        if (!exists) {
-          console.log(`[Hikvision Cross-Sync] Copying user ${uInfo.name} (${employeeNo}) -> ${dev.name}`);
-          const pushed = await pushUserToHikvision(dev, {
-            biometricId: employeeNo,
-            name: uInfo.name,
-          });
-          if (pushed) {
-            pushedUsers++;
-            devUsers.push({ employeeNo, name: uInfo.name, numOfFP: 0 });
+        const uList = await fetchHikvisionUsers(dev);
+        deviceUserMap.set(dev.id, uList);
+        console.log(`[Hikvision Cross-Sync] ${dev.name} (${dev.ipAddress}) has ${uList.length} user(s), ${uList.filter(u => (u.numOfFP || 0) > 0).length} with FP.`);
+        uList.forEach((u) => {
+          const empNo = String(u.employeeNo).trim();
+          if (empNo && !allUsersMap.has(empNo)) {
+            allUsersMap.set(empNo, {
+              employeeNo: empNo,
+              name: u.name || `User ${empNo}`,
+              userType: u.userType || "normal",
+              Valid: u.Valid,
+              sourceDevice: dev,
+            });
+          }
+        });
+      }
+
+      // 2️⃣ Cross-push missing user profiles so all terminals in this org contain every user
+      for (const [employeeNo, uInfo] of allUsersMap.entries()) {
+        for (const dev of devices) {
+          const devUsers = deviceUserMap.get(dev.id) || [];
+          const exists = devUsers.some((u) => String(u.employeeNo).trim() === employeeNo);
+          if (!exists) {
+            console.log(`[Hikvision Cross-Sync] Copying user ${uInfo.name} (${employeeNo}) -> ${dev.name}`);
+            const pushed = await pushUserToHikvision(dev, {
+              biometricId: employeeNo,
+              name: uInfo.name,
+            });
+            if (pushed) {
+              totalPushedUsers++;
+              devUsers.push({ employeeNo, name: uInfo.name, numOfFP: 0 });
+            }
           }
         }
       }
-    }
 
-    // 3️⃣ Cross-sync missing fingerprints across terminals
-    let pushedFPs = 0;
-    for (const [employeeNo, uInfo] of allUsersMap.entries()) {
-      let donorDev = null;
-      const targetDevs = [];
+      // 3️⃣ Cross-sync missing fingerprints across terminals in this org
+      for (const [employeeNo, uInfo] of allUsersMap.entries()) {
+        let donorDev = null;
+        const targetDevs = [];
 
-      for (const dev of devices) {
-        const devUsers = deviceUserMap.get(dev.id) || [];
-        const u = devUsers.find((x) => String(x.employeeNo).trim() === employeeNo);
-        if (u && (u.numOfFP || 0) > 0) {
-          if (!donorDev) donorDev = dev;
-        } else {
-          targetDevs.push(dev);
+        for (const dev of devices) {
+          const devUsers = deviceUserMap.get(dev.id) || [];
+          const u = devUsers.find((x) => String(x.employeeNo).trim() === employeeNo);
+          if (u && (u.numOfFP || 0) > 0) {
+            if (!donorDev) donorDev = dev;
+          } else {
+            targetDevs.push(dev);
+          }
         }
-      }
 
-      if (donorDev && targetDevs.length > 0) {
-        const fps = await fetchHikvisionFingerprints(donorDev, employeeNo);
-        if (fps && fps.length > 0) {
-          for (const targetDev of targetDevs) {
-            for (const fp of fps) {
-              const ok = await pushHikvisionFingerprint(targetDev, employeeNo, fp);
-              if (ok) {
-                console.log(`[Hikvision Cross-Sync] Cloned FP for emp ${employeeNo} (${uInfo.name}) from ${donorDev.name} -> ${targetDev.name}`);
-                pushedFPs++;
+        if (donorDev && targetDevs.length > 0) {
+          const fps = await fetchHikvisionFingerprints(donorDev, employeeNo);
+          if (fps && fps.length > 0) {
+            for (const targetDev of targetDevs) {
+              for (const fp of fps) {
+                const ok = await pushHikvisionFingerprint(targetDev, employeeNo, fp);
+                if (ok) {
+                  console.log(`[Hikvision Cross-Sync] Cloned FP for emp ${employeeNo} (${uInfo.name}) from ${donorDev.name} -> ${targetDev.name}`);
+                  totalPushedFPs++;
+                }
               }
             }
           }
@@ -860,8 +877,8 @@ async function syncBiometricsAcrossDevices(prisma) {
       }
     }
 
-    console.log(`[Hikvision Cross-Sync] Completed. ${pushedUsers} user(s) and ${pushedFPs} fingerprint(s) synced.`);
-    return { success: true, pushedUsers, pushedFPs };
+    console.log(`[Hikvision Cross-Sync] Completed. ${totalPushedUsers} user(s) and ${totalPushedFPs} fingerprint(s) synced.`);
+    return { success: true, pushedUsers: totalPushedUsers, pushedFPs: totalPushedFPs };
   } catch (error) {
     console.error("[Hikvision Cross-Sync Error]:", error.message);
     return { success: false, error: error.message };

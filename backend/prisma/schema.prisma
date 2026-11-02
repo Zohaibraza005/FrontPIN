@@ -95,6 +95,7 @@ model Organization {
   Entity         Entity[]
   AppRole        AppRole[]
   Visitor        Visitor[]
+  biometricDevices BiometricDevice[]
   
   @@index([deletedAt])
   @@map("organization")
@@ -133,6 +134,7 @@ model Company {
   Schedule   Schedule[]
   Entity     Entity[]
   Visitor    Visitor[]
+  biometricDevices BiometricDevice[]
 
   @@index([organizationId])
   @@index([deletedAt])
@@ -1356,21 +1358,27 @@ enum DeviceBrand {
 }
 
 model BiometricDevice {
-  id           Int         @id @default(autoincrement())
-  name         String
-  brand        DeviceBrand @default(HIKVISION)
-  ipAddress    String      @unique
-  port         Int         @default(4370)
-  username     String?
-  password     String?
-  companyId    Int?
-  status       String      @default("OFFLINE") // ONLINE | OFFLINE
-  lastSyncedAt DateTime?
+  id             Int          @id @default(autoincrement())
+  name           String
+  brand          DeviceBrand  @default(HIKVISION)
+  ipAddress      String       @unique
+  port           Int          @default(4370)
+  username       String?
+  password       String?
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      Int?
+  company        Company?      @relation(fields: [companyId], references: [id])
+  direction      String?       @default("AUTO")
+  status         String        @default("OFFLINE") // ONLINE | OFFLINE
+  lastSyncedAt   DateTime?
 
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  deletedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
 
+  @@index([organizationId])
+  @@index([companyId])
   @@index([brand])
   @@index([status])
   @@map("biometricdevice")

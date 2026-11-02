@@ -182,6 +182,23 @@ export const Visitors: React.FC = () => {
   const [isPushingMachine, setIsPushingMachine] = useState(false);
   const [pushingId, setPushingId] = useState<number | null>(null);
   const [isSyncingMachine, setIsSyncingMachine] = useState(false);
+  const [hasDevices, setHasDevices] = useState(false);
+
+  useEffect(() => {
+    const checkDevices = async () => {
+      try {
+        const res = await deviceService.getDevices();
+        if (res && res.success && Array.isArray(res.data)) {
+          setHasDevices(res.data.length > 0);
+        } else {
+          setHasDevices(false);
+        }
+      } catch (e) {
+        setHasDevices(false);
+      }
+    };
+    checkDevices();
+  }, []);
 
   const selectedDateRef = React.useRef(selectedDate);
   useEffect(() => {
@@ -189,6 +206,10 @@ export const Visitors: React.FC = () => {
   }, [selectedDate]);
 
   const handleSyncVisitors = async () => {
+    if (!hasDevices) {
+      toast.error('No biometric device connected. Please add a device in Organization Settings -> Integrations first.');
+      return;
+    }
     try {
       setIsSyncingMachine(true);
       const targetDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined;
@@ -214,6 +235,10 @@ export const Visitors: React.FC = () => {
   };
 
   const handlePushToMachine = async (visitorId?: number, visitorName?: string) => {
+    if (!hasDevices) {
+      toast.error('No biometric device connected. Please add a device in Organization Settings -> Integrations first.');
+      return;
+    }
     try {
       if (visitorId) {
         setPushingId(visitorId);
@@ -799,11 +824,19 @@ export const Visitors: React.FC = () => {
           <Button
             variant="outline"
             onClick={() => handlePushToMachine()}
-            disabled={isPushingMachine}
-            className="w-full sm:w-auto border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800 font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2"
-            title="Push all active visitors to biometric machines"
+            disabled={isPushingMachine || !hasDevices}
+            className={`w-full sm:w-auto font-semibold shadow-2xs rounded-xl h-10 px-3.5 flex items-center gap-2 ${
+              !hasDevices
+                ? 'border-gray-200 text-gray-400 bg-gray-50/70 cursor-not-allowed opacity-60'
+                : 'border-sky-200 text-sky-700 bg-sky-50/80 hover:bg-sky-100 hover:text-sky-800'
+            }`}
+            title={
+              !hasDevices
+                ? "No biometric device connected. Connect a device in Organization Settings -> Integrations first."
+                : "Push all active visitors to biometric machines"
+            }
           >
-            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : 'text-sky-600'}`} />
+            <Cpu className={`size-4 ${isPushingMachine ? 'animate-spin text-sky-600' : (!hasDevices ? 'text-gray-400' : 'text-sky-600')}`} />
             <span>{isPushingMachine ? 'Pushing...' : 'Push to Machine'}</span>
           </Button>
 
@@ -1218,19 +1251,25 @@ export const Visitors: React.FC = () => {
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handlePushToMachine(v.id, v.fullName)}
-                                disabled={isPushingMachine || pushingId === v.id}
-                                className="h-8 w-8 text-gray-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
-                                title="Push to Machine"
-                              >
-                                <Cpu className={`size-4 ${pushingId === v.id ? 'animate-spin text-sky-600' : ''}`} />
-                              </Button>
+                              <span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handlePushToMachine(v.id, v.fullName)}
+                                  disabled={isPushingMachine || pushingId === v.id || !hasDevices}
+                                  className={`h-8 w-8 rounded-lg ${
+                                    !hasDevices
+                                      ? 'text-gray-300 cursor-not-allowed opacity-50'
+                                      : 'text-gray-600 hover:text-sky-600 hover:bg-sky-50'
+                                  }`}
+                                  title={!hasDevices ? "No biometric device connected" : "Push to Machine"}
+                                >
+                                  <Cpu className={`size-4 ${pushingId === v.id ? 'animate-spin text-sky-600' : ''}`} />
+                                </Button>
+                              </span>
                             </TooltipTrigger>
                             <TooltipContent side="top">
-                              <p>Push to Machine</p>
+                              <p>{!hasDevices ? "No biometric device connected" : "Push to Machine"}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
@@ -1448,17 +1487,23 @@ export const Visitors: React.FC = () => {
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            onClick={() => handlePushToMachine(v.id, v.fullName)}
-                            disabled={isPushingMachine || pushingId === v.id}
-                            className="h-8 w-8 text-sky-700 hover:text-sky-800 hover:bg-sky-50 border-gray-200 rounded-xl"
-                          >
-                            <Cpu className={`size-3.5 ${pushingId === v.id ? 'animate-spin' : ''}`} />
-                          </Button>
+                          <span>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => handlePushToMachine(v.id, v.fullName)}
+                              disabled={isPushingMachine || pushingId === v.id || !hasDevices}
+                              className={`h-8 w-8 border-gray-200 rounded-xl ${
+                                !hasDevices
+                                  ? 'text-gray-400 bg-gray-50/70 cursor-not-allowed opacity-60'
+                                  : 'text-sky-700 hover:text-sky-800 hover:bg-sky-50'
+                              }`}
+                            >
+                              <Cpu className={`size-3.5 ${pushingId === v.id ? 'animate-spin' : ''}`} />
+                            </Button>
+                          </span>
                         </TooltipTrigger>
-                        <TooltipContent side="top">Push to Machine</TooltipContent>
+                        <TooltipContent side="top">{!hasDevices ? "No biometric device connected" : "Push to Machine"}</TooltipContent>
                       </Tooltip>
 
                       <Tooltip>

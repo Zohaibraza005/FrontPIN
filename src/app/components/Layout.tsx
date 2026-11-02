@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate, Link, useLocation } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
+import { useOrganization } from '../contexts/OrganizationContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useTour } from '../contexts/TourContext';
 import {
@@ -263,6 +264,7 @@ const CollapsibleSidebarItem: React.FC<CollapsibleSidebarItemProps> = ({
 export const Layout: React.FC = () => {
 
   const { user, logout, isAuthenticated } = useAuth();
+  const { organizationTitle } = useOrganization();
   const { notifications, unreadCount, markAsRead } = useNotifications();
   const { startTour } = useTour();
   const navigate = useNavigate();
@@ -899,12 +901,15 @@ export const Layout: React.FC = () => {
           {/* Fixed top header */}
           <div className="flex h-16 items-center justify-between border-b border-gray-200 px-6 shrink-0">
             {sidebarOpen ? (
-              <div className="flex flex-col">
-                <h1 className="text-xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent leading-tight">
+              <div className="flex flex-col min-w-0 pr-2">
+                <h1 className="text-xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent leading-tight truncate">
                   HR Pro
                 </h1>
-                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Management System
+                <span
+                  className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider truncate max-w-[170px]"
+                  title={organizationTitle || "Management System"}
+                >
+                  {organizationTitle || "Management System"}
                 </span>
               </div>
             ) : (

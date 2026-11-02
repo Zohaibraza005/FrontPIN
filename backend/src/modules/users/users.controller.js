@@ -125,72 +125,147 @@ exports.createEmployee = async (req, res) => {
       }
     }
 
+    // Deduplicate and normalize privileges by module to avoid unique key conflicts
+    const privMap = new Map();
+    if (Array.isArray(parsedPrivileges)) {
+      for (const p of parsedPrivileges) {
+        const rawMod = typeof p === "string" ? p : p?.module;
+        if (!rawMod) continue;
+        const mod = String(rawMod).trim().toUpperCase();
+        const canRead = typeof p === "string" ? true : (p.canRead ?? true);
+        const canCreate = typeof p === "string" ? false : Boolean(p.canCreate);
+        const canUpdate = typeof p === "string" ? false : Boolean(p.canUpdate);
+        const canDelete = typeof p === "string" ? false : Boolean(p.canDelete);
+        const ownTeamOnly = typeof p === "string" ? false : Boolean(p.ownTeamOnly);
+
+        if (privMap.has(mod)) {
+          const existing = privMap.get(mod);
+          privMap.set(mod, {
+            module: mod,
+            canRead: existing.canRead || canRead,
+            canCreate: existing.canCreate || canCreate,
+            canUpdate: existing.canUpdate || canUpdate,
+            canDelete: existing.canDelete || canDelete,
+            ownTeamOnly: existing.ownTeamOnly || ownTeamOnly,
+          });
+        } else {
+          privMap.set(mod, {
+            module: mod,
+            canRead,
+            canCreate,
+            canUpdate,
+            canDelete,
+            ownTeamOnly,
+          });
+        }
+      }
+    }
+    const cleanPrivileges = Array.from(privMap.values());
+
     ////////////////////////////////////////////////////
-    // 🔍 DUPLICATE CHECKS (ORG LEVEL SAFE)
+    // 🔍 COMPREHENSIVE DUPLICATE CHECKS
     ////////////////////////////////////////////////////
 
-    const existingUser = await prisma.employee.findFirst({
-      where: {
-        organizationId: orgId,
-        OR: [
-          { username: parsedPersonal.username },
-          { email: parsedPersonal.email },
-          parsedPersonal.employeeId
-            ? { employeeId: parsedPersonal.employeeId }
-            : undefined,
-          parsedPersonal.phoneNumber
-            ? { phoneNumber: parsedPersonal.phoneNumber }
-            : undefined,
-          parsedPersonal.nationalId
-            ? { nationalId: parsedPersonal.nationalId }
-            : undefined,
-        ].filter(Boolean),
-      },
-    });
+    const cleanUsername = parsedPersonal.username ? String(parsedPersonal.username).trim() : "";
+    const cleanEmail = parsedPersonal.email ? String(parsedPersonal.email).trim().toLowerCase() : "";
+    const cleanEmpId = parsedPersonal.employeeId ? String(parsedPersonal.employeeId).trim() : null;
+    const cleanBioId = parsedPersonal.biometricId ? String(parsedPersonal.biometricId).trim() : null;
+    const cleanPhone = parsedPersonal.phoneNumber ? String(parsedPersonal.phoneNumber).trim() : null;
+    const cleanNationalId = parsedPersonal.nationalId ? String(parsedPersonal.nationalId).trim() : null;
 
-    if (existingUser) {
-      if (existingUser.username === parsedPersonal.username) {
+    if (cleanEmail) {
+      const existingEmail = await prisma.employee.findFirst({
+        where: { email: cleanEmail, deletedAt: null },
+        select: { id: true, organizationId: true },
+      });
+      if (existingEmail) {
         return res.status(400).json({
           success: false,
-          message: "Username already exists",
+          message: "Email already exists. Please choose a different email.",
         });
       }
+    }
 
-      if (existingUser.email === parsedPersonal.email) {
+    if (cleanUsername) {
+      const existingUsername = await prisma.employee.findFirst({
+        where: { username: cleanUsername, deletedAt: null },
+        select: { id: true, organizationId: true },
+      });
+      if (existingUsername) {
         return res.status(400).json({
           success: false,
-          message: "Email already exists",
+          message: "Username already exists. Please choose a different username.",
         });
       }
+    }
 
-      if (
-        parsedPersonal.employeeId &&
-        existingUser.employeeId === parsedPersonal.employeeId
-      ) {
+    if (cleanEmpId) {
+      const existingEmpId = await prisma.employee.findFirst({
+        where: { employeeId: cleanEmpId, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingEmpId) {
         return res.status(400).json({
           success: false,
-          message: "Employee ID already exists",
+          message: "Employee ID already exists. Please choose a different Employee ID.",
         });
       }
+    }
 
-      if (
-        parsedPersonal.phoneNumber &&
-        existingUser.phoneNumber === parsedPersonal.phoneNumber
-      ) {
+    if (cleanBioId) {
+      const existingBioId = await prisma.employee.findFirst({
+        where: { biometricId: cleanBioId, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingBioId) {
         return res.status(400).json({
           success: false,
-          message: "Phone number already exists",
+          message: "Biometric ID already exists. Please choose a different Biometric ID.",
         });
       }
+    }
 
-      if (
-        parsedPersonal.nationalId &&
-        existingUser.nationalId === parsedPersonal.nationalId
-      ) {
+    if (cleanPhone) {
+      const existingPhone = await prisma.employee.findFirst({
+        where: { organizationId: orgId, phoneNumber: cleanPhone, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingPhone) {
         return res.status(400).json({
           success: false,
-          message: "National ID already exists",
+          message: "Phone number already exists in this company.",
         });
+      }
+    }
+
+    if (cleanNationalId) {
+      const existingNationalId = await prisma.employee.findFirst({
+        where: { organizationId: orgId, nationalId: cleanNationalId, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingNationalId) {
+        return res.status(400).json({
+          success: false,
+          message: "National ID already exists in this company.",
+        });
+      }
+    }
+
+    ////////////////////////////////////////////////////
+    // 🏢 SAFE COMPANY RESOLUTION
+    ////////////////////////////////////////////////////
+
+    let targetCompanyId = parsedPersonal.companyId && !isNaN(parseInt(parsedPersonal.companyId))
+      ? parseInt(parsedPersonal.companyId)
+      : (req.user?.companyId || null);
+
+    if (!targetCompanyId) {
+      const defaultCompany = await prisma.company.findFirst({
+        where: { organizationId: orgId, deletedAt: null },
+        select: { id: true },
+      });
+      if (defaultCompany) {
+        targetCompanyId = defaultCompany.id;
       }
     }
 
@@ -213,16 +288,16 @@ exports.createEmployee = async (req, res) => {
         data: {
           firstName: parsedPersonal.firstName,
           lastName: parsedPersonal.lastName,
-          username: parsedPersonal.username,
-          email: parsedPersonal.email,
+          username: cleanUsername,
+          email: cleanEmail,
 
           password: canLogin ? hashedPassword : null,
           pin: canLogin ? parsedPersonal.pin || null : null,
 
-          employeeId: parsedPersonal.employeeId || null,
-          biometricId: parsedPersonal.biometricId || null,
-          phoneNumber: parsedPersonal.phoneNumber || null,
-          nationalId: parsedPersonal.nationalId || null,
+          employeeId: cleanEmpId,
+          biometricId: cleanBioId,
+          phoneNumber: cleanPhone,
+          nationalId: cleanNationalId,
 
           gender: parsedPersonal.gender || null,
           age: parsedPersonal.age ? parseInt(parsedPersonal.age) : null,
@@ -241,17 +316,17 @@ exports.createEmployee = async (req, res) => {
             : "USER",
 
           organizationId: orgId,
-          companyId: parseInt(parsedPersonal.companyId),
-          departmentId: parsedPersonal.departmentId
+          companyId: targetCompanyId,
+          departmentId: parsedPersonal.departmentId && !isNaN(parseInt(parsedPersonal.departmentId))
             ? parseInt(parsedPersonal.departmentId)
             : null,
-          entityId: parsedPersonal.entityId
+          entityId: parsedPersonal.entityId && !isNaN(parseInt(parsedPersonal.entityId))
             ? parseInt(parsedPersonal.entityId)
             : null,
-          roleId: parsedPersonal.roleId
+          roleId: parsedPersonal.roleId && !isNaN(parseInt(parsedPersonal.roleId))
             ? parseInt(parsedPersonal.roleId)
             : null,
-          supervisorId: parsedPersonal.supervisorId
+          supervisorId: parsedPersonal.supervisorId && !isNaN(parseInt(parsedPersonal.supervisorId))
             ? parseInt(parsedPersonal.supervisorId)
             : null,
 
@@ -275,10 +350,10 @@ exports.createEmployee = async (req, res) => {
 
           payroll: {
             create: {
-              payoutType: parsedPayroll.payoutType,
-              rate: parseFloat(parsedPayroll.rate),
-              currency: parsedPayroll.currency,
-              cycleDate: parseInt(parsedPayroll.cycleDate),
+              payoutType: parsedPayroll.payoutType || "monthly",
+              rate: parseFloat(parsedPayroll.rate) || 0,
+              currency: parsedPayroll.currency || "PKR",
+              cycleDate: parseInt(parsedPayroll.cycleDate) || 1,
               overtimeRate: parsedPayroll.overtimeRate
                 ? parseFloat(parsedPayroll.overtimeRate)
                 : null,
@@ -286,22 +361,14 @@ exports.createEmployee = async (req, res) => {
           },
 
           privileges: {
-            create: parsedPrivileges.map((p) => {
-              const mod = typeof p === "string" ? p : p.module;
-              const canRead = typeof p === "string" ? true : (p.canRead ?? true);
-              const canCreate = typeof p === "string" ? false : (p.canCreate || false);
-              const canUpdate = typeof p === "string" ? false : (p.canUpdate || false);
-              const canDelete = typeof p === "string" ? false : (p.canDelete || false);
-              const ownTeamOnly = typeof p === "string" ? false : (p.ownTeamOnly || false);
-              return {
-                module: mod.toUpperCase(),
-                canRead,
-                canCreate,
-                canUpdate,
-                canDelete,
-                ownTeamOnly,
-              };
-            }),
+            create: cleanPrivileges.map((p) => ({
+              module: p.module,
+              canRead: p.canRead ?? true,
+              canCreate: p.canCreate || false,
+              canUpdate: p.canUpdate || false,
+              canDelete: p.canDelete || false,
+              ownTeamOnly: p.ownTeamOnly || false,
+            })),
           },
         },
         include: {
@@ -319,7 +386,11 @@ exports.createEmployee = async (req, res) => {
       try {
         const { pushUserToHikvision } = require("../devices/hikvision.service");
         const activeDevices = await prisma.biometricDevice.findMany({
-          where: { brand: "HIKVISION", deletedAt: null },
+          where: {
+            brand: "HIKVISION",
+            deletedAt: null,
+            organizationId: employee.organizationId || orgId,
+          },
         });
         activeDevices.forEach((device) => {
           pushUserToHikvision(device, {
@@ -339,16 +410,16 @@ exports.createEmployee = async (req, res) => {
       await prisma.schedule.create({
         data: {
           employeeId: employee.id,
-          companyId: employee.companyId || null,
+          companyId: employee.companyId || targetCompanyId || null,
           startTime: "09:00",
           endTime: "18:00",
           days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
           overtimeAllowed: isOtAllowed,
           overtimeMinutes: maxHours > 0 ? maxHours * 60 : 120,
           allowEarlyIn: true,
-          earlyInMargin: 15,
+          earlyInMinutes: 15,
           allowEarlyOut: true,
-          earlyOutMargin: 15,
+          earlyOutMinutes: 15,
           allowHalfDay: false,
           halfDayMinutes: 240,
           breaksAllowed: true,
@@ -369,15 +440,37 @@ exports.createEmployee = async (req, res) => {
 
     // 🔥 Prisma Unique Constraint Catch
     if (error.code === "P2002") {
+      let targetField = "A duplicate record";
+      const rawTarget = Array.isArray(error.meta?.target)
+        ? error.meta.target.join(", ")
+        : String(error.meta?.target || "");
+
+      const lower = rawTarget.toLowerCase();
+      if (lower.includes("username")) {
+        targetField = "Username already exists. Please choose a different username.";
+      } else if (lower.includes("email")) {
+        targetField = "Email already exists. Please choose a different email.";
+      } else if (lower.includes("employeeid") || lower.includes("employee_id")) {
+        targetField = "Employee ID already exists. Please choose a different Employee ID.";
+      } else if (lower.includes("biometricid") || lower.includes("biometric_id")) {
+        targetField = "Biometric ID already exists. Please choose a different Biometric ID.";
+      } else if (lower.includes("phonenumber") || lower.includes("phone")) {
+        targetField = "Phone number already exists in this company.";
+      } else if (lower.includes("nationalid")) {
+        targetField = "National ID already exists in this company.";
+      } else {
+        targetField = `Duplicate value error for: ${rawTarget || "unique constraint"}`;
+      }
+
       return res.status(400).json({
         success: false,
-        message: `Duplicate value for: ${error.meta.target.join(", ")}`,
+        message: targetField,
       });
     }
 
     return res.status(500).json({
       success: false,
-      message: "Failed to create employee",
+      message: error.message || "Failed to create employee",
     });
   }
 };
@@ -633,9 +726,39 @@ exports.updateEmployee = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Employee Error:", error);
+
+    if (error.code === "P2002") {
+      let targetField = "A duplicate record";
+      const rawTarget = Array.isArray(error.meta?.target)
+        ? error.meta.target.join(", ")
+        : String(error.meta?.target || "");
+
+      const lower = rawTarget.toLowerCase();
+      if (lower.includes("username")) {
+        targetField = "Username already exists. Please choose a different username.";
+      } else if (lower.includes("email")) {
+        targetField = "Email already exists. Please choose a different email.";
+      } else if (lower.includes("employeeid") || lower.includes("employee_id")) {
+        targetField = "Employee ID already exists. Please choose a different Employee ID.";
+      } else if (lower.includes("biometricid") || lower.includes("biometric_id")) {
+        targetField = "Biometric ID already exists. Please choose a different Biometric ID.";
+      } else if (lower.includes("phonenumber") || lower.includes("phone")) {
+        targetField = "Phone number already exists in this company.";
+      } else if (lower.includes("nationalid")) {
+        targetField = "National ID already exists in this company.";
+      } else {
+        targetField = `Duplicate value error for: ${rawTarget || "unique constraint"}`;
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: targetField,
+      });
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Failed to update employee",
+      message: error.message || "Failed to update employee",
     });
   }
 };
@@ -1333,9 +1456,13 @@ exports.importEmployees = async (req, res) => {
       });
     }
 
-    // Find active Hikvision devices and fetch current machine users for ID matching
+    // Find active Hikvision devices for this organization and fetch current machine users for ID matching
     const activeHikvisionDevices = await prisma.biometricDevice.findMany({
-      where: { brand: "HIKVISION", deletedAt: null },
+      where: {
+        brand: "HIKVISION",
+        deletedAt: null,
+        organizationId: orgId,
+      },
     });
 
     let machineUserList = [];
@@ -1521,11 +1648,11 @@ exports.getNextBiometricId = async (req, res) => {
       }
     }
 
-    // Ensure candidate nextBiometricId does not clash with any existing unique biometricId
+    // Ensure candidate nextBiometricId does not clash with any existing unique biometricId across the entire database
     const existingIds = new Set(
       (
         await prisma.employee.findMany({
-          where: { organizationId: orgId, biometricId: { not: null } },
+          where: { biometricId: { not: null } },
           select: { biometricId: true },
         })
       ).map((e) => String(e.biometricId).trim())

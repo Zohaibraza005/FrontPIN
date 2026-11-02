@@ -463,10 +463,13 @@ export const AddEmployee: React.FC = () => {
         message.toLowerCase().includes("email") ||
         message.toLowerCase().includes("phone") ||
         message.toLowerCase().includes("national") ||
-        message.toLowerCase().includes("employee id")
+        message.toLowerCase().includes("employee id") ||
+        message.toLowerCase().includes("biometric")
       ) {
         if (message.toLowerCase().includes("username")) {
           setFieldErrors({ username: message });
+        } else if (message.toLowerCase().includes("email")) {
+          setFieldErrors({ email: message });
         }
         setStep(1);
       } else if (

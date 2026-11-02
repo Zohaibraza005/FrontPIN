@@ -19,6 +19,7 @@ import { Assets } from "./pages/Assets";
 import { Reports } from "./pages/Reports";
 import { NotFound } from "./pages/NotFound";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { OrganizationProvider } from "./contexts/OrganizationContext";
 import { NotificationProvider } from "./contexts/NotificationContext";
 import { TourProvider } from "./contexts/TourContext";
 import { DetailProject } from "./pages/DetailProject";
@@ -63,11 +64,13 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
 function ProvidersWrapper({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <NotificationProvider>
-        <TourProvider>
-          {children}
-        </TourProvider>
-      </NotificationProvider>
+      <OrganizationProvider>
+        <NotificationProvider>
+          <TourProvider>
+            {children}
+          </TourProvider>
+        </NotificationProvider>
+      </OrganizationProvider>
     </AuthProvider>
   );
 }
