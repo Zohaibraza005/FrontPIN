@@ -211,10 +211,19 @@ const getAdminDashboard = async (req, res) => {
         matchedRecords[0] ||
         null;
 
-      let effectiveCheckIn = attendance?.checkInTime;
+      const empSched = emp.Schedule?.find((s) => !s.deletedAt) || emp.Schedule?.[0];
+      const shiftStartTime = attendance?.shiftStartTime || empSched?.startTime || "09:00";
+      const shiftStartLocal = moment.tz(`${targetDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", empTz);
+      const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+
+      let effectiveCheckIn = (attendance?.checkInTime && moment(attendance.checkInTime).tz(empTz).isSameOrAfter(earliestCheckInLocal))
+        ? attendance.checkInTime
+        : null;
       let effectiveCheckOut = attendance?.checkOutTime;
       if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
-        const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
+        const firstIn = attendance.punches.find(
+          (p) => p.type === "CHECK_IN" && moment(p.punchTime).tz(empTz).isSameOrAfter(earliestCheckInLocal)
+        );
         if (firstIn) effectiveCheckIn = firstIn.punchTime;
       }
       if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
@@ -613,11 +622,22 @@ const getWeeklyTimesheet = async (req, res) => {
 
       for (const att of dayAttendances) {
         let workedMins = att.totalWorkedMinutes ?? 0;
-        let effectiveCheckIn = att.checkInTime;
+        const emp = employees.find((e) => e.id === att.employeeId);
+        const empTz = emp?.company?.timezone || tz;
+        const attSched = emp?.Schedule?.find((s) => !s.deletedAt) || emp?.Schedule?.[0];
+        const shiftStartTime = att.shiftStartTime || attSched?.startTime || "09:00";
+        const shiftStartLocal = moment.tz(`${targetDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", empTz);
+        const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+
+        let effectiveCheckIn = (att.checkInTime && moment(att.checkInTime).tz(empTz).isSameOrAfter(earliestCheckInLocal))
+          ? att.checkInTime
+          : null;
         let effectiveCheckOut = att.checkOutTime;
 
         if (!effectiveCheckIn && att.punches?.length > 0) {
-          const firstIn = att.punches.find((p) => p.type === "CHECK_IN");
+          const firstIn = att.punches.find(
+            (p) => p.type === "CHECK_IN" && moment(p.punchTime).tz(empTz).isSameOrAfter(earliestCheckInLocal)
+          );
           if (firstIn) effectiveCheckIn = firstIn.punchTime;
         }
         if (!effectiveCheckOut && att.punches?.length > 0) {
@@ -854,10 +874,19 @@ const getSupervisorDashboard = async (req, res) => {
         matchedRecords[0] ||
         null;
 
-      let effectiveCheckIn = attendance?.checkInTime;
+      const empSched = emp.Schedule?.find((s) => !s.deletedAt) || emp.Schedule?.[0];
+      const shiftStartTime = attendance?.shiftStartTime || empSched?.startTime || "09:00";
+      const shiftStartLocal = moment.tz(`${targetDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", empTz);
+      const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+
+      let effectiveCheckIn = (attendance?.checkInTime && moment(attendance.checkInTime).tz(empTz).isSameOrAfter(earliestCheckInLocal))
+        ? attendance.checkInTime
+        : null;
       let effectiveCheckOut = attendance?.checkOutTime;
       if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
-        const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
+        const firstIn = attendance.punches.find(
+          (p) => p.type === "CHECK_IN" && moment(p.punchTime).tz(empTz).isSameOrAfter(earliestCheckInLocal)
+        );
         if (firstIn) effectiveCheckIn = firstIn.punchTime;
       }
       if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
@@ -1748,10 +1777,19 @@ const getStatsDetails = async (req, res) => {
 
       const leave = leaveMap.get(emp.id);
 
-      let effectiveCheckIn = att?.checkInTime;
+      const currentSched = emp.Schedule?.find((s) => !s.deletedAt) || emp.Schedule?.[0];
+      const sStartTime = att?.shiftStartTime || currentSched?.startTime || "09:00";
+      const shiftStartLocal = moment.tz(`${targetDateStr} ${sStartTime}`, "YYYY-MM-DD HH:mm", empTz);
+      const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+
+      let effectiveCheckIn = (att?.checkInTime && moment(att.checkInTime).tz(empTz).isSameOrAfter(earliestCheckInLocal))
+        ? att.checkInTime
+        : null;
       let effectiveCheckOut = att?.checkOutTime;
       if (att && !effectiveCheckIn && att.punches?.length > 0) {
-        const firstIn = att.punches.find((p) => p.type === "CHECK_IN");
+        const firstIn = att.punches.find(
+          (p) => p.type === "CHECK_IN" && moment(p.punchTime).tz(empTz).isSameOrAfter(earliestCheckInLocal)
+        );
         if (firstIn) effectiveCheckIn = firstIn.punchTime;
       }
       if (att && !effectiveCheckOut && att.punches?.length > 0) {

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { 
-  Search, Plus, Edit, Trash2, Shield, Users, RefreshCw, CheckCircle2, 
+  Search, Plus, Edit, Trash2, Shield, Users, UserCheck, RefreshCw, CheckCircle2, 
   Lock, Sparkles, AlertTriangle, Eye, Check, X, Clock, Calendar, 
   CalendarDays, Timer, DollarSign, Cog, BarChart3, MapPin 
 } from "lucide-react";
@@ -18,6 +18,7 @@ import { roleAPI } from "../services/api";
 
 export const privilegesList = [
   { id: "employee", label: "Employee", description: "Manage employee profiles, credentials and employment info" },
+  { id: "visitor", label: "Visitor", description: "Manage visitor logs, registrations and guest passes" },
   { id: "attendance", label: "Attendance", description: "Clock in/out, view daily activity and punch logs" },
   { id: "schedule", label: "Schedule", description: "Manage and assign work shifts and rosters" },
   { id: "leave", label: "Leave", description: "Request, review and approve leave applications" },
@@ -30,6 +31,7 @@ export const privilegesList = [
 
 const moduleConfig: Record<string, { icon: any; color: string; bg: string }> = {
   employee: { icon: Users, color: "text-blue-600", bg: "bg-blue-50 text-blue-600 border border-blue-200" },
+  visitor: { icon: UserCheck, color: "text-teal-600", bg: "bg-teal-50 text-teal-600 border border-teal-200" },
   attendance: { icon: Clock, color: "text-emerald-600", bg: "bg-emerald-50 text-emerald-600 border border-emerald-200" },
   schedule: { icon: Calendar, color: "text-purple-600", bg: "bg-purple-50 text-purple-600 border border-purple-200" },
   leave: { icon: CalendarDays, color: "text-amber-600", bg: "bg-amber-50 text-amber-600 border border-amber-200" },
@@ -92,12 +94,12 @@ export const Roles: React.FC = () => {
     setEditingRole(null);
     setRoleName("");
     setRoleDescription("");
-    // Default: read-only on core modules
+    // Default: read-only on core modules, visitor unchecked by default
     setRolePrivileges(
       privilegesList.map((p) => ({
         module: p.id.toUpperCase(),
         canCreate: false,
-        canRead: true,
+        canRead: p.id === "visitor" ? false : true,
         canUpdate: false,
         canDelete: false,
         ownTeamOnly: false,

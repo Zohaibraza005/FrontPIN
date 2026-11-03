@@ -123,13 +123,34 @@ const DatePickerCustomInput = React.forwardRef<HTMLButtonElement, any>(({ value,
     type="button"
     onClick={onClick}
     ref={ref}
-    className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-3.5 py-1.5 rounded-xl shadow-2xs text-xs font-semibold text-gray-800 transition-all cursor-pointer"
+    className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 px-3.5 py-1.5 rounded-full shadow-2xs text-xs font-semibold text-gray-800 transition-all cursor-pointer"
   >
     <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
     <span>{value || "Select date"}</span>
   </button>
 ));
 DatePickerCustomInput.displayName = "DatePickerCustomInput";
+
+const formatCompactPayroll = (val: string | number | undefined | null) => {
+  if (!val) return "No Record";
+  const str = String(val).trim();
+  if (str === "No Payroll Record" || str === "Pending Setup" || str === "Contact Admin") return str;
+
+  const match = str.match(/^([A-Za-z$€£¥]+)?\s*([0-9,]+(?:\.[0-9]+)?)/);
+  if (!match) return str;
+
+  const currency = match[1] ? match[1].trim() + " " : "";
+  const num = parseFloat(match[2].replace(/,/g, ""));
+  if (isNaN(num)) return str;
+
+  if (num >= 1000000) {
+    return `${currency}${(num / 1000000).toFixed(2)}M`;
+  }
+  if (num >= 1000) {
+    return `${currency}${(num / 1000).toFixed(2)}k`;
+  }
+  return `${currency}${num.toFixed(2)}`;
+};
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -475,26 +496,38 @@ export const Dashboard: React.FC = () => {
           date: formattedDate,
           location,
         });
-        const weeklyAttendance = await dashboardAPI.getWeeklyTimesheet({
-          date: formattedDate,
-          location,
-        });
-        setWeeklyTimeSheetData(weeklyAttendance.data)
-
-        const graphData = await dashboardAPI.getAdminGraphs({
-          date: formattedDate,
-          location,
-        });
-        const loc = await locationAPI.getLocations();
-        setLocations(loc.data);
-
         setStats(statsData.stats || {});
         setAttendanceData(statsData.attendanceWidget || []);
 
-        setWeeklyAttendance(graphData.weeklyAttendance || []);
-        setProjectStatusData(graphData.projectStatusData || []);
-        setTaskTrend(graphData.taskTrend || []);
-        setDepartmentData(graphData.departmentData || []);
+        try {
+          const weeklyAttendance = await dashboardAPI.getWeeklyTimesheet({
+            date: formattedDate,
+            location,
+          });
+          setWeeklyTimeSheetData(weeklyAttendance?.data || []);
+        } catch (e) {
+          console.error("Weekly timesheet load error:", e);
+        }
+
+        try {
+          const graphData = await dashboardAPI.getAdminGraphs({
+            date: formattedDate,
+            location,
+          });
+          setWeeklyAttendance(graphData.weeklyAttendance || []);
+          setProjectStatusData(graphData.projectStatusData || []);
+          setTaskTrend(graphData.taskTrend || []);
+          setDepartmentData(graphData.departmentData || []);
+        } catch (e) {
+          console.error("Admin graphs load error:", e);
+        }
+
+        try {
+          const loc = await locationAPI.getLocations();
+          setLocations(loc.data || []);
+        } catch (e) {
+          console.error("Locations load error:", e);
+        }
       } else if (user?.role === "SUPERVISOR") {
         // Fetch supervisor's personal real-time attendance status
         const statusRes = await attendanceAPI.getTodayStatus().catch(() => null);
@@ -506,22 +539,29 @@ export const Dashboard: React.FC = () => {
           date: formattedDate,
           location,
         });
-
-        const graphData = await dashboardAPI.getAdminGraphs({
-          date: formattedDate,
-          location,
-        });
-
         setStats(statsData.stats || {});
         setAttendanceData(statsData.attendanceWidget || []);
         setCompanyName(statsData.companyName || user?.company?.name || "");
 
-        setWeeklyAttendance(graphData.weeklyAttendance || []);
-        setProjectStatusData(graphData.projectStatusData || []);
-        setTaskTrend(graphData.taskTrend || []);
-        setDepartmentData(graphData.departmentData || []);
-        const loc = await locationAPI.getLocations();
-        setLocations(loc.data);
+        try {
+          const graphData = await dashboardAPI.getAdminGraphs({
+            date: formattedDate,
+            location,
+          });
+          setWeeklyAttendance(graphData.weeklyAttendance || []);
+          setProjectStatusData(graphData.projectStatusData || []);
+          setTaskTrend(graphData.taskTrend || []);
+          setDepartmentData(graphData.departmentData || []);
+        } catch (e) {
+          console.error("Supervisor graphs load error:", e);
+        }
+
+        try {
+          const loc = await locationAPI.getLocations();
+          setLocations(loc.data || []);
+        } catch (e) {
+          console.error("Locations load error:", e);
+        }
       } else {
         // Always fetch today's real-time attendance status first (reliable endpoint)
         const statusRes = await attendanceAPI.getTodayStatus().catch(() => null);
@@ -1018,7 +1058,7 @@ export const Dashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
-                      className="text-xs font-semibold px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors whitespace-nowrap shadow-xs cursor-pointer"
+                      className="text-xs font-semibold px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors whitespace-nowrap shadow-xs cursor-pointer"
                     >
                       Today
                     </button>
@@ -1567,16 +1607,39 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Card 1: Welcome Box */}
             <Card className="shadow-sm border rounded-2xl overflow-hidden bg-white flex flex-col justify-between p-6 min-h-[350px]">
-              <div className="flex justify-between items-start">
+              <div className="flex justify-between items-start gap-4">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
                     Welcome To {companyName || "HR Pro Management System"}
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">CLOCK IN / Clock Out</p>
                 </div>
-                <div className="text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-xs">
-                  <span className="font-bold text-indigo-600">Today:</span>
-                  <span>{moment().format("DD MMM YYYY")}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <DatePicker
+                    selected={selectedDate ? moment(selectedDate, "YYYY-MM-DD").toDate() : new Date()}
+                    maxDate={new Date()}
+                    onChange={(date: Date | null) => {
+                      if (!date) return;
+                      const today = new Date();
+                      today.setHours(23, 59, 59, 999);
+                      if (date > today) return;
+                      setSelectedDate(moment(date).format("YYYY-MM-DD"));
+                    }}
+                    dateFormat="dd MMM yyyy"
+                    showMonthDropdown
+                    showYearDropdown
+                    dropdownMode="select"
+                    customInput={<DatePickerCustomInput />}
+                  />
+                  {selectedDate !== moment().format("YYYY-MM-DD") && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(moment().format("YYYY-MM-DD"))}
+                      className="text-xs font-semibold px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors whitespace-nowrap shadow-xs cursor-pointer"
+                    >
+                      Today
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1775,203 +1838,186 @@ export const Dashboard: React.FC = () => {
             </Card>
           </div>
 
-          {/* Row 2: 4 Real-time Functional Summary Cards (Unified Theme) */}
+          {/* Row 2: 4 Real-time Functional Summary Cards (Unified Theme matching Admin StatCards) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Card 1: Present Days (This Month) */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Present Days</h3>
-                <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                    <UserCheck className="size-5" />
+            {(() => {
+              const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
+              const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
+              const presentDaysSet = new Set<string>();
+
+              (weeklyAttendance || []).forEach((a: any) => {
+                const dt = new Date(a.checkInTime || a.date);
+                if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
+                  const st = String(a.status || "").toUpperCase();
+                  if (st === "PRESENT" || st === "LATE" || st === "TARDY") {
+                    presentDaysSet.add(dt.toDateString());
+                  }
+                }
+              });
+
+              const todayRec = getTodayRecord();
+              const today = new Date();
+              if (today.getMonth() === targetMonth && today.getFullYear() === targetYear) {
+                if (todayRec && (todayRec.checkInTime || todayStatusState?.checkInTime)) {
+                  presentDaysSet.add(today.toDateString());
+                }
+              }
+
+              return (
+                <div
+                  onClick={() => navigate("/attendance")}
+                  className="shadow-2xs border border-gray-100/90 bg-white rounded-2xl p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-200 transition-all group min-h-[148px]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-600">Present Days</span>
+                    <div className="size-9 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+                      <UserCheck className="size-4.5" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
-                      {(() => {
-                        const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
-                        const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
-                        const presentDaysSet = new Set<string>();
 
-                        (weeklyAttendance || []).forEach((a: any) => {
-                          const dt = new Date(a.checkInTime || a.date);
-                          if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
-                            const st = String(a.status || "").toUpperCase();
-                            if (st === "PRESENT" || st === "LATE" || st === "TARDY") {
-                              presentDaysSet.add(dt.toDateString());
-                            }
-                          }
-                        });
-
-                        const todayRec = getTodayRecord();
-                        const today = new Date();
-                        if (today.getMonth() === targetMonth && today.getFullYear() === targetYear) {
-                          if (todayRec && (todayRec.checkInTime || todayStatusState?.checkInTime)) {
-                            presentDaysSet.add(today.toDateString());
-                          }
-                        }
-
-                        return presentDaysSet.size;
-                      })()}
+                  <div className="my-2">
+                    <p className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none">
+                      {presentDaysSet.size}
                     </p>
-                    <p className="text-xs font-semibold text-gray-700">Days Present</p>
-                    <p className="text-[11px] text-gray-400">This Month ({moment(selectedDate || new Date()).format("MMM YYYY")})</p>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-gray-400 font-normal">
+                    <span>Days Present</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/attendance")}
-                className="w-full mt-4 h-9 text-xs font-semibold text-emerald-700 border-emerald-100 hover:bg-emerald-50/50 rounded-xl"
-              >
-                View Attendance
-              </Button>
-            </Card>
+              );
+            })()}
 
             {/* Card 2: Monthly Leaves */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Monthly Leaves</h3>
-                <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                    <Calendar className="size-5" />
+            {(() => {
+              const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
+              const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
+              const leaveDaysSet = new Set<string>();
+
+              (weeklyAttendance || []).forEach((a: any) => {
+                const dt = new Date(a.date || a.checkInTime);
+                if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
+                  const st = String(a.status || "").toUpperCase();
+                  if (st === "LEAVE" || st === "L") {
+                    leaveDaysSet.add(dt.toDateString());
+                  }
+                }
+              });
+
+              (leaves || []).forEach((l: any) => {
+                const isApproved = String(l.status || "").toUpperCase() === "APPROVED";
+                if (isApproved) {
+                  const st = new Date(l.startDate);
+                  const et = new Date(l.endDate || l.startDate);
+                  let curr = new Date(st);
+                  while (curr <= et) {
+                    if (curr.getMonth() === targetMonth && curr.getFullYear() === targetYear) {
+                      leaveDaysSet.add(curr.toDateString());
+                    }
+                    curr.setDate(curr.getDate() + 1);
+                  }
+                }
+              });
+
+              return (
+                <div
+                  onClick={handleOpenApplyLeave}
+                  className="shadow-2xs border border-gray-100/90 bg-white rounded-2xl p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-200 transition-all group min-h-[148px]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-600">Monthly Leaves</span>
+                    <div className="size-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+                      <Calendar className="size-4.5" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
-                      {(() => {
-                        const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
-                        const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
-                        const leaveDaysSet = new Set<string>();
 
-                        // 1. Count days from attendance records marked as LEAVE or L
-                        (weeklyAttendance || []).forEach((a: any) => {
-                          const dt = new Date(a.date || a.checkInTime);
-                          if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
-                            const st = String(a.status || "").toUpperCase();
-                            if (st === "LEAVE" || st === "L") {
-                              leaveDaysSet.add(dt.toDateString());
-                            }
-                          }
-                        });
-
-                        // 2. Count days from approved leave requests in database
-                        (leaves || []).forEach((l: any) => {
-                          const isApproved = String(l.status || "").toUpperCase() === "APPROVED";
-                          if (isApproved) {
-                            const st = new Date(l.startDate);
-                            const et = new Date(l.endDate || l.startDate);
-                            let curr = new Date(st);
-                            while (curr <= et) {
-                              if (curr.getMonth() === targetMonth && curr.getFullYear() === targetYear) {
-                                leaveDaysSet.add(curr.toDateString());
-                              }
-                              curr.setDate(curr.getDate() + 1);
-                            }
-                          }
-                        });
-
-                        return leaveDaysSet.size;
-                      })()}
+                  <div className="my-2">
+                    <p className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none">
+                      {leaveDaysSet.size}
                     </p>
-                    <p className="text-xs font-semibold text-gray-700">Days On Leave</p>
-                    <p className="text-[11px] text-gray-400">This Month ({moment(selectedDate || new Date()).format("MMM YYYY")})</p>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-gray-400 font-normal">
+                    <span>Days On Leave</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOpenApplyLeave}
-                className="w-full mt-4 h-9 text-xs font-semibold text-blue-600 border-blue-100 hover:bg-blue-50/50 rounded-xl"
-              >
-                Apply Leave
-              </Button>
-            </Card>
+              );
+            })()}
 
             {/* Card 3: Monthly Tardies */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Monthly Tardies</h3>
-                <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                    <AlertCircle className="size-5" />
+            {(() => {
+              const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
+              const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
+              const tardyDaysSet = new Set<string>();
+
+              (weeklyAttendance || []).forEach((a: any) => {
+                const dt = new Date(a.checkInTime || a.date);
+                if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
+                  const st = String(a.status || "").toUpperCase();
+                  if (st === "LATE" || st === "TARDY") {
+                    tardyDaysSet.add(dt.toDateString());
+                  }
+                }
+              });
+
+              return (
+                <div
+                  onClick={() => navigate("/attendance")}
+                  className="shadow-2xs border border-gray-100/90 bg-white rounded-2xl p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-200 transition-all group min-h-[148px]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-600">Monthly Tardies</span>
+                    <div className="size-9 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+                      <AlertCircle className="size-4.5" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none mb-1">
-                      {(() => {
-                        const targetMonth = selectedDate ? new Date(selectedDate).getMonth() : new Date().getMonth();
-                        const targetYear = selectedDate ? new Date(selectedDate).getFullYear() : new Date().getFullYear();
-                        const tardyDaysSet = new Set<string>();
 
-                        (weeklyAttendance || []).forEach((a: any) => {
-                          const dt = new Date(a.checkInTime || a.date);
-                          if (dt.getMonth() === targetMonth && dt.getFullYear() === targetYear) {
-                            const st = String(a.status || "").toUpperCase();
-                            if (st === "LATE" || st === "TARDY") {
-                              tardyDaysSet.add(dt.toDateString());
-                            }
-                          }
-                        });
-
-                        return tardyDaysSet.size;
-                      })()}
+                  <div className="my-2">
+                    <p className="text-3xl font-extrabold text-gray-900 tracking-tight leading-none">
+                      {tardyDaysSet.size}
                     </p>
-                    <p className="text-xs font-semibold text-gray-700">Late Arrivals</p>
-                    <p className="text-[11px] text-gray-400">This Month ({moment(selectedDate || new Date()).format("MMM YYYY")})</p>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-gray-400 font-normal">
+                    <span>Late Arrivals</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/attendance")}
-                className="w-full mt-4 h-9 text-xs font-semibold text-amber-700 border-amber-100 hover:bg-amber-50/50 rounded-xl"
-              >
-                View Attendance
-              </Button>
-            </Card>
+              );
+            })()}
 
             {/* Card 4: Payroll Summary */}
-            <Card className="shadow-sm border border-gray-200/80 rounded-2xl overflow-hidden bg-white p-5 flex flex-col justify-between min-h-[175px]">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 mb-3">Payroll Summary</h3>
-                <div className="flex items-center gap-3">
-                  <div className="size-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                    <Wallet className="size-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-lg font-extrabold text-gray-900 leading-none mb-1 truncate">
-                      {payrollSummaryData?.amount || "No Payroll Record"}
-                    </p>
-                    <p className="text-xs font-semibold text-gray-700 truncate">
-                      {payrollSummaryData?.hasRecord
-                        ? `Net Salary (${payrollSummaryData.month})`
-                        : "Net Salary"}
-                    </p>
-                    <p className="text-[11px] text-gray-400 truncate">
-                      {payrollSummaryData?.paidDate
-                        ? payrollSummaryData.paidDate.startsWith("Paid") || payrollSummaryData.paidDate.startsWith("Active") || payrollSummaryData.paidDate.startsWith("Contact")
-                          ? payrollSummaryData.paidDate
-                          : `Paid on ${payrollSummaryData.paidDate}`
-                        : "Pending Setup"}
-                    </p>
-                  </div>
+            <div
+              onClick={handleDownloadPayslip}
+              className="shadow-2xs border border-gray-100/90 bg-white rounded-2xl p-5 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-gray-200 transition-all group min-h-[148px]"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-600">Payroll Summary</span>
+                <div className="size-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+                  <Wallet className="size-4.5" />
                 </div>
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={downloadingPayslip}
-                onClick={handleDownloadPayslip}
-                className="w-full mt-4 h-9 text-xs font-semibold text-blue-600 border-blue-100 hover:bg-blue-50/50 rounded-xl"
-              >
-                {downloadingPayslip ? "Downloading..." : "View Payslip"}
-              </Button>
-            </Card>
+              <div className="my-2 min-w-0">
+                <p className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight leading-none truncate">
+                  {formatCompactPayroll(payrollSummaryData?.amount)}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-gray-400 font-normal">
+                <span className="truncate">
+                  {downloadingPayslip
+                    ? "Downloading..."
+                    : payrollSummaryData?.hasRecord
+                    ? `Net Salary (${payrollSummaryData.month})`
+                    : "Net Salary"}
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all shrink-0 ml-1" />
+              </div>
+            </div>
           </div>
 
           {/* Row 3: Company Announcements & Quick Actions */}

@@ -310,14 +310,25 @@ async function autoCheckoutOverdueAttendances() {
       let maxOtMinutes = 120; // 2 hours allowed extra time by default
       if (activeSchedule.overtimeAllowed === false) {
         maxOtMinutes = 0;
-      } else {
-        const schedOt = Number(activeSchedule.overtimeMinutes) || 0;
-        const jobOt = emp.jobInfo?.maxExtraHours != null ? Number(emp.jobInfo.maxExtraHours) * 60 : 0;
-        maxOtMinutes = Math.max(120, schedOt, jobOt);
       }
 
-      const inPunches = (att.punches || []).filter((p) => p.type === "CHECK_IN");
-      const trueInMoment = inPunches.length > 0 ? moment(inPunches[0].punchTime) : moment(att.checkInTime);
+      const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+      const validInPunches = (att.punches || []).filter((p) => {
+        if (p.type !== "CHECK_IN") return false;
+        return moment(p.punchTime).tz(timezone).isSameOrAfter(earliestCheckInLocal);
+      });
+      let trueInMoment = null;
+      if (att.checkInTime && moment(att.checkInTime).tz(timezone).isSameOrAfter(earliestCheckInLocal)) {
+        trueInMoment = moment(att.checkInTime);
+      } else if (validInPunches.length > 0) {
+        trueInMoment = moment(validInPunches[0].punchTime);
+      } else if (att.checkInTime) {
+        trueInMoment = moment(att.checkInTime);
+      }
+
+      if (!trueInMoment) {
+        continue;
+      }
       const trueInLocal = trueInMoment.clone().tz(timezone);
 
       const nominalCutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
@@ -381,9 +392,9 @@ async function autoCheckoutOverdueAttendances() {
           data: {
             checkInTime: trueInMoment.toDate(),
             checkOutTime: effectiveOutDate,
-            checkOutMethod: lastCheckOutPunch.method || "BIOMETRIC",
-            checkOutDevice: lastCheckOutPunch.device || null,
-            autoClockedOut: false,
+            checkOutMethod: isPastCutoff ? "SYSTEM" : (lastCheckOutPunch.method || "BIOMETRIC"),
+            checkOutDevice: isPastCutoff ? "Auto System Checkout" : (lastCheckOutPunch.device || null),
+            autoClockedOut: isPastCutoff ? true : false,
             totalWorkedMinutes,
             overtimeMinutes,
             isEarlyOut: false,
@@ -553,12 +564,39 @@ exports.getTodayStatus = async (req, res) => {
 
     const breakStats = getBreakStats(employee.Schedule, attendance?.activities);
 
-    let effectiveCheckIn = attendance?.checkInTime;
+    const activeSchedule = employee.Schedule?.find((s) => !s.deletedAt) || employee.Schedule?.[0];
+    const dayShift = getScheduleShiftForDay(activeSchedule, todayDateString, timezone);
+    const shiftStartTime = attendance?.shiftStartTime || dayShift?.startTime || activeSchedule?.startTime || "09:00";
+    const shiftEndTime = attendance?.shiftEndTime || dayShift?.endTime || activeSchedule?.endTime || "18:00";
+    const todayDateStr = moment().tz(timezone).format("YYYY-MM-DD");
+    const shiftStartLocal = moment.tz(`${todayDateStr} ${shiftStartTime}`, "YYYY-MM-DD HH:mm", timezone);
+    let shiftEndLocal = moment.tz(`${todayDateStr} ${shiftEndTime}`, "YYYY-MM-DD HH:mm", timezone);
+    if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
+      shiftEndLocal.add(1, "day");
+    }
+    const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
+
+    const todayScheduleInfo = {
+      startTime: shiftStartTime,
+      endTime: shiftEndTime,
+      shiftStartFormatted: shiftStartLocal.format("hh:mm A"),
+      shiftEndFormatted: shiftEndLocal.format("hh:mm A"),
+      earliestCheckInFormatted: earliestCheckInLocal.format("hh:mm A"),
+      shiftStartIso: shiftStartLocal.toISOString(),
+      earliestCheckInIso: earliestCheckInLocal.toISOString(),
+      timezone,
+    };
+
+    let effectiveCheckIn = (attendance?.checkInTime && moment(attendance.checkInTime).tz(timezone).isSameOrAfter(earliestCheckInLocal))
+      ? attendance.checkInTime
+      : null;
     let effectiveCheckOut = attendance?.checkOutTime;
 
     if (attendance && !effectiveCheckIn && attendance.punches?.length > 0) {
-      const firstIn = attendance.punches.find((p) => p.type === "CHECK_IN");
-      if (firstIn) effectiveCheckIn = firstIn.punchTime;
+      const validFirstIn = attendance.punches.find(
+        (p) => p.type === "CHECK_IN" && moment(p.punchTime).tz(timezone).isSameOrAfter(earliestCheckInLocal)
+      );
+      if (validFirstIn) effectiveCheckIn = validFirstIn.punchTime;
     }
     if (attendance && !effectiveCheckOut && attendance.punches?.length > 0) {
       const lastOut = [...attendance.punches].reverse().find((p) => p.type === "CHECK_OUT");
@@ -571,6 +609,7 @@ exports.getTodayStatus = async (req, res) => {
         isOffDay: isTodayOff,
         clockedIn: false,
         clockedOut: false,
+        todaySchedule: todayScheduleInfo,
         punches: attendance?.punches || [],
         ...breakStats,
       });
@@ -585,6 +624,7 @@ exports.getTodayStatus = async (req, res) => {
         checkInTime: effectiveCheckIn,
         checkOutTime: effectiveCheckOut,
         totalWorkedMinutes: attendance.totalWorkedMinutes,
+        todaySchedule: todayScheduleInfo,
         punches: attendance.punches || [],
         ...breakStats,
       });
@@ -600,6 +640,7 @@ exports.getTodayStatus = async (req, res) => {
       clockedIn: true,
       clockedOut: false,
       checkInTime: effectiveCheckIn,
+      todaySchedule: todayScheduleInfo,
       currentActivity: activeActivity
         ? {
             type: activeActivity.type,
@@ -719,13 +760,9 @@ exports.clockOut = async (req, res) => {
       scheduledDurationMinutes = diffShiftMins;
     }
 
-    let maxOtMinutes = 120;
+    let maxOtMinutes = 120; // 2 hours allowed overtime after schedule
     if (activeSchedule?.overtimeAllowed === false) {
       maxOtMinutes = 0;
-    } else if (activeSchedule?.overtimeMinutes && Number(activeSchedule.overtimeMinutes) > 0) {
-      maxOtMinutes = Number(activeSchedule.overtimeMinutes);
-    } else if (employee?.jobInfo?.maxExtraHours != null) {
-      maxOtMinutes = Number(employee.jobInfo.maxExtraHours) * 60;
     }
 
     const cutoffLocal = shiftEndLocal.clone().add(maxOtMinutes, "minutes");
@@ -933,11 +970,29 @@ exports.clockIn = async (req, res) => {
       timezone
     );
 
+    let shiftEndLocal = moment.tz(
+      `${todayDateString} ${schedule.endTime}`,
+      "YYYY-MM-DD HH:mm",
+      timezone
+    );
+    if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
+      shiftEndLocal.add(1, "day");
+    }
+
     const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
     const nowLocal = moment().tz(timezone);
     if (nowLocal.isBefore(earliestCheckInLocal)) {
       return res.status(400).json({
-        message: `Clock-in is only allowed within 2 hours before your shift start (${schedule.startTime}). Early check-in opens at ${earliestCheckInLocal.format("hh:mm A")}.`,
+        success: false,
+        isTooEarly: true,
+        message: `Aap ka schedule is din ka ${shiftStartLocal.format("hh:mm A")} se ${shiftEndLocal.format("hh:mm A")} tak hai. Aap sirf 2 ghante pehle (${earliestCheckInLocal.format("hh:mm A")} se) check-in kar sakte hain. Is se pehle manual check-in allowed nahi hai.`,
+        schedule: {
+          startTime: schedule.startTime,
+          endTime: schedule.endTime,
+          shiftStartFormatted: shiftStartLocal.format("hh:mm A"),
+          shiftEndFormatted: shiftEndLocal.format("hh:mm A"),
+          earliestCheckInFormatted: earliestCheckInLocal.format("hh:mm A"),
+        }
       });
     }
 
@@ -1642,13 +1697,10 @@ exports.getAttendanceReport = async (req, res) => {
         let maxOtMinutes = 120;
         if (activeSched?.overtimeAllowed === false) {
           maxOtMinutes = 0;
-        } else {
-          const schedOt = Number(activeSched?.overtimeMinutes) || 0;
-          const jobOt = emp.jobInfo?.maxExtraHours != null ? Number(emp.jobInfo.maxExtraHours) * 60 : 0;
-          maxOtMinutes = Math.max(120, schedOt, jobOt);
         }
 
         const shiftStartLocal = moment.tz(`${dateStr} ${sTime}`, "YYYY-MM-DD HH:mm", empTz);
+        const earliestCheckInLocal = shiftStartLocal.clone().subtract(2, "hours");
         let shiftEndLocal = moment.tz(`${dateStr} ${eTime}`, "YYYY-MM-DD HH:mm", empTz);
         if (shiftEndLocal.isSameOrBefore(shiftStartLocal)) {
           shiftEndLocal.add(1, "day");
@@ -1667,18 +1719,23 @@ exports.getAttendanceReport = async (req, res) => {
         const isCrossMidnightShift = shiftEndLocal.format("YYYY-MM-DD") !== dateStr || shiftStartLocal.hour() >= 12;
 
         // Retrieve effective check-in and check-out from punches or existing record
-        let effCheckIn = existing.checkInTime || null;
+        // An early punch (> 2h before schedule) must never be treated as check-in!
+        let effCheckIn = (existing.checkInTime && moment(existing.checkInTime).tz(empTz).isSameOrAfter(earliestCheckInLocal))
+          ? existing.checkInTime
+          : null;
         let effCheckOut = existing.checkOutTime || null;
 
         const punchesList = existing.punches || [];
         const checkInPunches = punchesList.filter((p) => {
           if (p.type !== "CHECK_IN") return false;
           const pDayStr = moment(p.punchTime).tz(empTz).format("YYYY-MM-DD");
-          return (
+          const isDateMatch = (
             pDayStr === dateStr ||
             (pDayStr === prevDateStr && !isDayOff) ||
             (pDayStr === nextDateStr && isCrossMidnightShift)
           );
+          if (!isDateMatch) return false;
+          return moment(p.punchTime).tz(empTz).isSameOrAfter(earliestCheckInLocal);
         });
         const checkOutPunches = punchesList.filter((p) => {
           if (p.type !== "CHECK_OUT") return false;
@@ -1686,7 +1743,7 @@ exports.getAttendanceReport = async (req, res) => {
           return pDayStr === dateStr || pDayStr === nextDateStr;
         });
 
-        // 1. Check-In: First CHECK_IN punch of the shift takes priority
+        // 1. Check-In: First valid CHECK_IN punch of the shift takes priority
         if (checkInPunches.length > 0) {
           effCheckIn = checkInPunches[0].punchTime;
         }

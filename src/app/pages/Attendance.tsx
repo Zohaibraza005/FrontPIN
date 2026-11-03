@@ -814,8 +814,30 @@ export const Attendance: React.FC = () => {
 
     let effCellCheckIn = record?.checkInTime ?? null;
     let effCellCheckOut = record?.checkOutTime ?? null;
+
+    const dayScheduleForEarliest = getEmployeeScheduleForDate(emp?.Schedule, cellDate, record);
+    const shiftStartTimeStr = dayScheduleForEarliest?.startTime || "09:00";
+    const [shVal, smVal] = shiftStartTimeStr.split(":").map(Number);
+    const shiftStartMinsVal = (!isNaN(shVal) ? shVal : 9) * 60 + (!isNaN(smVal) ? smVal : 0);
+    const earliestAllowedMinsVal = shiftStartMinsVal - 120; // Up to 2 hours before schedule allowed
+
+    // If existing check-in is earlier than 2 hours before shift on this date, don't treat as checked-in
+    if (effCellCheckIn) {
+      const inD = new Date(effCellCheckIn);
+      const inMins = inD.getHours() * 60 + inD.getMinutes();
+      const inStr = format(inD, "yyyy-MM-dd");
+      if (inStr === cellDateStr && inMins < earliestAllowedMinsVal) {
+        effCellCheckIn = null;
+      }
+    }
+
     if (!effCellCheckIn && record?.punches?.length) {
-      const pIn = record.punches.find((p: any) => p.type === "CHECK_IN");
+      const pIn = record.punches.find((p: any) => {
+        if (p.type !== "CHECK_IN") return false;
+        const pDate = new Date(p.punchTime);
+        const pMins = pDate.getHours() * 60 + pDate.getMinutes();
+        return pMins >= earliestAllowedMinsVal;
+      });
       if (pIn) effCellCheckIn = pIn.punchTime;
     }
     if (!effCellCheckOut && record?.punches?.length) {

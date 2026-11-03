@@ -406,6 +406,7 @@ enum PrivilegeModule {
   SCHEDULE
   PAYROLL
   ORGANIZATION
+  VISITOR
 }
 
 

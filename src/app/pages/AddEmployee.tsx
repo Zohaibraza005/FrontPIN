@@ -51,6 +51,7 @@ const cycleDates = Array.from({ length: 31 }, (_, i) => i + 1);
 
 const privilegesList = [
   { id: 'employee', label: 'Employee', description: 'Manage employee profiles and status' },
+  { id: 'visitor', label: 'Visitor', description: 'Manage visitor logs and guest registrations' },
   { id: 'attendance', label: 'Attendance', description: 'Clock in, check activities & time logs' },
   { id: 'schedule', label: 'Schedule', description: 'Manage work shift schedules' },
   { id: 'leave', label: 'Leave', description: 'Request & approve leave applications' },

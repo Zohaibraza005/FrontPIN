@@ -30,7 +30,9 @@ import {
   HelpCircle,
   ChevronDown,
   Coffee, RefreshCw, Cog, ChevronRight, UserCheck,
+  ShieldAlert, AlertTriangle, AlertCircle,
 } from 'lucide-react';
+import moment from 'moment';
 import {
   Tooltip,
   TooltipContent,
@@ -115,7 +117,7 @@ const menuSections = [
         module: 'VISITOR',
         children: [
           { label: 'All Visitors', path: '/visitors' },
-          { label: 'Add Visitor', path: '/visitors/add' },
+          { label: 'Add Visitor', path: '/visitors/add', canCreateModule: 'VISITOR' },
         ],
       },
     ]
@@ -360,6 +362,12 @@ export const Layout: React.FC = () => {
     usedMinutes: 0,
     previousBreakText: '',
   });
+
+  // 🔹 Early Clock-In States (2-hour relaxation policy)
+  const [todaySchedule, setTodaySchedule] = useState<any>(null);
+  const [showEarlyBlockModal, setShowEarlyBlockModal] = useState<boolean>(false);
+  const [showEarlyConfirmModal, setShowEarlyConfirmModal] = useState<boolean>(false);
+  const [earlyModalInfo, setEarlyModalInfo] = useState<any>(null);
   const updateBreakData = (res: any) => {
     if (!res) return;
     if (typeof res.allowedBreakCount === 'number') setAllowedBreakCount(res.allowedBreakCount);
@@ -416,6 +424,10 @@ export const Layout: React.FC = () => {
     try {
       const res = await attendanceAPI.getTodayStatus();
       updateBreakData(res);
+
+      if (res?.todaySchedule) {
+        setTodaySchedule(res.todaySchedule);
+      }
 
       setIsTodayOff(Boolean(res.isOffDay));
 
@@ -559,6 +571,61 @@ export const Layout: React.FC = () => {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const openClockInDrawer = () => {
+    setDrawerMode('clockin');
+    setPinVerified(false);
+    setPinInput('');
+    setSelectedTab('activity');
+    setSelectedItem('');
+    setDrawerOpen(true);
+  };
+
+  const handleStartClockInFlow = async () => {
+    if (isTodayOff) {
+      toast.error("This is an Off Day. There is no schedule for this day.");
+      return;
+    }
+
+    let sched = todaySchedule;
+    if (!sched) {
+      try {
+        const res = await attendanceAPI.getTodayStatus();
+        if (res?.todaySchedule) {
+          sched = res.todaySchedule;
+          setTodaySchedule(res.todaySchedule);
+        }
+      } catch (e) {}
+    }
+
+    if (sched && sched.shiftStartIso && sched.earliestCheckInIso) {
+      const now = moment();
+      const earliest = moment(sched.earliestCheckInIso);
+      const shiftStart = moment(sched.shiftStartIso);
+
+      // 🔴 CASE 1: Punch time is MORE than 2 hours before schedule
+      if (now.isBefore(earliest)) {
+        setEarlyModalInfo(sched);
+        setShowEarlyBlockModal(true);
+        return;
+      }
+
+      // 🟡 CASE 2: Punch time is within 2 hours before schedule start
+      if (now.isBefore(shiftStart)) {
+        setEarlyModalInfo(sched);
+        setShowEarlyConfirmModal(true);
+        return;
+      }
+    }
+
+    // 🟢 CASE 3: On or after shift start: open drawer directly
+    openClockInDrawer();
+  };
+
+  const handleConfirmEarlyClockIn = () => {
+    setShowEarlyConfirmModal(false);
+    openClockInDrawer();
+  };
+
   const handleClockIn = async () => {
     try {
       if (isTodayOff) {
@@ -606,6 +673,12 @@ export const Layout: React.FC = () => {
       }
     } catch (err: any) {
       console.log(err);
+      if (err?.response?.data?.isTooEarly) {
+        setEarlyModalInfo(err.response.data.schedule || todaySchedule);
+        setShowEarlyBlockModal(true);
+        setDrawerOpen(false);
+        return;
+      }
       const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || "Clock In Failed";
       toast.error(errMsg);
     }
@@ -862,7 +935,7 @@ export const Layout: React.FC = () => {
         }
         
         // Default fallback when privilege record is missing in DB/session
-        const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE', 'VISITOR'];
+        const defaultVisibleModules = ['ATTENDANCE', 'LEAVE', 'OVERTIME', 'SCHEDULE'];
         return defaultVisibleModules.includes(item.module);
       }
 
@@ -1262,14 +1335,7 @@ export const Layout: React.FC = () => {
                         variant="default"
                         size="sm"
                         className="bg-green-600 hover:bg-green-700 text-white gap-1.5 px-4"
-                        onClick={() => {
-                          setDrawerMode('clockin');
-                          setPinVerified(false);
-                          setPinInput('');
-                          setSelectedTab('activity');
-                          setSelectedItem('');
-                          setDrawerOpen(true);
-                        }}
+                        onClick={handleStartClockInFlow}
                       >
                         <Clock className="h-4 w-4" />
                         Clock In
@@ -1874,6 +1940,146 @@ export const Layout: React.FC = () => {
             </Button>
           </DialogFooter>
 
+        </DialogContent>
+      </Dialog>
+
+      {/* 🔴 Early Clock-In Blocked Modal (> 2 hours before schedule) */}
+      <Dialog open={showEarlyBlockModal} onOpenChange={setShowEarlyBlockModal}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
+                <ShieldAlert className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <DialogTitle className="text-lg font-bold text-gray-900">
+                  Early Clock-In Not Allowed
+                </DialogTitle>
+                <p className="mt-0.5 text-xs text-gray-500 font-medium">
+                  2-Hour Early Relaxation Policy
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="px-6 pb-5 space-y-3.5">
+            {/* Schedule Details Card */}
+            <div className="rounded-xl border border-red-200 bg-red-50/70 p-4 space-y-2.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600 font-medium">Today's Shift Schedule:</span>
+                <span className="font-bold text-gray-900 font-mono">
+                  {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime || "N/A"} - {earlyModalInfo?.shiftEndFormatted || earlyModalInfo?.endTime || "N/A"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm border-t border-red-200 pt-2.5">
+                <span className="text-gray-600 font-medium">Allowed Check-In Opens:</span>
+                <span className="font-bold text-red-700 font-mono">
+                  {earlyModalInfo?.earliestCheckInFormatted || "2 hours before shift"}
+                </span>
+              </div>
+            </div>
+
+            {/* Explanation Message */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm leading-relaxed text-gray-700">
+                Aap ka schedule is din ka{" "}
+                <span className="font-bold text-gray-900">
+                  {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime}
+                </span>{" "}
+                se{" "}
+                <span className="font-bold text-gray-900">
+                  {earlyModalInfo?.shiftEndFormatted || earlyModalInfo?.endTime}
+                </span>{" "}
+                tak hai.
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-red-700 font-medium">
+                Policy ke mutabiq aap schedule se sirf 2 ghante pehle (
+                <span className="font-bold">
+                  {earlyModalInfo?.earliestCheckInFormatted}
+                </span>{" "}
+                ke baad) check-in kar sakte hain. Is se pehle manual check-in allowed nahi hai.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t bg-gray-50 px-6 py-4 flex justify-end">
+            <Button
+              className="min-w-[120px] bg-red-600 text-white hover:bg-red-700 font-semibold"
+              onClick={() => setShowEarlyBlockModal(false)}
+            >
+              Theek Hai / Understood
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 🟡 Early Clock-In Confirmation Modal (Within 2 hours before schedule) */}
+      <Dialog open={showEarlyConfirmModal} onOpenChange={setShowEarlyConfirmModal}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                <Clock className="h-6 w-6" />
+              </div>
+              <div className="flex-1">
+                <DialogTitle className="text-lg font-bold text-gray-900">
+                  Early Clock-In Confirmation
+                </DialogTitle>
+                <p className="mt-0.5 text-xs text-gray-500 font-medium">
+                  Shift Starting Soon
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="px-6 pb-5 space-y-3.5">
+            {/* Shift Timings Card */}
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600 font-medium">Today's Shift:</span>
+                <span className="font-bold text-gray-900 font-mono">
+                  {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime} - {earlyModalInfo?.shiftEndFormatted || earlyModalInfo?.endTime}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm border-t border-amber-200 pt-2.5">
+                <span className="text-gray-600 font-medium">Shift Start Time:</span>
+                <span className="font-bold text-indigo-700 font-mono">
+                  {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime}
+                </span>
+              </div>
+            </div>
+
+            {/* Prompt Question */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm leading-relaxed text-gray-700">
+                Aap ka schedule{" "}
+                <span className="font-bold text-gray-900">
+                  {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime}
+                </span>{" "}
+                se start ho raha hai.
+              </p>
+              <p className="mt-2 text-sm font-semibold text-gray-900">
+                Aap schedule start hone se pehle check-in kar rahe hain. Are you sure you want to clock in now?
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t bg-gray-50 px-6 py-4 flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowEarlyConfirmModal(false)}
+              className="min-w-[90px]"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="min-w-[150px] bg-green-600 text-white hover:bg-green-700 font-semibold"
+              onClick={handleConfirmEarlyClockIn}
+            >
+              <Clock className="mr-1.5 h-4 w-4" />
+              Confirm Clock In
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
