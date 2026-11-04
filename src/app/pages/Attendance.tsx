@@ -1242,7 +1242,11 @@ export const Attendance: React.FC = () => {
       toast.loading("Connecting to machine & syncing punches...", { id: "sync-machine" });
       const targetDateStr = format(selectedDate, "yyyy-MM-dd");
       const res = await deviceService.syncAllDevices(targetDateStr);
-      toast.success(res?.message || "Punches synced from machine successfully!", { id: "sync-machine" });
+      if (res?.hasOfflineDevices || res?.message?.includes("⚠️")) {
+        toast.warning(res.message, { id: "sync-machine", duration: 7000 });
+      } else {
+        toast.success(res?.message || "Punches synced from machine successfully!", { id: "sync-machine" });
+      }
       await loadReport(false);
     } catch (err: any) {
       console.error("Machine sync failed:", err);

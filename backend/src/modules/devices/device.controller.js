@@ -1795,14 +1795,28 @@ exports.syncAllDevicesRoute = async (req, res) => {
     }
 
     const summary = await syncAllActiveDevices(prisma, processBiometricPunch, startTime, endTime, orgId);
+
+    const offlineDevices = (summary.results || [])
+      .filter((r) => !r.success)
+      .map((r) => `${r.deviceName || "Device"}`);
+
+    let message = "";
+    if (summary.totalDevices === 0) {
+      message = "No biometric machines registered for your organization.";
+    } else if (offlineDevices.length === 0) {
+      message = `Synced ${summary.count} punches from all ${summary.devicesSynced} machine(s) successfully!`;
+    } else {
+      message = `Synced ${summary.count} punches from ${summary.devicesSynced}/${summary.totalDevices} machine(s). ⚠️ Machine(s) offline: ${offlineDevices.join(", ")}. Please check their network/power.`;
+    }
+
     return res.json({
       success: true,
       count: summary.count,
       devicesSynced: summary.devicesSynced,
       totalDevices: summary.totalDevices,
-      message: summary.totalDevices === 0
-        ? "No biometric machines registered for your organization."
-        : `Synced ${summary.count} punches from ${summary.devicesSynced} machine(s) successfully!`,
+      hasOfflineDevices: offlineDevices.length > 0,
+      offlineDevices,
+      message,
       results: summary.results,
     });
   } catch (error) {

@@ -213,9 +213,6 @@ async function pushUserToHikvision(device, { biometricId, name }) {
       doorRight: "1",
       RightPlan: [
         { doorNo: 1, planTemplateNo: "1" },
-        { doorNo: 2, planTemplateNo: "1" },
-        { doorNo: 3, planTemplateNo: "1" },
-        { doorNo: 4, planTemplateNo: "1" },
       ],
       roomNumber: 99,
       floorNumber: 99,
@@ -540,7 +537,7 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
     };
 
     let res = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       res = await sendHikvisionDigest(
         ipAddress,
         targetPort,
@@ -551,10 +548,21 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
         payload
       );
       if (res && res.status === 200 && res.body) break;
-      await new Promise((r) => setTimeout(r, 300 * attempt));
+      await new Promise((r) => setTimeout(r, 250 * attempt));
     }
 
-    if (!res || res.status !== 200 || !res.body) break;
+    if (!res || res.status !== 200 || !res.body) {
+      if (position === 0) {
+        if (!res) {
+          throw new Error(`Device at ${ipAddress}:${targetPort} is unreachable (network timeout / host unreachable).`);
+        }
+        if (res.status === 401) {
+          throw new Error(`Device at ${ipAddress}:${targetPort} authentication failed (HTTP 401 Unauthorized).`);
+        }
+        throw new Error(`Device at ${ipAddress}:${targetPort} returned HTTP status ${res.status}.`);
+      }
+      break;
+    }
 
     let data;
     try {
@@ -568,11 +576,12 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
     if (list.length === 0) break;
 
     for (const ev of list) {
-      const bioId = ev.employeeNoString ? String(ev.employeeNoString).trim() : null;
+      const rawBioId = ev.employeeNoString || ev.employeeNo || ev.cardNo;
+      const bioId = rawBioId ? String(rawBioId).trim() : null;
       const major = Number(ev.major ?? ev.majorEventType ?? 0);
       const minor = Number(ev.minor ?? ev.subEventType ?? 0);
       const isAccessEvent = major === 5 || major === 0;
-      const isValidMinor = VALID_MINOR_CODES.has(minor);
+      const isValidMinor = VALID_MINOR_CODES.has(minor) || minor === 0;
 
       if (bioId && isAccessEvent && isValidMinor) {
         const rawTime = ev.time || ev.dateTime;

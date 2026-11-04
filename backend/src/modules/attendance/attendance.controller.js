@@ -985,7 +985,7 @@ exports.clockIn = async (req, res) => {
       return res.status(400).json({
         success: false,
         isTooEarly: true,
-        message: `Aap ka schedule is din ka ${shiftStartLocal.format("hh:mm A")} se ${shiftEndLocal.format("hh:mm A")} tak hai. Aap sirf 2 ghante pehle (${earliestCheckInLocal.format("hh:mm A")} se) check-in kar sakte hain. Is se pehle manual check-in allowed nahi hai.`,
+        message: `Your shift is scheduled from ${shiftStartLocal.format("hh:mm A")} to ${shiftEndLocal.format("hh:mm A")}. Early clock-in is only permitted up to 2 hours prior to shift start (after ${earliestCheckInLocal.format("hh:mm A")}). Manual check-in prior to this window is not allowed.`,
         schedule: {
           startTime: schedule.startTime,
           endTime: schedule.endTime,

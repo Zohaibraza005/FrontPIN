@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
-import { DollarSign, Download, Plus, Wallet, CreditCard, Users, TrendingUp, Eye, Pencil, Trash2, Calendar, AlertTriangle, PieChart as PieChartIcon, Calculator, CheckCircle2, Loader2, Search, X, Lock, LockOpen } from 'lucide-react';
+import { DollarSign, Download, Plus, Wallet, CreditCard, Users, TrendingUp, Eye, Pencil, Trash2, Calendar, AlertTriangle, PieChart as PieChartIcon, Calculator, CheckCircle2, Loader2, Search, X, Lock, LockOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import {   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +54,52 @@ const DEDUCTIONS_TITLES = [
   "Late Deduction",
   "Other Deduction",
 ];
+
+const formatCompactCurrency = (val: number | string | undefined | null) => {
+  if (val === undefined || val === null || val === "" || isNaN(Number(val))) return "PKR 0";
+  const num = Number(val);
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+
+  if (abs >= 1_000_000_000) {
+    return `${sign}PKR ${(abs / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${sign}PKR ${(abs / 1_000_000).toFixed(2)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${sign}PKR ${(abs / 1_000).toFixed(2)}k`;
+  }
+  return `${sign}PKR ${abs.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+};
+
+const getPaginationRange = (current: number, total: number) => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const delta = 1;
+  const range: (number | string)[] = [];
+
+  for (
+    let i = Math.max(2, current - delta);
+    i <= Math.min(total - 1, current + delta);
+    i++
+  ) {
+    range.push(i);
+  }
+
+  if (current - delta > 2) {
+    range.unshift("...");
+  }
+  if (current + delta < total - 1) {
+    range.push("...");
+  }
+
+  range.unshift(1);
+  range.push(total);
+
+  return range;
+};
 
 export const Payroll: React.FC = () => {
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -131,9 +177,15 @@ export const Payroll: React.FC = () => {
 
   const [payrolls, setPayrolls] = useState<any[]>([]);
 
+  // Pagination state for Payroll Records table
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   const [filterMonth, setFilterMonth] = useState<number | string>(now.month() + 1);
   const [filterYear, setFilterYear] = useState<number>(now.year());
   const [filterStatus, setFilterStatus] = useState('all');
+  const [searchEmployee, setSearchEmployee] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('all');
 
   // Edit Payroll Modal States
   const [editOpen, setEditOpen] = useState(false);
@@ -343,14 +395,46 @@ export const Payroll: React.FC = () => {
     }
   };
 
+  // Filter payrolls by employee search and department
+  const filteredPayrolls = (payrolls || []).filter((p: any) => {
+    // 1. Department Filter
+    if (filterDepartment && filterDepartment !== "all") {
+      const depId = p.employee?.department?.id || p.employee?.departmentId;
+      if (String(depId) !== String(filterDepartment)) {
+        return false;
+      }
+    }
+
+    // 2. Employee Search Filter
+    if (searchEmployee.trim()) {
+      const q = searchEmployee.trim().toLowerCase();
+      const fn = (p.employee?.firstName || "").toLowerCase();
+      const ln = (p.employee?.lastName || "").toLowerCase();
+      const full = `${fn} ${ln}`.trim();
+      const email = (p.employee?.email || "").toLowerCase();
+      const empCode = String(p.employee?.employeeId || p.employee?.id || "").toLowerCase();
+      const bioId = String(p.employee?.biometricId || "").toLowerCase();
+
+      const matches = full.includes(q) || fn.includes(q) || ln.includes(q) || email.includes(q) || empCode.includes(q) || bioId.includes(q);
+      if (!matches) return false;
+    }
+
+    return true;
+  });
+
   const handleExport = async (format: "xlsx" | "csv" = "xlsx", specificIds?: number[]) => {
     try {
       setExporting(true);
+      const isFiltered = searchEmployee.trim() || (filterDepartment && filterDepartment !== "all");
+      const exportIds = specificIds && specificIds.length > 0 
+        ? specificIds 
+        : (isFiltered ? filteredPayrolls.map(p => p.id) : undefined);
+
       await payrollAPI.exportPayroll({
         month: filterMonth !== "all" ? Number(filterMonth) : undefined,
         year: filterYear || undefined,
         status: filterStatus !== "all" ? filterStatus : undefined,
-        ids: specificIds && specificIds.length > 0 ? specificIds : undefined,
+        ids: exportIds,
         format,
       });
       toast.success(`Payroll report exported successfully as ${format.toUpperCase()}`);
@@ -361,12 +445,21 @@ export const Payroll: React.FC = () => {
     }
   };
 
+  // Pagination calculations
+  const totalPayrolls = filteredPayrolls.length;
+  const totalPages = Math.max(1, Math.ceil(totalPayrolls / itemsPerPage));
+  const validPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalPayrolls);
+  const paginatedPayrolls = filteredPayrolls.slice(startIndex, endIndex);
+
   const handleSelectAllRows = (checked: boolean) => {
     if (checked) {
-      const allIds = (payrolls || []).map((p: any) => p.id);
-      setSelectedPayrollIds(allIds);
+      const pageIds = paginatedPayrolls.map((p: any) => p.id);
+      setSelectedPayrollIds(prev => Array.from(new Set([...prev, ...pageIds])));
     } else {
-      setSelectedPayrollIds([]);
+      const pageIds = new Set(paginatedPayrolls.map((p: any) => p.id));
+      setSelectedPayrollIds(prev => prev.filter(id => !pageIds.has(id)));
     }
   };
 
@@ -548,6 +641,10 @@ export const Payroll: React.FC = () => {
     loadPayrolls(filterMonth, filterYear, filterStatus);
     loadAnalytics(filterMonth, filterYear);
   }, [filterMonth, filterYear, filterStatus]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMonth, filterYear, filterStatus, filterDepartment, searchEmployee]);
 
   useEffect(() => {
     loadInfo();
@@ -1263,8 +1360,11 @@ export const Payroll: React.FC = () => {
                 <Wallet className="size-5.5" />
               </div>
               <div>
-                <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none">
-                  Rs. {stats?.totalGross?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || 0}
+                <p 
+                  className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none cursor-default"
+                  title={`PKR ${Number(stats?.totalGross || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                >
+                  {formatCompactCurrency(stats?.totalGross)}
                 </p>
                 <p className="text-xs font-semibold text-gray-400 mt-1">Gross Earnings</p>
               </div>
@@ -1281,8 +1381,11 @@ export const Payroll: React.FC = () => {
                 <CreditCard className="size-5.5" />
               </div>
               <div>
-                <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none">
-                  Rs. {stats?.totalNet?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || 0}
+                <p 
+                  className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none cursor-default"
+                  title={`PKR ${Number(stats?.totalNet || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                >
+                  {formatCompactCurrency(stats?.totalNet)}
                 </p>
                 <p className="text-xs font-semibold text-gray-400 mt-1">Take Home Total</p>
               </div>
@@ -1317,8 +1420,11 @@ export const Payroll: React.FC = () => {
                 <TrendingUp className="size-5.5" />
               </div>
               <div>
-                <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none">
-                  Rs. {stats?.averageCostPerEmployee?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || 0}
+                <p 
+                  className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none cursor-default"
+                  title={`PKR ${Number(stats?.averageCostPerEmployee || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                >
+                  {formatCompactCurrency(stats?.averageCostPerEmployee)}
                 </p>
                 <p className="text-xs font-semibold text-gray-400 mt-1">Average Expenditure</p>
               </div>
@@ -1332,12 +1438,49 @@ export const Payroll: React.FC = () => {
             <div className="flex items-center gap-2">
               <CardTitle className="text-lg font-bold text-gray-900">Payroll Records</CardTitle>
               <Badge variant="outline" className="bg-white border-gray-200 text-gray-700 text-xs font-semibold">
-                {payrolls?.length || 0} Records
+                {filteredPayrolls.length} Records
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
+              {/* Search Employee Input */}
+              <div className="relative w-full sm:w-[200px]">
+                <Search className="absolute left-3 top-2.5 size-3.5 text-gray-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder="Search employee..."
+                  value={searchEmployee}
+                  onChange={(e) => setSearchEmployee(e.target.value)}
+                  className="pl-8 pr-7 h-9 text-xs rounded-xl bg-white border-gray-200 focus-visible:ring-blue-500 shadow-2xs"
+                />
+                {searchEmployee && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchEmployee("")}
+                    className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Department Filter */}
               <SearchableSelect
-                className="w-[140px] text-xs"
+                className="w-full sm:w-[155px] text-xs"
+                placeholder="Department"
+                searchPlaceholder="Search department..."
+                value={filterDepartment}
+                onValueChange={setFilterDepartment}
+                options={[
+                  { value: "all", label: "All Departments" },
+                  ...departments.map((d) => ({
+                    value: String(d.id),
+                    label: d.title || d.name,
+                  })),
+                ]}
+              />
+
+              <SearchableSelect
+                className="w-[125px] text-xs"
                 placeholder="Month"
                 searchPlaceholder="Search month..."
                 value={filterMonth.toString()}
@@ -1346,7 +1489,7 @@ export const Payroll: React.FC = () => {
               />
 
               <SearchableSelect
-                className="w-[110px] text-xs"
+                className="w-[100px] text-xs"
                 placeholder="Year"
                 searchPlaceholder="Search year..."
                 value={filterYear.toString()}
@@ -1358,7 +1501,7 @@ export const Payroll: React.FC = () => {
               />
 
               <SearchableSelect
-                className="w-[140px] text-xs"
+                className="w-[125px] text-xs"
                 placeholder="Status"
                 searchPlaceholder="Search status..."
                 value={filterStatus}
@@ -1473,9 +1616,12 @@ export const Payroll: React.FC = () => {
                 <TableRow>
                   <TableHead className="w-[45px] pl-6">
                     <Checkbox
-                      checked={(payrolls || []).length > 0 && selectedPayrollIds.length === (payrolls || []).length}
+                      checked={
+                        paginatedPayrolls.length > 0 &&
+                        paginatedPayrolls.every((p: any) => selectedPayrollIds.includes(p.id))
+                      }
                       onCheckedChange={(checked) => handleSelectAllRows(!!checked)}
-                      aria-label="Select all payroll records"
+                      aria-label="Select all payroll records on this page"
                     />
                   </TableHead>
                   <TableHead className="font-bold text-gray-700 text-xs">Employee</TableHead>
@@ -1488,7 +1634,14 @@ export const Payroll: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payrolls?.map((payroll) => {
+                {paginatedPayrolls.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-12 text-gray-500 text-sm font-medium">
+                      No payroll records found for this period.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedPayrolls.map((payroll) => {
                   const empName = payroll?.employee
                     ? `${payroll.employee.firstName || ""} ${payroll.employee.lastName || ""}`.trim()
                     : "Unknown Employee";
@@ -1654,10 +1807,104 @@ export const Payroll: React.FC = () => {
                       </TableCell>
                     </TableRow>
                   );
-                })}
+                })
+              )}
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination Footer */}
+          {totalPayrolls > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-3.5 border-t border-gray-100 bg-gray-50/50">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                <span>
+                  Showing <strong className="text-gray-700">{startIndex + 1}</strong> to{" "}
+                  <strong className="text-gray-700">{endIndex}</strong> of{" "}
+                  <strong className="text-gray-700">{totalPayrolls}</strong> records
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden sm:inline text-gray-500">Rows per page:</span>
+                  <Select
+                    value={String(itemsPerPage)}
+                    onValueChange={(val) => {
+                      setItemsPerPage(Number(val));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[72px] text-xs bg-white border-gray-200">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent side="top">
+                      {[10, 20, 50, 100].map((size) => (
+                        <SelectItem key={size} value={String(size)} className="text-xs">
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                    if (item === "...") {
+                      return (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                        >
+                          ...
+                        </span>
+                      );
+                    }
+
+                    const pageNum = Number(item);
+                    const isActive = pageNum === validPage;
+
+                    return (
+                      <Button
+                        key={`page-${pageNum}`}
+                        variant={isActive ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                          isActive
+                            ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                            : "border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                        }`}
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={validPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
       {/* RISK ALERTS */}

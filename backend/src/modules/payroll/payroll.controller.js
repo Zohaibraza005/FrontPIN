@@ -848,7 +848,7 @@ exports.generateBulkPayroll = async (req, res) => {
 
 exports.getPayrolls = async (req, res) => {
   try {
-    const { month, year, status } = req.query;
+    const { month, year, status, departmentId, search } = req.query;
 
     const where = {
       organizationId: req.user.orgId,
@@ -857,6 +857,21 @@ exports.getPayrolls = async (req, res) => {
         deletedAt: null
       }
     };
+
+    if (departmentId && departmentId !== "all" && !isNaN(Number(departmentId))) {
+      where.employee.departmentId = Number(departmentId);
+    }
+
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      where.employee.OR = [
+        { firstName: { contains: q } },
+        { lastName: { contains: q } },
+        { email: { contains: q } },
+        { employeeId: { contains: q } },
+        { biometricId: { contains: q } }
+      ];
+    }
 
     if (req.user.role !== "ADMIN") {
       where.employeeId = req.user.id;

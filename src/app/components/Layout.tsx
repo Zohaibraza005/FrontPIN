@@ -1982,22 +1982,20 @@ export const Layout: React.FC = () => {
             {/* Explanation Message */}
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
               <p className="text-sm leading-relaxed text-gray-700">
-                Aap ka schedule is din ka{" "}
+                Your shift is scheduled from{" "}
                 <span className="font-bold text-gray-900">
                   {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime}
                 </span>{" "}
-                se{" "}
+                to{" "}
                 <span className="font-bold text-gray-900">
                   {earlyModalInfo?.shiftEndFormatted || earlyModalInfo?.endTime}
-                </span>{" "}
-                tak hai.
+                </span>.
               </p>
               <p className="mt-2 text-sm leading-relaxed text-red-700 font-medium">
-                Policy ke mutabiq aap schedule se sirf 2 ghante pehle (
+                According to company policy, clock-in is only permitted within 2 hours of your scheduled start time (after{" "}
                 <span className="font-bold">
                   {earlyModalInfo?.earliestCheckInFormatted}
-                </span>{" "}
-                ke baad) check-in kar sakte hain. Is se pehle manual check-in allowed nahi hai.
+                </span>). Manual check-in prior to this window is not allowed.
               </p>
             </div>
           </div>
@@ -2007,7 +2005,7 @@ export const Layout: React.FC = () => {
               className="min-w-[120px] bg-red-600 text-white hover:bg-red-700 font-semibold"
               onClick={() => setShowEarlyBlockModal(false)}
             >
-              Theek Hai / Understood
+              Understood
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2052,14 +2050,13 @@ export const Layout: React.FC = () => {
             {/* Prompt Question */}
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
               <p className="text-sm leading-relaxed text-gray-700">
-                Aap ka schedule{" "}
+                Your shift begins at{" "}
                 <span className="font-bold text-gray-900">
                   {earlyModalInfo?.shiftStartFormatted || earlyModalInfo?.startTime}
-                </span>{" "}
-                se start ho raha hai.
+                </span>.
               </p>
               <p className="mt-2 text-sm font-semibold text-gray-900">
-                Aap schedule start hone se pehle check-in kar rahe hain. Are you sure you want to clock in now?
+                You are clocking in ahead of your scheduled start time. Are you sure you want to clock in now?
               </p>
             </div>
           </div>

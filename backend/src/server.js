@@ -7,10 +7,17 @@ const { processBiometricPunch } = require("./modules/devices/device.controller")
 
 const port = process.env.PORT || 4000;
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`API running on http://localhost:${port}`);
-  initMachineSyncCron();
-  initAutoCheckoutCron();
-  initHikvisionStreams(prisma, processBiometricPunch);
+  try {
+    await prisma.$connect();
+    console.log("Database connected successfully to MySQL.");
+    initMachineSyncCron();
+    initAutoCheckoutCron();
+    initHikvisionStreams(prisma, processBiometricPunch);
+  } catch (err) {
+    console.error("\n❌ [DATABASE CONNECTION ERROR]: Unable to reach MySQL database at localhost:3306.");
+    console.error("👉 Please ensure MySQL is started in XAMPP Control Panel (or run C:\\xampp\\mysql_start.bat).\n");
+  }
 });
 

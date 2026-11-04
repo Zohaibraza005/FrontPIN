@@ -649,8 +649,12 @@ export const PayrollDetail = () => {
     if (!payroll?.employeeId) return;
     try {
       setLoadingAttendance(true);
-      const startDate = moment(payroll.periodStart).startOf("month").format("YYYY-MM-DD");
-      const endDate = moment(payroll.periodStart).endOf("month").format("YYYY-MM-DD");
+      const startDate = payroll.periodStart
+        ? moment(payroll.periodStart).format("YYYY-MM-DD")
+        : moment().startOf("month").format("YYYY-MM-DD");
+      const endDate = payroll.periodEnd
+        ? moment(payroll.periodEnd).format("YYYY-MM-DD")
+        : moment().endOf("month").format("YYYY-MM-DD");
       const res = await attendanceAPI.getAttendanceReport({
         employeeId: payroll.employeeId,
         startDate,
@@ -676,9 +680,7 @@ export const PayrollDetail = () => {
 
   const handleOpenAttendanceModal = async () => {
     setAttendanceModalOpen(true);
-    if (attendanceRecords.length === 0) {
-      await fetchMonthlyAttendance();
-    }
+    await fetchMonthlyAttendance(false);
   };
 
   const handleConfirmPay = async () => {
@@ -1515,7 +1517,11 @@ export const PayrollDetail = () => {
                       Monthly Attendance Details
                     </DialogTitle>
                     <Badge variant="outline" className="text-xs bg-indigo-50/80 text-indigo-700 border-indigo-200 font-bold px-3 py-0.5 rounded-full">
-                      {moment(payroll.periodStart).format("MMMM YYYY")}
+                      {payroll.periodStart && payroll.periodEnd
+                        ? moment(payroll.periodStart).isSame(payroll.periodEnd, 'month')
+                          ? moment(payroll.periodStart).format("MMMM YYYY")
+                          : `${moment(payroll.periodStart).format("MMM YYYY")} – ${moment(payroll.periodEnd).format("MMM YYYY")}`
+                        : moment(payroll.periodStart).format("MMMM YYYY")}
                     </Badge>
                   </div>
                   <p className="text-xs sm:text-sm text-gray-500 font-medium mt-0.5 truncate">
@@ -1523,7 +1529,12 @@ export const PayrollDetail = () => {
                     <span className="text-gray-300 mx-2">•</span>
                     <span>{payroll.employee.department?.title || 'Staff'}</span>
                     <span className="text-gray-300 mx-2">•</span>
-                    <span>Pay Period: {moment(payroll.periodStart).startOf("month").format("DD MMM")} – {moment(payroll.periodStart).endOf("month").format("DD MMM YYYY")}</span>
+                    <span>
+                      Pay Period:{" "}
+                      {payroll.periodStart && payroll.periodEnd
+                        ? `${moment(payroll.periodStart).format("DD MMM YYYY")} – ${moment(payroll.periodEnd).format("DD MMM YYYY")}`
+                        : "—"}
+                    </span>
                   </p>
                 </div>
               </div>

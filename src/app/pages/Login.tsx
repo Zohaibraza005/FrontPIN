@@ -46,7 +46,7 @@ export const Login: React.FC = () => {
       setStep("password");
       setError(""); // clear any previous error
     } catch (err: any) {
-      setError(err.response?.data?.message || "User not found");
+      setError(err.data?.message || err.response?.data?.message || err.message || "User not found");
     } finally {
       setLoading(false);
     }
@@ -67,7 +67,7 @@ export const Login: React.FC = () => {
       toast.success("Login successful!");
       navigate("/");
     } catch (err: any) {
-      setError(err.response?.data?.message || "Invalid password");
+      setError(err.data?.message || err.response?.data?.message || err.message || "Invalid password");
     } finally {
       setLoading(false);
     }
