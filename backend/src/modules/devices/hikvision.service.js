@@ -132,8 +132,15 @@ async function parseHikvisionEvent(body) {
  */
 function sendHikvisionDigest(ip, port, username, password, method, path, data) {
   return new Promise((resolve) => {
-    const postData = JSON.stringify(data);
+    const hasBody = data !== undefined && data !== null && method !== "GET";
+    const postData = hasBody ? (typeof data === "string" ? data : JSON.stringify(data)) : "";
     const targetPort = resolveHikvisionPort(port);
+
+    const headers = {};
+    if (hasBody) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(postData);
+    }
 
     const options = {
       hostname: ip,
@@ -141,10 +148,7 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
       path: path,
       method: method,
       timeout: 4000,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(postData),
-      },
+      headers: headers,
     };
 
     const req = http.request(options, (res) => {
@@ -169,7 +173,7 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
         const authOptions = {
           ...options,
           headers: {
-            ...options.headers,
+            ...headers,
             Authorization: digestHeader,
           },
         };
@@ -181,7 +185,7 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
         });
         req2.on('timeout', () => { req2.destroy(); resolve({ status: 408, error: 'timeout' }); });
         req2.on('error', (err) => resolve({ status: 500, error: err.message }));
-        req2.write(postData);
+        if (hasBody) req2.write(postData);
         req2.end();
       } else {
         let body = "";
@@ -192,9 +196,59 @@ function sendHikvisionDigest(ip, port, username, password, method, path, data) {
 
     req.on('timeout', () => { req.destroy(); resolve({ status: 408, error: 'timeout' }); });
     req.on('error', (err) => resolve({ status: 500, error: err.message }));
-    req.write(postData);
+    if (hasBody) req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Tests connection and authentication to a Hikvision device
+ * @param {string} ip
+ * @param {number} port
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ isOnline: boolean, message: string }>}
+ */
+async function testHikvisionConnection(ip, port = 8000, username = "admin", password = "") {
+  try {
+    const targetPort = resolveHikvisionPort(port);
+    const res = await sendHikvisionDigest(
+      ip,
+      targetPort,
+      username || "admin",
+      password || "",
+      "GET",
+      "/ISAPI/System/deviceInfo"
+    );
+
+    if (res.status === 200) {
+      return { isOnline: true, message: "Device is ONLINE and reachable!" };
+    }
+
+    if (res.status === 401) {
+      return {
+        isOnline: false,
+        message: "Device is reachable, but authentication failed (invalid username or password).",
+      };
+    }
+
+    if (res.error === "timeout" || res.status === 408) {
+      return {
+        isOnline: false,
+        message: `Connection timed out. Device at ${ip}:${targetPort} is OFFLINE or unreachable.`,
+      };
+    }
+
+    return {
+      isOnline: false,
+      message: `Device is OFFLINE or returned error (HTTP ${res.status}): ${res.error || "Connection failed"}`,
+    };
+  } catch (err) {
+    return {
+      isOnline: false,
+      message: err.message || "Failed to reach device",
+    };
+  }
 }
 
 /**
@@ -511,6 +565,80 @@ function startHikvisionStream(device, processPunchCallback) {
 }
 
 /**
+ * Sends a Digest-Authenticated HTTP POST using a kept-alive agent and reusable Digest nonce
+ * so multi-page ISAPI queries avoid repeating TCP handshakes and 401 challenges on every page.
+ */
+function sendHikvisionSessionDigest(ip, port, username, password, path, data, agent, authState) {
+  return new Promise((resolve) => {
+    const postData = typeof data === "string" ? data : JSON.stringify(data);
+    const baseHeaders = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(postData),
+      Connection: "keep-alive",
+    };
+
+    const buildAuthHeader = () => {
+      authState.ncNum += 1;
+      const nc = String(authState.ncNum).padStart(8, "0");
+      const cnonce = crypto.randomBytes(8).toString("hex");
+      const ha1 = md5(`${username}:${authState.realm}:${password}`);
+      const ha2 = md5(`POST:${path}`);
+      const responseHash = md5(`${ha1}:${authState.nonce}:${nc}:${cnonce}:${authState.qop}:${ha2}`);
+      return `Digest username="${username}", realm="${authState.realm}", nonce="${authState.nonce}", uri="${path}", response="${responseHash}", qop=${authState.qop}, nc=${nc}, cnonce="${cnonce}"`;
+    };
+
+    const parseChallenge = (authHeader) => {
+      const realmMatch = authHeader.match(/realm="([^"]+)"/);
+      const nonceMatch = authHeader.match(/nonce="([^"]+)"/);
+      const qopMatch = authHeader.match(/qop="([^"]+)"/);
+      authState.realm = realmMatch ? realmMatch[1] : "DS-K1T671TMFW";
+      authState.nonce = nonceMatch ? nonceMatch[1] : "";
+      authState.qop = qopMatch ? qopMatch[1] : "auth";
+      authState.ncNum = 0;
+    };
+
+    const doRequest = (withAuth, allowRetryOn401) => {
+      const headers = withAuth && authState.nonce
+        ? { ...baseHeaders, Authorization: buildAuthHeader() }
+        : baseHeaders;
+
+      const req = http.request(
+        {
+          hostname: ip,
+          port,
+          path,
+          method: "POST",
+          timeout: 6000,
+          agent,
+          headers,
+        },
+        (res) => {
+          if (res.statusCode === 401 && res.headers["www-authenticate"] && allowRetryOn401) {
+            res.resume();
+            parseChallenge(res.headers["www-authenticate"]);
+            doRequest(true, false);
+            return;
+          }
+          let body = "";
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status: res.statusCode, body }));
+        }
+      );
+
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ status: 408, error: "timeout" });
+      });
+      req.on("error", (err) => resolve({ status: 500, error: err.message, code: err.code }));
+      req.write(postData);
+      req.end();
+    };
+
+    doRequest(Boolean(authState.nonce), true);
+  });
+}
+
+/**
  * Directly queries Hikvision ISAPI AcsEvent storage for exact punch logs
  */
 async function fetchHikvisionAcsEvents(device, startTime, endTime) {
@@ -518,93 +646,105 @@ async function fetchHikvisionAcsEvents(device, startTime, endTime) {
   if (!ipAddress) return [];
 
   const targetPort = resolveHikvisionPort(port);
+  const path = "/ISAPI/AccessControl/AcsEvent?format=json";
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const authState = { realm: null, nonce: null, qop: "auth", ncNum: 0 };
+
   let allEvents = [];
   let position = 0;
   const pageSize = 30;
   const searchID = `sync_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-  while (true) {
-    const payload = {
-      AcsEventCond: {
-        searchID,
-        searchResultPosition: position,
-        maxResults: pageSize,
-        major: 0,
-        minor: 0,
-        startTime,
-        endTime,
-      },
-    };
+  try {
+    while (true) {
+      const payload = {
+        AcsEventCond: {
+          searchID,
+          searchResultPosition: position,
+          maxResults: pageSize,
+          major: 0,
+          minor: 0,
+          startTime,
+          endTime,
+        },
+      };
 
-    let res = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      res = await sendHikvisionDigest(
-        ipAddress,
-        targetPort,
-        username || "admin",
-        password || "",
-        "POST",
-        "/ISAPI/AccessControl/AcsEvent?format=json",
-        payload
-      );
-      if (res && res.status === 200 && res.body) break;
-      await new Promise((r) => setTimeout(r, 250 * attempt));
-    }
+      let res = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        res = await sendHikvisionSessionDigest(
+          ipAddress,
+          targetPort,
+          username || "admin",
+          password || "",
+          path,
+          payload,
+          agent,
+          authState
+        );
+        if (res && res.status === 200 && res.body) break;
+        // Reset Digest nonce so retry cleanly re-negotiates auth/socket if needed
+        authState.nonce = null;
+        authState.ncNum = 0;
+        if (res && (res.status === 401 || res.code === "ECONNREFUSED" || res.code === "EHOSTUNREACH" || res.code === "ENETUNREACH")) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+      }
 
-    if (!res || res.status !== 200 || !res.body) {
-      if (position === 0) {
+      if (!res || res.status !== 200 || !res.body) {
         if (!res) {
           throw new Error(`Device at ${ipAddress}:${targetPort} is unreachable (network timeout / host unreachable).`);
         }
         if (res.status === 401) {
           throw new Error(`Device at ${ipAddress}:${targetPort} authentication failed (HTTP 401 Unauthorized).`);
         }
-        throw new Error(`Device at ${ipAddress}:${targetPort} returned HTTP status ${res.status}.`);
+        throw new Error(`Device at ${ipAddress}:${targetPort} failed at position ${position} (HTTP status ${res.status}${res.error ? `: ${res.error}` : ""}).`);
       }
-      break;
-    }
 
-    let data;
-    try {
-      data = JSON.parse(res.body);
-    } catch (e) {
-      break;
-    }
-
-    const list = data?.AcsEvent?.InfoList || [];
-    const totalMatches = data?.AcsEvent?.totalMatches || 0;
-    if (list.length === 0) break;
-
-    for (const ev of list) {
-      const rawBioId = ev.employeeNoString || ev.employeeNo || ev.cardNo;
-      const bioId = rawBioId ? String(rawBioId).trim() : null;
-      const major = Number(ev.major ?? ev.majorEventType ?? 0);
-      const minor = Number(ev.minor ?? ev.subEventType ?? 0);
-      const isAccessEvent = major === 5 || major === 0;
-      const isValidMinor = VALID_MINOR_CODES.has(minor) || minor === 0;
-
-      if (bioId && isAccessEvent && isValidMinor) {
-        const rawTime = ev.time || ev.dateTime;
-        const evDate = rawTime ? new Date(rawTime) : null;
-        if (!evDate || isNaN(evDate.getTime())) continue;
-
-        // Strictly enforce startTime and endTime boundaries
-        if (startTime && evDate < new Date(startTime)) continue;
-        if (endTime && evDate > new Date(endTime)) continue;
-
-        allEvents.push({
-          biometricId: bioId,
-          name: ev.name ? String(ev.name).trim() : null,
-          punchTime: rawTime,
-          minor: minor,
-          verifyMode: ev.currentVerifyMode || "HIKVISION_FACE",
-          serialNo: ev.serialNo,
-        });
+      let data;
+      try {
+        data = JSON.parse(res.body);
+      } catch (e) {
+        throw new Error(`Device at ${ipAddress}:${targetPort} returned invalid JSON at position ${position}.`);
       }
-    }
 
-    position += list.length;
-    if (position >= totalMatches) break;
+      const list = data?.AcsEvent?.InfoList || [];
+      const totalMatches = data?.AcsEvent?.totalMatches || 0;
+      if (list.length === 0) break;
+
+      for (const ev of list) {
+        const rawBioId = ev.employeeNoString || ev.employeeNo || ev.cardNo;
+        const bioId = rawBioId ? String(rawBioId).trim() : null;
+        const major = Number(ev.major ?? ev.majorEventType ?? 0);
+        const minor = Number(ev.minor ?? ev.subEventType ?? 0);
+        const isAccessEvent = major === 5 || major === 0;
+        const isValidMinor = VALID_MINOR_CODES.has(minor) || minor === 0;
+
+        if (bioId && isAccessEvent && isValidMinor) {
+          const rawTime = ev.time || ev.dateTime;
+          const evDate = rawTime ? new Date(rawTime) : null;
+          if (!evDate || isNaN(evDate.getTime())) continue;
+
+          // Strictly enforce startTime and endTime boundaries
+          if (startTime && evDate < new Date(startTime)) continue;
+          if (endTime && evDate > new Date(endTime)) continue;
+
+          allEvents.push({
+            biometricId: bioId,
+            name: ev.name ? String(ev.name).trim() : null,
+            punchTime: rawTime,
+            minor: minor,
+            verifyMode: ev.currentVerifyMode || "HIKVISION_FACE",
+            serialNo: ev.serialNo,
+          });
+        }
+      }
+
+      position += list.length;
+      if (position >= totalMatches) break;
+    }
+  } finally {
+    agent.destroy();
   }
 
   allEvents.sort((a, b) => new Date(a.punchTime) - new Date(b.punchTime));
@@ -1025,6 +1165,8 @@ async function syncUserBiometricsAcrossDevices(devices, employeeNo, userName = "
 }
 
 module.exports = {
+  testHikvisionConnection,
+  sendHikvisionDigest,
   parseHikvisionEvent,
   pushUserToHikvision,
   deleteUserFromHikvision,

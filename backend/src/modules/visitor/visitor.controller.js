@@ -2,6 +2,7 @@ const prisma = require("../../config/prisma");
 const bcrypt = require("bcrypt");
 const moment = require("moment-timezone");
 const visitorLogService = require("./visitorLog.service");
+const { ensureDefaultScheduleForEmployee } = require("../schedule/schedule.helper");
 
 //////////////////////////////////////////////////////
 // GET ALL VISITORS (WITH FILTERS, SEARCH & DATE PUNCHES)
@@ -916,6 +917,13 @@ exports.convertVisitorToEmployee = async (req, res) => {
           payroll: true,
           privileges: true,
         },
+      });
+
+      const maxExtra = maxExtraHours ? parseInt(maxExtraHours) : 2;
+      await ensureDefaultScheduleForEmployee(tx, newEmployee, {
+        companyId: finalCompanyId ? parseInt(finalCompanyId) : null,
+        overtimeAllowed: Boolean(allowExtraHours),
+        overtimeMinutes: maxExtra > 0 ? maxExtra * 60 : 120,
       });
 
       // 2. Update Visitor record

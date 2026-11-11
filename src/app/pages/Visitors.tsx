@@ -272,8 +272,6 @@ export const Visitors: React.FC = () => {
   }, [selectedDate]);
 
   useEffect(() => {
-    fetchVisitors(false, selectedDate);
-    fetchStats(selectedDate);
     fetchLocations();
     fetchDepartments();
     fetchEmployees();
@@ -681,9 +679,23 @@ export const Visitors: React.FC = () => {
         !filterDepartment ||
         String(v.departmentId || '') === String(filterDepartment);
 
-      return matchesStatus && matchesLocation && matchesDept;
+      // Selected Date: show only visitors who visited/punched on that date
+      // (unless user explicitly filtered for Expected or Converted status)
+      const hasActivityOnDate =
+        (Array.isArray(v.punches) && v.punches.length > 0) ||
+        Boolean(v.checkInTime) ||
+        v.status === 'CHECKED_IN' ||
+        v.status === 'CHECKED_OUT';
+
+      const matchesDate =
+        !selectedDate ||
+        filterStatus === 'EXPECTED' ||
+        filterStatus === 'CONVERTED' ||
+        hasActivityOnDate;
+
+      return matchesStatus && matchesLocation && matchesDept && matchesDate;
     });
-  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment]);
+  }, [visitors, searchQuery, filterStatus, filterLocation, filterDepartment, selectedDate]);
 
   // Pagination calculations
   const totalVisitors = filteredVisitors.length;
@@ -855,7 +867,16 @@ export const Visitors: React.FC = () => {
       {/* ── Stat KPI Cards ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Total Visitors */}
-        <Card className="border border-gray-200/80 shadow-2xs rounded-2xl bg-white hover:border-gray-300 transition-all">
+        <Card
+          onClick={() => {
+            setFilterStatus('all');
+            setSelectedDate(null);
+          }}
+          className={`border shadow-2xs rounded-2xl bg-white hover:border-gray-300 transition-all cursor-pointer ${
+            filterStatus === 'all' && !selectedDate ? 'border-blue-300 ring-1 ring-blue-100' : 'border-gray-200/80'
+          }`}
+          title="Click to show all visitors"
+        >
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Visitors</p>
@@ -869,7 +890,20 @@ export const Visitors: React.FC = () => {
         </Card>
 
         {/* Today Present */}
-        <Card className="border border-emerald-200/80 shadow-2xs rounded-2xl bg-emerald-50/20 hover:border-emerald-300 transition-all">
+        <Card
+          onClick={() => {
+            if (filterStatus === 'CHECKED_IN') {
+              setFilterStatus('all');
+            } else {
+              if (!selectedDate) setSelectedDate(new Date());
+              setFilterStatus('CHECKED_IN');
+            }
+          }}
+          className={`border shadow-2xs rounded-2xl bg-emerald-50/20 hover:border-emerald-300 transition-all cursor-pointer ${
+            filterStatus === 'CHECKED_IN' ? 'border-emerald-400 ring-2 ring-emerald-200/70' : 'border-emerald-200/80'
+          }`}
+          title="Click to filter only currently checked-in (present) visitors"
+        >
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <div className="flex items-center gap-1.5">
@@ -1075,7 +1109,7 @@ export const Visitors: React.FC = () => {
           </div>
           <h3 className="text-lg font-semibold text-gray-900">No visitors found</h3>
           <p className="text-sm text-gray-500 mt-1 max-w-sm mx-auto">
-            {searchQuery || filterStatus !== 'all' || filterLocation !== 'all'
+            {searchQuery || filterStatus !== 'all' || filterLocation !== 'all' || filterDepartment !== 'all' || selectedDate !== null
               ? 'No visitors match the selected filters. Try clearing your search or filters.'
               : 'No company visitors have been registered yet. Click "Add Visitor" to record your first guest.'}
           </p>

@@ -11,6 +11,10 @@ async function fetchZkTecoLogs(ip, port = 4370) {
   try {
     // Create socket connection
     await zk.createSocket();
+    try {
+      zk.zklibTcp?.socket?.on?.("error", (e) => console.warn(`[ZKTeco TCP Socket Warn] ${ip}:`, e.message));
+      zk.zklibUdp?.socket?.on?.("error", (e) => console.warn(`[ZKTeco UDP Socket Warn] ${ip}:`, e.message));
+    } catch (ignore) {}
 
     // Get attendance logs from machine internal memory
     const logs = await zk.getAttendances();
@@ -38,6 +42,10 @@ async function testZkTecoConnection(ip, port = 4370) {
   const zk = new ZKLib(ip, port, 4000, 4000);
   try {
     await zk.createSocket();
+    try {
+      zk.zklibTcp?.socket?.on?.("error", () => {});
+      zk.zklibUdp?.socket?.on?.("error", () => {});
+    } catch (ignore) {}
     const info = await zk.getInfo();
     await zk.disconnect();
     return true;

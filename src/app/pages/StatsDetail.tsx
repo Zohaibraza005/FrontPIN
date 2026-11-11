@@ -60,6 +60,34 @@ import { format } from "date-fns";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
 
+const getPaginationRange = (current: number, total: number) => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const delta = 1;
+  const range: (number | string)[] = [];
+
+  for (
+    let i = Math.max(2, current - delta);
+    i <= Math.min(total - 1, current + delta);
+    i++
+  ) {
+    range.push(i);
+  }
+
+  if (current - delta > 2) {
+    range.unshift("...");
+  }
+  if (current + delta < total - 1) {
+    range.push("...");
+  }
+
+  range.unshift(1);
+  range.push(total);
+
+  return range;
+};
+
 export const StatsDetails: React.FC = () => {
   const { category } = useParams<{ category: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -69,6 +97,10 @@ export const StatsDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Locations & Departments state
   const [locations, setLocations] = useState<any[]>([]);
@@ -405,6 +437,11 @@ export const StatsDetails: React.FC = () => {
     return selectedDate;
   };
 
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [category, selectedDate, selectedLocation, selectedDepartment, searchQuery]);
+
   // Filter list based on real-time search query and department
   const filteredData = data.filter((item) => {
     if (selectedDepartment && selectedDepartment !== "all") {
@@ -426,6 +463,14 @@ export const StatsDetails: React.FC = () => {
     const status = (item.status || "").toLowerCase();
     return name.includes(q) || email.includes(q) || dept.includes(q) || status.includes(q);
   });
+
+  // Pagination calculations
+  const totalRecords = filteredData.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / itemsPerPage));
+  const validPage = Math.min(currentPage, totalPages);
+  const startIndex = (validPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalRecords);
+  const paginatedData = filteredData.slice(startIndex, endIndex);
 
   // Get Category Icon & Theme
   const getCategoryTheme = () => {
@@ -656,40 +701,41 @@ export const StatsDetails: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto overflow-y-auto max-h-[560px] w-full">
-              <Table className="w-full text-xs">
-                <TableHeader className="bg-gray-50/80 sticky top-0 z-10 shadow-2xs">
-                  <TableRow>
-                    {isAttendanceCategory ? (
-                      <>
-                        <TableHead className="pl-4 font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5">EMPLOYEE</TableHead>
-                        <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">CHECK IN</TableHead>
-                        <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">CHECK OUT</TableHead>
-                        <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">WORKED</TableHead>
-                        <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">OVERTIME</TableHead>
-                        <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">STATUS</TableHead>
-                        <TableHead className="pr-4 font-semibold text-[11px] text-gray-400 uppercase tracking-wider text-right py-2.5 whitespace-nowrap">ACTIONS</TableHead>
-                      </>
-                    ) : (
-                      <>
-                        <TableHead className="font-bold text-gray-700 text-xs pl-4 py-2.5">Employee / Name</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Department</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Status</TableHead>
-                        {isTaskCategory && (
-                          <>
-                            <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Priority</TableHead>
-                            <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Deadline</TableHead>
-                          </>
-                        )}
-                        {isProjectCategory && (
-                          <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Progress</TableHead>
-                        )}
-                      </>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredData.map((item, idx) => {
+            <>
+              <div className="overflow-x-auto w-full">
+                <Table className="w-full text-xs">
+                  <TableHeader className="bg-gray-50/80 sticky top-0 z-10 shadow-2xs">
+                    <TableRow>
+                      {isAttendanceCategory ? (
+                        <>
+                          <TableHead className="pl-4 font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5">EMPLOYEE</TableHead>
+                          <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">CHECK IN</TableHead>
+                          <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">CHECK OUT</TableHead>
+                          <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">WORKED</TableHead>
+                          <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">OVERTIME</TableHead>
+                          <TableHead className="font-semibold text-[11px] text-gray-400 uppercase tracking-wider py-2.5 px-2">STATUS</TableHead>
+                          <TableHead className="pr-4 font-semibold text-[11px] text-gray-400 uppercase tracking-wider text-right py-2.5 whitespace-nowrap">ACTIONS</TableHead>
+                        </>
+                      ) : (
+                        <>
+                          <TableHead className="font-bold text-gray-700 text-xs pl-4 py-2.5">Employee / Name</TableHead>
+                          <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Department</TableHead>
+                          <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Status</TableHead>
+                          {isTaskCategory && (
+                            <>
+                              <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Priority</TableHead>
+                              <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Deadline</TableHead>
+                            </>
+                          )}
+                          {isProjectCategory && (
+                            <TableHead className="font-bold text-gray-700 text-xs py-2.5 px-2">Progress</TableHead>
+                          )}
+                        </>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedData.map((item, idx) => {
                     const st = (item.status || "").toLowerCase();
                     const isLateItem = item.isLate || st === "late" || (item.late && item.late !== "N/A" && item.late !== "On time");
 
@@ -916,7 +962,101 @@ export const StatsDetails: React.FC = () => {
                 </TableBody>
               </Table>
             </div>
-          )}
+
+            {/* Pagination Footer */}
+            {totalRecords > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                  <span>
+                    Showing <strong className="text-gray-700 dark:text-gray-200">{startIndex + 1}</strong> to{" "}
+                    <strong className="text-gray-700 dark:text-gray-200">{endIndex}</strong> of{" "}
+                    <strong className="text-gray-700 dark:text-gray-200">{totalRecords}</strong> {isAttendanceCategory ? "employees" : "records"}
+                  </span>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="hidden sm:inline text-gray-500 dark:text-gray-400">Rows per page:</span>
+                    <Select
+                      value={String(itemsPerPage)}
+                      onValueChange={(val) => {
+                        setItemsPerPage(Number(val));
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[72px] text-xs bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent side="top">
+                        {[10, 20, 50, 100].map((size) => (
+                          <SelectItem key={size} value={String(size)} className="text-xs">
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={validPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                    Previous
+                  </Button>
+
+                  <div className="flex items-center gap-1">
+                    {getPaginationRange(validPage, totalPages).map((item, idx) => {
+                      if (item === "...") {
+                        return (
+                          <span
+                            key={`ellipsis-${idx}`}
+                            className="w-8 h-8 flex items-center justify-center text-xs text-gray-400"
+                          >
+                            ...
+                          </span>
+                        );
+                      }
+
+                      const pageNum = Number(item);
+                      const isActive = pageNum === validPage;
+
+                      return (
+                        <Button
+                          key={`page-${pageNum}`}
+                          variant={isActive ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`h-8 w-8 p-0 text-xs font-semibold rounded-lg transition-colors ${
+                            isActive
+                              ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs border-blue-600"
+                              : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          }`}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={validPage === totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="h-8 px-2.5 text-xs font-semibold rounded-lg border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                  >
+                    Next
+                    <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
         </CardContent>
       </Card>
 

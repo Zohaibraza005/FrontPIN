@@ -773,6 +773,9 @@ model AttendancePunch {
   createdAt DateTime @default(now())
 
   @@index([attendanceId])
+  @@index([attendanceId, type])
+  @@index([employeeId, punchTime])
+  @@index([punchTime])
   @@map("attendancepunch")
 }
 

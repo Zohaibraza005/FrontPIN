@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
+const { backfillMissingSchedulesForOrg } = require("./schedule.helper");
 
 function getScheduleShiftForDay(schedule, date, timezone = null) {
   let startTime = schedule?.startTime || "09:00";
@@ -349,11 +350,17 @@ exports.getSchedules = async (req, res) => {
     const role = req.user.role;
     const userId = req.user.id;
 
+    // Auto-backfill default schedules for employees that were auto-provisioned/imported without any schedule row
+    await backfillMissingSchedulesForOrg(prisma, orgId).catch((err) =>
+      console.warn("Schedule backfill warning:", err.message)
+    );
+
     // Build where clause based on role
     const whereClause = {
       deletedAt: null,
       employee: {
         organizationId: orgId,
+        deletedAt: null,
         NOT: { role: "ADMIN" }
       }
     };
@@ -479,7 +486,8 @@ exports.updateSchedule = async (req, res) => {
         allowHalfDay: isHalfDayEdit,
         halfDayMinutes: halfDayMinsEdit,
         breaksAllowed,
-        breakDurations: breaksAllowed ? breakDurations : []
+        breakDurations: breaksAllowed ? breakDurations : [],
+        deletedAt: null,
       },
       include: {
         employee: {
@@ -504,6 +512,14 @@ exports.updateSchedule = async (req, res) => {
     });
 
     if (updated.employeeId) {
+      await prisma.schedule.updateMany({
+        where: {
+          employeeId: updated.employeeId,
+          id: { not: updated.id },
+          deletedAt: null,
+        },
+        data: { deletedAt: new Date() },
+      });
       await syncEmployeeRecentAttendances(updated.employeeId, updated);
     }
 

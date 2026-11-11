@@ -247,10 +247,19 @@ function getBreakStats(schedules, attendanceActivities) {
 async function autoCheckoutOverdueAttendances() {
   try {
     const nowUtc = moment.utc();
+    // Find attendances that have checked in, but have no check-out time yet OR were auto-closed prematurely
     const openAttendances = await prisma.attendance.findMany({
       where: {
         checkInTime: { not: null },
-        checkOutTime: null,
+        OR: [
+          { checkOutTime: null },
+          {
+            autoClockedOut: true,
+            punches: {
+              some: { type: "CHECK_OUT" },
+            },
+          },
+        ],
       },
       include: {
         employee: {
@@ -356,21 +365,13 @@ async function autoCheckoutOverdueAttendances() {
         const effectiveOutUtc = isPastCutoff ? cutoffUtc : lastPunchUtc;
         const effectiveOutDate = effectiveOutUtc.toDate();
 
-        if (isPastCutoff) {
-          const hasAuto = (att.punches || []).some((p) => p.type === "AUTO_CLOCK_OUT");
-          if (!hasAuto) {
-            await prisma.attendancePunch.create({
-              data: {
-                attendanceId: att.id,
-                employeeId: emp.id,
-                type: "AUTO_CLOCK_OUT",
-                punchTime: cutoffUtc.toDate(),
-                device: "Auto System Checkout",
-                method: "SYSTEM",
-              },
-            });
-          }
-        }
+        // Crucial: Employee checked out physically. Delete any premature AUTO_CLOCK_OUT punch!
+        await prisma.attendancePunch.deleteMany({
+          where: {
+            attendanceId: att.id,
+            type: "AUTO_CLOCK_OUT",
+          },
+        });
 
         const rawWorkedMinutes = Math.max(0, Math.round(effectiveOutUtc.diff(trueInMoment, "minutes")));
         const maxAllowedWorkedMinutes = scheduledDurationMinutes + maxOtMinutes;
@@ -387,18 +388,30 @@ async function autoCheckoutOverdueAttendances() {
           overtimeMinutes = 0;
         }
 
+        // Check early out
+        let isEarlyOut = false;
+        let earlyOutMinutes = 0;
+        const allowEarlyOut = activeSchedule ? activeSchedule.allowEarlyOut : false;
+        const allowedEarlyOutMins = allowEarlyOut ? (Number(activeSchedule.earlyOutMinutes) || 0) : 0;
+        const earlyOutThresholdLocal = shiftEndLocal.clone().subtract(allowedEarlyOutMins, "minutes");
+        const outLocal = lastPunchMoment.clone().tz(timezone);
+        if (outLocal.isBefore(earlyOutThresholdLocal) && outLocal.isAfter(trueInLocal)) {
+          earlyOutMinutes = Math.max(0, shiftEndLocal.diff(outLocal, "minutes"));
+          if (earlyOutMinutes > 0) isEarlyOut = true;
+        }
+
         await prisma.attendance.update({
           where: { id: att.id },
           data: {
             checkInTime: trueInMoment.toDate(),
             checkOutTime: effectiveOutDate,
-            checkOutMethod: isPastCutoff ? "SYSTEM" : (lastCheckOutPunch.method || "BIOMETRIC"),
-            checkOutDevice: isPastCutoff ? "Auto System Checkout" : (lastCheckOutPunch.device || null),
-            autoClockedOut: isPastCutoff ? true : false,
+            checkOutMethod: lastCheckOutPunch.method || "BIOMETRIC",
+            checkOutDevice: lastCheckOutPunch.device || null,
+            autoClockedOut: false,
             totalWorkedMinutes,
             overtimeMinutes,
-            isEarlyOut: false,
-            earlyOutMinutes: 0,
+            isEarlyOut,
+            earlyOutMinutes,
           },
         });
         closedCount++;
@@ -435,6 +448,7 @@ async function autoCheckoutOverdueAttendances() {
               checkInTime: trueInMoment.toDate(),
               checkOutTime: cutoffDate,
               checkOutMethod: "SYSTEM",
+              checkOutDevice: "Auto System Checkout",
               autoClockedOut: true,
               totalWorkedMinutes,
               overtimeMinutes,
@@ -823,9 +837,14 @@ exports.clockOut = async (req, res) => {
         overtimeMinutes,
         isEarlyOut,
         earlyOutMinutes,
-        autoClockedOut: isPastCutoff,
+        autoClockedOut: false,
         summary,
       },
+    });
+
+    // Employee clocked out manually. Delete any premature AUTO_CLOCK_OUT punch!
+    await prisma.attendancePunch.deleteMany({
+      where: { attendanceId: attendance.id, type: "AUTO_CLOCK_OUT" },
     });
 
     await prisma.attendancePunch.create({
@@ -1959,22 +1978,28 @@ exports.getAttendanceReport = async (req, res) => {
           overtimeAmount: overtime?.amount || 0,
           totalWorkedMinutes,
           punches: (() => {
-            const list = [...(existing.punches || [])];
-            const isCutoffCapped = finalCheckOut && (
-              existing.autoClockedOut ||
-              moment(finalCheckOut).tz(empTz).isSame(cutoffLocal, "minute")
-            );
-            const hasAutoPunch = list.some((p) => p.type === "AUTO_CLOCK_OUT");
-            if (isCutoffCapped && !hasAutoPunch && finalCheckOut) {
-              list.push({
-                id: `auto_${existing.id || dateStr}`,
-                attendanceId: existing.id,
-                employeeId: emp.id,
-                type: "AUTO_CLOCK_OUT",
-                punchTime: finalCheckOut,
-                device: "Auto System Checkout",
-                method: "SYSTEM",
-              });
+            let list = [...(existing.punches || [])];
+            const hasPhysicalOut = list.some((p) => p.type === "CHECK_OUT");
+            if (hasPhysicalOut) {
+              // Employee has a physical CHECK_OUT punch. Never show an AUTO_CLOCK_OUT punch!
+              list = list.filter((p) => p.type !== "AUTO_CLOCK_OUT");
+            } else {
+              const isCutoffCapped = finalCheckOut && (
+                existing.autoClockedOut ||
+                moment(finalCheckOut).tz(empTz).isSame(cutoffLocal, "minute")
+              );
+              const hasAutoPunch = list.some((p) => p.type === "AUTO_CLOCK_OUT");
+              if (isCutoffCapped && !hasAutoPunch && finalCheckOut) {
+                list.push({
+                  id: `auto_${existing.id || dateStr}`,
+                  attendanceId: existing.id,
+                  employeeId: emp.id,
+                  type: "AUTO_CLOCK_OUT",
+                  punchTime: finalCheckOut,
+                  device: "Auto System Checkout",
+                  method: "SYSTEM",
+                });
+              }
             }
             list.sort((a, b) => new Date(a.punchTime) - new Date(b.punchTime));
             return list;
@@ -2343,6 +2368,12 @@ exports.getAttendanceReport = async (req, res) => {
       }
 
       if (existingRecord) {
+        if (finalCheckOut) {
+          await prisma.attendancePunch.deleteMany({
+            where: { attendanceId: existingRecord.id, type: "AUTO_CLOCK_OUT" },
+          });
+        }
+
         const attendance = await prisma.attendance.update({
           where: { id: existingRecord.id },
           data: {
@@ -2354,6 +2385,8 @@ exports.getAttendanceReport = async (req, res) => {
             lateMinutes,
             isEarlyOut,
             earlyOutMinutes,
+            autoClockedOut: finalCheckOut ? false : existingRecord.autoClockedOut,
+            checkOutMethod: finalCheckOut && existingRecord.checkOutMethod === "SYSTEM" ? "MANUAL" : existingRecord.checkOutMethod,
             status: finalStatus || existingRecord.status
           }
         });

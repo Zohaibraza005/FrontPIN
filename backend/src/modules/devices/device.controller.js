@@ -1,7 +1,8 @@
 const prisma = require("../../config/prisma");
 const moment = require("moment-timezone");
-const { parseHikvisionEvent, startHikvisionStream } = require("./hikvision.service");
+const { parseHikvisionEvent, startHikvisionStream, testHikvisionConnection } = require("./hikvision.service");
 const { fetchZkTecoLogs, testZkTecoConnection } = require("./zkteco.service");
+const { ensureDefaultScheduleForEmployee } = require("../schedule/schedule.helper");
 
 function getScheduleShiftForDay(schedule, date, timezone = null) {
   let startTime = schedule?.startTime || "09:00";
@@ -76,7 +77,7 @@ function isOffDay(schedules, date, timezone = null) {
 /**
  * Helper to match a visitor by Badge Number, ID, Phone, National ID, or Full Name
  */
-async function findVisitor(biometricId, employeeName, organizationId = null) {
+async function findVisitorUncached(biometricId, employeeName, organizationId = null) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
   const orgFilter = organizationId ? { organizationId } : {};
 
@@ -158,10 +159,24 @@ async function findVisitor(biometricId, employeeName, organizationId = null) {
   return null;
 }
 
+async function findVisitor(biometricId, employeeName, organizationId = null, syncContext = null) {
+  const bioIdStr = biometricId ? String(biometricId).trim() : "";
+  const nameKey = employeeName ? employeeName.trim().toLowerCase() : "";
+  const cacheKey = `${organizationId || "all"}|${bioIdStr}|${nameKey}`;
+  if (syncContext?.visitorCache?.has(cacheKey)) {
+    return syncContext.visitorCache.get(cacheKey);
+  }
+  const visitor = await findVisitorUncached(biometricId, employeeName, organizationId);
+  if (syncContext?.visitorCache) {
+    syncContext.visitorCache.set(cacheKey, visitor || null);
+  }
+  return visitor;
+}
+
 /**
  * Helper to match an employee by Biometric ID, Employee ID, or Machine Name
  */
-async function findEmployee(biometricId, employeeName, organizationId = null) {
+async function findEmployeeUncached(biometricId, employeeName, organizationId = null, skipVisitorCheck = false) {
   const bioIdStr = biometricId ? String(biometricId).trim() : "";
 
   // Permanently removed biometric IDs should never match or restore
@@ -172,9 +187,11 @@ async function findEmployee(biometricId, employeeName, organizationId = null) {
   }
 
   // 0. If this punch belongs to a visitor, NEVER treat it as an employee
-  const isVis = await findVisitor(biometricId, employeeName, organizationId);
-  if (isVis) {
-    return null;
+  if (!skipVisitorCheck) {
+    const isVis = await findVisitorUncached(biometricId, employeeName, organizationId);
+    if (isVis) {
+      return null;
+    }
   }
 
   const orgCondition = organizationId ? { organizationId } : { organizationId: { not: 1 } };
@@ -367,6 +384,14 @@ async function findEmployee(biometricId, employeeName, organizationId = null) {
         },
       });
 
+      const defaultSched = await ensureDefaultScheduleForEmployee(prisma, newEmp).catch((err) => {
+        console.warn("[Biometric Punch] Default schedule creation warning:", err.message);
+        return null;
+      });
+      if (defaultSched) {
+        newEmp.Schedule = [defaultSched];
+      }
+
       console.log(`[Biometric Punch] Auto-provisioned new employee: ${firstName} ${lastName} (Bio: ${bioIdStr})`);
       return newEmp;
     } catch (createErr) {
@@ -375,6 +400,21 @@ async function findEmployee(biometricId, employeeName, organizationId = null) {
   }
 
   return null;
+}
+
+async function findEmployee(biometricId, employeeName, organizationId = null, options = {}) {
+  const { skipVisitorCheck = false, syncContext = null } = options;
+  const bioIdStr = biometricId ? String(biometricId).trim() : "";
+  const nameKey = employeeName ? employeeName.trim().toLowerCase() : "";
+  const cacheKey = `${organizationId || "all"}|${bioIdStr}|${nameKey}`;
+  if (syncContext?.employeeCache?.has(cacheKey)) {
+    return syncContext.employeeCache.get(cacheKey);
+  }
+  const emp = await findEmployeeUncached(biometricId, employeeName, organizationId, skipVisitorCheck);
+  if (syncContext?.employeeCache) {
+    syncContext.employeeCache.set(cacheKey, emp || null);
+  }
+  return emp;
 }
 
 /**
@@ -524,7 +564,7 @@ function calculateAttendanceMetrics(inDate, outDate, schedule, shiftDateString, 
  * 3. Store EVERY punch in AttendancePunch (deduplicating identical timestamps within 1 min).
  * 4. Calculate complete shift time from Check-In to Check-Out (up to 15 hours).
  */
-async function processBiometricPunch({ biometricId, punchTime, brand, deviceName, method, employeeName, direction, organizationId = null, companyId = null }) {
+async function processBiometricPunch({ biometricId, punchTime, brand, deviceName, method, employeeName, direction, organizationId = null, companyId = null }, syncContext = null) {
   if (!biometricId && !employeeName) {
     console.warn(`[Biometric Punch] Skipped - No biometricId or employeeName provided`);
     return { success: false, reason: "No identifier provided" };
@@ -552,7 +592,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   }
 
   // 1. Match Visitor FIRST - Visitors must stay strictly in the Visitor section
-  const matchedVisitor = await findVisitor(biometricId, employeeName, resolvedOrgId);
+  const matchedVisitor = await findVisitor(biometricId, employeeName, resolvedOrgId, syncContext);
   if (matchedVisitor) {
     const timezone = matchedVisitor.company?.timezone || "Asia/Karachi";
     const pTime = punchTime ? moment(punchTime).tz(timezone) : moment().tz(timezone);
@@ -601,6 +641,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       timezone,
     });
 
+    if (syncContext?.visitorCache && logRes?.visitor) {
+      const bioKey = biometricId ? String(biometricId).trim() : "";
+      const nameKey = employeeName ? employeeName.trim().toLowerCase() : "";
+      syncContext.visitorCache.set(`${resolvedOrgId || "all"}|${bioKey}|${nameKey}`, logRes.visitor);
+    }
+
     return {
       success: true,
       isVisitor: true,
@@ -611,7 +657,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   }
 
   // 2. Not a visitor -> Process as Employee
-  const employee = await findEmployee(biometricId, employeeName, resolvedOrgId);
+  const employee = await findEmployee(biometricId, employeeName, resolvedOrgId, { skipVisitorCheck: true, syncContext });
   if (!employee) {
     console.warn(`[Biometric Punch] No Employee or Visitor matched with biometricId: ${biometricId} / Name: ${employeeName}`);
     return { success: false, reason: `Employee not found for Biometric ID: ${biometricId} / Name: ${employeeName}` };
@@ -786,6 +832,30 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   };
 
   const recordPunch = async (attendanceId, type, time) => {
+    const timeMs = new Date(time).getTime();
+    if (syncContext?.punchesPreloaded) {
+      const empPunches = syncContext.existingPunchesByEmp.get(employee.id) || [];
+      const existing = empPunches.find(
+        (p) => p.device === deviceTag && p.type === type && Math.abs(p.punchTimeMs - timeMs) <= 15000
+      );
+      if (existing) {
+        return existing;
+      }
+      const created = await prisma.attendancePunch.create({
+        data: {
+          attendanceId,
+          employeeId: employee.id,
+          type,
+          punchTime: time,
+          device: deviceTag,
+          method: punchMethod,
+        },
+      });
+      empPunches.push({ id: created.id, attendanceId, device: deviceTag, type, punchTimeMs: timeMs });
+      syncContext.existingPunchesByEmp.set(employee.id, empPunches);
+      return created;
+    }
+
     // Deduplicate against the exact same punch for this employee on the same device within 15 seconds
     const existing = await prisma.attendancePunch.findFirst({
       where: {
@@ -1014,8 +1084,7 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   if (deviceDir === "CHECK_OUT") {
     const hasValidIn = Boolean(attendance?.checkInTime);
     const isPastCutoff = hasValidIn && pTime.isAfter(cutoffLocal) && cutoffUtc.isAfter(moment(attendance.checkInTime));
-    const isOverdueOrAuto = isPastCutoff || Boolean(attendance?.autoClockedOut);
-    const effectiveCheckOutDate = isOverdueOrAuto ? cutoffUtc.toDate() : punchDate;
+    const effectiveCheckOutDate = isPastCutoff ? cutoffUtc.toDate() : punchDate;
 
     if (!attendance) {
       // Create attendance record with Check-Out (Check-In pending)
@@ -1034,10 +1103,10 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
             shiftEndTime: schedule.endTime,
             checkInTime: null,
             checkOutTime: effectiveCheckOutDate,
-            checkOutMethod: isOverdueOrAuto ? "SYSTEM" : punchMethod,
-            checkOutDevice: isOverdueOrAuto ? "Auto System Checkout" : deviceTag,
+            checkOutMethod: punchMethod,
+            checkOutDevice: deviceTag,
             status: isOffDay(employee.Schedule, shiftDateString, timezone) ? "OFF_DAY" : "PRESENT",
-            autoClockedOut: isOverdueOrAuto ? true : false,
+            autoClockedOut: false,
           },
           update: {},
         });
@@ -1074,18 +1143,20 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
 
     // Update checkOutTime with latest exit punch (capped at cutoff if past cutoff or already auto-closed)
     const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
+    const effectiveOutMoment = moment(effectiveCheckOutDate);
+    const isDifferentOut = !currentOutMoment || Math.abs(effectiveOutMoment.diff(currentOutMoment)) >= 1000;
     const isLatestOut =
       !currentOutMoment ||
-      pTime.isAfter(currentOutMoment) ||
       attendance.autoClockedOut ||
+      (isDifferentOut && effectiveOutMoment.isAfter(currentOutMoment)) ||
       (attendance.checkInTime && currentOutMoment.isSameOrBefore(moment(attendance.checkInTime)));
 
     if (isLatestOut) {
       const updateData = {
         checkOutTime: effectiveCheckOutDate,
-        checkOutMethod: isOverdueOrAuto ? "SYSTEM" : punchMethod,
-        checkOutDevice: isOverdueOrAuto ? "Auto System Checkout" : deviceTag,
-        autoClockedOut: isOverdueOrAuto ? true : false,
+        checkOutMethod: punchMethod,
+        checkOutDevice: deviceTag,
+        autoClockedOut: false,
       };
 
       if (attendance.checkInTime) {
@@ -1098,25 +1169,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
         data: updateData,
       });
 
-      console.log(`[Biometric Punch] [${deviceTag}] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Auto/Capped: ${isOverdueOrAuto})`);
-    }
-
-    if (isOverdueOrAuto) {
-      const existingAuto = await prisma.attendancePunch.findFirst({
+      // Employee physically checked out. Delete any premature AUTO_CLOCK_OUT punch!
+      await prisma.attendancePunch.deleteMany({
         where: { attendanceId: attendance.id, type: "AUTO_CLOCK_OUT" },
       });
-      if (!existingAuto) {
-        await prisma.attendancePunch.create({
-          data: {
-            attendanceId: attendance.id,
-            employeeId: employee.id,
-            type: "AUTO_CLOCK_OUT",
-            punchTime: cutoffUtc.toDate(),
-            device: "Auto System Checkout",
-            method: "SYSTEM",
-          },
-        });
-      }
+
+      console.log(`[Biometric Punch] [${deviceTag}] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Physical checkout)`);
     }
 
     return { success: true, type: "CHECK_OUT", employee, attendance };
@@ -1290,11 +1348,12 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
   await recordPunch(attendance.id, "CHECK_OUT", punchDate);
 
   const isPastCutoff = pTime.isAfter(cutoffLocal);
-  const isOverdueOrAuto = isPastCutoff || Boolean(attendance.autoClockedOut);
-  const effectiveCheckOutDate = isOverdueOrAuto ? cutoffUtc.toDate() : punchDate;
+  const effectiveCheckOutDate = isPastCutoff ? cutoffUtc.toDate() : punchDate;
 
   const currentOutMoment = attendance.checkOutTime ? moment(attendance.checkOutTime) : null;
-  const isLatestOut = !currentOutMoment || pTime.isAfter(currentOutMoment) || attendance.autoClockedOut;
+  const effectiveOutMoment = moment(effectiveCheckOutDate);
+  const isDifferentOut = !currentOutMoment || Math.abs(effectiveOutMoment.diff(currentOutMoment)) >= 1000;
+  const isLatestOut = !currentOutMoment || attendance.autoClockedOut || (isDifferentOut && effectiveOutMoment.isAfter(currentOutMoment));
 
   if (isLatestOut) {
     const metrics = calculateAttendanceMetrics(inTimeMoment, effectiveCheckOutDate, schedule, shiftDateString, timezone);
@@ -1303,32 +1362,19 @@ async function processBiometricPunch({ biometricId, punchTime, brand, deviceName
       where: { id: attendance.id },
       data: {
         checkOutTime: effectiveCheckOutDate,
-        checkOutMethod: isOverdueOrAuto ? "SYSTEM" : punchMethod,
-        checkOutDevice: isOverdueOrAuto ? "Auto System Checkout" : deviceTag,
-        autoClockedOut: isOverdueOrAuto ? true : false,
+        checkOutMethod: punchMethod,
+        checkOutDevice: deviceTag,
+        autoClockedOut: false,
         ...metrics,
       },
     });
 
-    console.log(`[Biometric Punch] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Auto/Capped: ${isOverdueOrAuto})`);
-  }
-
-  if (isOverdueOrAuto) {
-    const existingAuto = await prisma.attendancePunch.findFirst({
+    // Employee physically checked out. Delete any premature AUTO_CLOCK_OUT punch!
+    await prisma.attendancePunch.deleteMany({
       where: { attendanceId: attendance.id, type: "AUTO_CLOCK_OUT" },
     });
-    if (!existingAuto) {
-      await prisma.attendancePunch.create({
-        data: {
-          attendanceId: attendance.id,
-          employeeId: employee.id,
-          type: "AUTO_CLOCK_OUT",
-          punchTime: cutoffUtc.toDate(),
-          device: "Auto System Checkout",
-          method: "SYSTEM",
-        },
-      });
-    }
+
+    console.log(`[Biometric Punch] CHECK-OUT updated for ${employee.firstName} ${employee.lastName} (${bioIdStr}) (Physical checkout)`);
   }
 
   return { success: true, type: "CHECK_OUT", employee, attendance };
@@ -1569,12 +1615,22 @@ exports.testDeviceConnection = async (req, res) => {
     if (!device) return res.status(404).json({ success: false, message: "Device not found or unauthorized" });
 
     let isOnline = false;
+    let message = "";
 
     if (device.brand === "ZKTECO") {
       isOnline = await testZkTecoConnection(device.ipAddress, device.port);
+      message = isOnline
+        ? "Device is ONLINE and reachable!"
+        : `Device at ${device.ipAddress}:${device.port} is OFFLINE or unreachable`;
     } else {
-      // Hikvision ping test or status check
-      isOnline = true; // Placeholder for Hikvision ISAPI ping
+      const testResult = await testHikvisionConnection(
+        device.ipAddress,
+        device.port,
+        device.username,
+        device.password
+      );
+      isOnline = testResult.isOnline;
+      message = testResult.message;
     }
 
     await prisma.biometricDevice.update({
@@ -1582,16 +1638,50 @@ exports.testDeviceConnection = async (req, res) => {
       data: { status: isOnline ? "ONLINE" : "OFFLINE" },
     });
 
-    return res.json({ success: true, isOnline, status: isOnline ? "ONLINE" : "OFFLINE" });
+    return res.json({
+      success: true,
+      isOnline,
+      status: isOnline ? "ONLINE" : "OFFLINE",
+      message,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+let deviceSyncMutex = Promise.resolve();
+
+function resolveDeviceSyncWindow(device, startTime, endTime, timezone = "Asia/Karachi") {
+  if (startTime || endTime) {
+    return { startTime, endTime };
+  }
+  const now = moment().tz(timezone);
+  const resolvedEnd = now.clone().add(15, "minutes").format("YYYY-MM-DDTHH:mm:ssZ");
+  const fallbackStart = now.clone().subtract(1, "day").startOf("day");
+
+  if (device.brand === "HIKVISION" && device.status === "ONLINE" && device.lastSyncedAt) {
+    const lastSyncMoment = moment(device.lastSyncedAt).tz(timezone);
+    const hoursSinceSync = now.diff(lastSyncMoment, "hours", true);
+    if (hoursSinceSync >= 0 && hoursSinceSync <= 24) {
+      return {
+        startTime: lastSyncMoment.clone().subtract(30, "minutes").format("YYYY-MM-DDTHH:mm:ssZ"),
+        endTime: resolvedEnd,
+      };
+    }
+  }
+
+  return {
+    startTime: fallbackStart.format("YYYY-MM-DDTHH:mm:ssZ"),
+    endTime: resolvedEnd,
+  };
+}
+
 /**
  * Helper to sync a single device's logs
  */
-async function syncSingleDevice(device, prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null) {
+async function syncSingleDevice(device, prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null, options = {}) {
+  const { skipDeviceUpdate = false } = options;
+
   if (device.brand === "ZKTECO") {
     const logs = await fetchZkTecoLogs(device.ipAddress, device.port);
     let count = 0;
@@ -1610,23 +1700,30 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
       if (punchRes?.success) count++;
     }
 
-    await prismaInstance.biometricDevice.update({
-      where: { id: device.id },
-      data: { lastSyncedAt: new Date(), status: "ONLINE" },
-    });
+    if (!skipDeviceUpdate) {
+      await prismaInstance.biometricDevice.update({
+        where: { id: device.id },
+        data: { lastSyncedAt: new Date(), status: "ONLINE" },
+      });
+    }
 
-    return { success: true, count, brand: "ZKTECO", deviceName: device.name };
+    return { success: true, deviceId: device.id, count, brand: "ZKTECO", deviceName: device.name };
   } else if (device.brand === "HIKVISION") {
     const { syncHikvisionDeviceLogs } = require("./hikvision.service");
     const result = await syncHikvisionDeviceLogs(device, processPunchCallback, startTime, endTime);
 
-    await prismaInstance.biometricDevice.update({
-      where: { id: device.id },
-      data: { lastSyncedAt: new Date(), status: result.success ? "ONLINE" : "OFFLINE" },
-    });
+    if (!skipDeviceUpdate) {
+      await prismaInstance.biometricDevice.update({
+        where: { id: device.id },
+        data: result.success
+          ? { lastSyncedAt: new Date(), status: "ONLINE" }
+          : { status: "OFFLINE" },
+      });
+    }
 
     return {
       success: result.success,
+      deviceId: device.id,
       count: result.count || 0,
       totalEvents: result.totalEvents || 0,
       brand: "HIKVISION",
@@ -1646,106 +1743,193 @@ async function syncSingleDevice(device, prismaInstance = prisma, processPunchCal
  * 4. Run autoCheckoutOverdueAttendances() after processing.
  */
 async function syncAllActiveDevices(prismaInstance = prisma, processPunchCallback = processBiometricPunch, startTime = null, endTime = null, orgId = null) {
-  const where = { deletedAt: null };
-  if (orgId) {
-    where.organizationId = orgId;
-  }
-  const devices = await prismaInstance.biometricDevice.findMany({
-    where,
-  });
+  const runSync = async () => {
+    const syncStartedAt = new Date();
+    const where = { deletedAt: null };
+    if (orgId) {
+      where.organizationId = orgId;
+    }
+    const devices = await prismaInstance.biometricDevice.findMany({
+      where,
+    });
 
-  if (devices.length === 0) {
-    return { success: true, count: 0, devicesSynced: 0, totalDevices: 0, message: "No registered biometric devices found." };
-  }
+    if (devices.length === 0) {
+      return { success: true, count: 0, devicesSynced: 0, totalDevices: 0, message: "No registered biometric devices found." };
+    }
 
-  const collectedPunches = [];
-  const collectPunch = async (punchData) => {
-    collectedPunches.push(punchData);
-    return { success: true };
-  };
+    const collectedPunches = [];
+    const collectPunch = async (punchData) => {
+      collectedPunches.push(punchData);
+      return { success: true };
+    };
 
-  // 1. Fetch logs from all devices concurrently in parallel
-  const syncPromises = devices.map(async (device) => {
-    try {
-      const res = await syncSingleDevice(device, prismaInstance, collectPunch, startTime, endTime);
-      return res;
-    } catch (err) {
-      console.error(`[Device Sync Failed] ${device.name} (${device.ipAddress}):`, err.message);
+    // 1. Fetch logs from all devices concurrently in parallel
+    const syncPromises = devices.map(async (device) => {
       try {
-        await prismaInstance.biometricDevice.update({
-          where: { id: device.id },
-          data: { status: "OFFLINE" },
-        });
-      } catch (e) {}
-      return {
-        success: false,
-        deviceName: device.name,
-        brand: device.brand,
-        error: err.message,
-      };
-    }
-  });
-
-  const settledResults = await Promise.allSettled(syncPromises);
-
-  let successfulDevices = 0;
-  const results = [];
-
-  for (const item of settledResults) {
-    if (item.status === "fulfilled") {
-      const res = item.value;
-      if (res && res.success) {
-        successfulDevices++;
+        const win = resolveDeviceSyncWindow(device, startTime, endTime);
+        const res = await syncSingleDevice(
+          device,
+          prismaInstance,
+          collectPunch,
+          win.startTime,
+          win.endTime,
+          { skipDeviceUpdate: true }
+        );
+        return res;
+      } catch (err) {
+        console.error(`[Device Sync Failed] ${device.name} (${device.ipAddress}):`, err.message);
+        return {
+          success: false,
+          deviceId: device.id,
+          deviceName: device.name,
+          brand: device.brand,
+          error: err.message,
+        };
       }
-      results.push(res);
-    } else {
-      results.push({
-        success: false,
-        error: item.reason?.message || "Device communication error",
-      });
+    });
+
+    const settledResults = await Promise.allSettled(syncPromises);
+
+    let successfulDevices = 0;
+    const successfulDeviceIds = [];
+    const failedDeviceIds = [];
+    const results = [];
+
+    for (let i = 0; i < settledResults.length; i++) {
+      const item = settledResults[i];
+      const device = devices[i];
+      if (item.status === "fulfilled") {
+        const res = item.value;
+        if (res && res.success) {
+          successfulDevices++;
+          successfulDeviceIds.push(device.id);
+        } else {
+          failedDeviceIds.push(device.id);
+        }
+        results.push(res);
+      } else {
+        failedDeviceIds.push(device.id);
+        results.push({
+          success: false,
+          deviceId: device.id,
+          deviceName: device.name,
+          brand: device.brand,
+          error: item.reason?.message || "Device communication error",
+        });
+      }
     }
-  }
 
-  // 2. Sort all collected punches strictly by timestamp ASC (CHECK_IN before CHECK_OUT on ties)
-  collectedPunches.sort((a, b) => {
-    const tA = new Date(a.punchTime).getTime() || 0;
-    const tB = new Date(b.punchTime).getTime() || 0;
-    if (tA !== tB) return tA - tB;
-    const dirA = getDeviceDirection(a.deviceName, a.brand, a.direction);
-    const dirB = getDeviceDirection(b.deviceName, b.brand, b.direction);
-    if (dirA === "CHECK_IN" && dirB !== "CHECK_IN") return -1;
-    if (dirB === "CHECK_IN" && dirA !== "CHECK_IN") return 1;
-    return 0;
-  });
+    // 2. Sort all collected punches strictly by timestamp ASC (CHECK_IN before CHECK_OUT on ties)
+    collectedPunches.sort((a, b) => {
+      const tA = new Date(a.punchTime).getTime() || 0;
+      const tB = new Date(b.punchTime).getTime() || 0;
+      if (tA !== tB) return tA - tB;
+      const dirA = getDeviceDirection(a.deviceName, a.brand, a.direction);
+      const dirB = getDeviceDirection(b.deviceName, b.brand, b.direction);
+      if (dirA === "CHECK_IN" && dirB !== "CHECK_IN") return -1;
+      if (dirB === "CHECK_IN" && dirA !== "CHECK_IN") return 1;
+      return 0;
+    });
 
-  // 3. Process chronologically
-  let totalCount = 0;
-  for (const punch of collectedPunches) {
+    // 3. Preload existing punches in this window & initialize per-sync lookup caches
+    const syncContext = {
+      visitorCache: new Map(),
+      employeeCache: new Map(),
+      existingPunchesByEmp: new Map(),
+      punchesPreloaded: false,
+    };
+
+    if (collectedPunches.length > 0 && processPunchCallback === processBiometricPunch) {
+      let minMs = Infinity;
+      let maxMs = -Infinity;
+      for (const p of collectedPunches) {
+        const ms = new Date(p.punchTime).getTime();
+        if (!isNaN(ms)) {
+          if (ms < minMs) minMs = ms;
+          if (ms > maxMs) maxMs = ms;
+        }
+      }
+      if (minMs !== Infinity && maxMs !== -Infinity) {
+        try {
+          const existingPunches = await prismaInstance.attendancePunch.findMany({
+            where: {
+              punchTime: {
+                gte: new Date(minMs - 15000),
+                lte: new Date(maxMs + 15000),
+              },
+            },
+            select: { id: true, attendanceId: true, employeeId: true, device: true, type: true, punchTime: true },
+          });
+          for (const ep of existingPunches) {
+            const list = syncContext.existingPunchesByEmp.get(ep.employeeId) || [];
+            list.push({
+              id: ep.id,
+              attendanceId: ep.attendanceId,
+              device: ep.device,
+              type: ep.type,
+              punchTimeMs: new Date(ep.punchTime).getTime(),
+            });
+            syncContext.existingPunchesByEmp.set(ep.employeeId, list);
+          }
+          syncContext.punchesPreloaded = true;
+        } catch (e) {
+          console.warn("[Sync Preload Punches Warn]:", e.message);
+        }
+      }
+    }
+
+    // 4. Process chronologically
+    let totalCount = 0;
+    const useContext = processPunchCallback === processBiometricPunch;
+    for (const punch of collectedPunches) {
+      try {
+        const punchRes = useContext
+          ? await processPunchCallback(punch, syncContext)
+          : await processPunchCallback(punch);
+        if (punchRes?.success) totalCount++;
+      } catch (err) {
+        console.error(`[Chronological Punch Sync Error] (${punch.deviceName}):`, err.message);
+      }
+    }
+
+    // 5. Persist device statuses & lastSyncedAt only after punches are processed
+    if (successfulDeviceIds.length > 0) {
+      await prismaInstance.biometricDevice.updateMany({
+        where: { id: { in: successfulDeviceIds } },
+        data: { lastSyncedAt: syncStartedAt, status: "ONLINE" },
+      }).catch(() => {});
+    }
+    if (failedDeviceIds.length > 0) {
+      await prismaInstance.biometricDevice.updateMany({
+        where: { id: { in: failedDeviceIds } },
+        data: { status: "OFFLINE" },
+      }).catch(() => {});
+    }
+
+    // 6. Reconcile & auto-checkout overdue attendances immediately after sync
     try {
-      const punchRes = await processPunchCallback(punch);
-      if (punchRes?.success) totalCount++;
+      const { autoCheckoutOverdueAttendances } = require("../attendance/attendance.controller");
+      if (typeof autoCheckoutOverdueAttendances === "function") {
+        await autoCheckoutOverdueAttendances();
+      }
     } catch (err) {
-      console.error(`[Chronological Punch Sync Error] (${punch.deviceName}):`, err.message);
+      console.error("[Post-Sync Auto-Checkout Error]:", err.message);
     }
-  }
 
-  // 4. Reconcile & auto-checkout overdue attendances immediately after sync
-  try {
-    const { autoCheckoutOverdueAttendances } = require("../attendance/attendance.controller");
-    if (typeof autoCheckoutOverdueAttendances === "function") {
-      await autoCheckoutOverdueAttendances();
-    }
-  } catch (err) {
-    console.error("[Post-Sync Auto-Checkout Error]:", err.message);
-  }
-
-  return {
-    success: true,
-    count: totalCount,
-    devicesSynced: successfulDevices,
-    totalDevices: devices.length,
-    results,
+    return {
+      success: true,
+      count: totalCount,
+      devicesSynced: successfulDevices,
+      totalDevices: devices.length,
+      results,
+    };
   };
+
+  // Serialize hardware syncs so manual sync & scheduled crons never collide on embedded Hikvision servers
+  const queuedPromise = deviceSyncMutex.then(runSync, runSync);
+  deviceSyncMutex = queuedPromise.catch(() => {});
+
+  return queuedPromise;
 }
 
 /**
@@ -1785,13 +1969,17 @@ exports.syncAllDevicesRoute = async (req, res) => {
     const moment = require("moment-timezone");
     const timezone = "Asia/Karachi";
     const targetDate = req.query.date || req.body?.date;
+    const forceFull = req.query.full === "true" || req.body?.full === true;
     const orgId = req.user?.orgId || req.user?.organizationId;
+    const todayStr = moment().tz(timezone).format("YYYY-MM-DD");
     let startTime = null;
     let endTime = null;
 
-    if (targetDate) {
+    if (targetDate && (forceFull || targetDate !== todayStr)) {
       startTime = moment.tz(targetDate, timezone).subtract(1, "day").startOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
-      endTime = moment.tz(targetDate, timezone).add(1, "day").endOf("day").format("YYYY-MM-DDTHH:mm:ssZ");
+      const rawEnd = moment.tz(targetDate, timezone).add(1, "day").endOf("day");
+      const nowEnd = moment().tz(timezone).add(15, "minutes");
+      endTime = (rawEnd.isAfter(nowEnd) ? nowEnd : rawEnd).format("YYYY-MM-DDTHH:mm:ssZ");
     }
 
     const summary = await syncAllActiveDevices(prisma, processBiometricPunch, startTime, endTime, orgId);

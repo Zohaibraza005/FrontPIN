@@ -763,6 +763,11 @@ export const Attendance: React.FC = () => {
       }
     }
 
+    // If a physical CHECK_OUT punch exists, never display an AUTO_CLOCK_OUT punch
+    if (punches.some((p) => p.type === "CHECK_OUT")) {
+      punches = punches.filter((p) => p.type !== "AUTO_CLOCK_OUT");
+    }
+
     return punches.sort((a, b) => new Date(a.punchTime).getTime() - new Date(b.punchTime).getTime());
   };
 
@@ -1820,89 +1825,12 @@ export const Attendance: React.FC = () => {
       <Card className="w-full max-w-full min-w-0 shadow-sm border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-gray-950">
         <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 py-3 px-4 sm:px-5 border-b border-gray-200/80 dark:border-gray-800 w-full min-w-0">
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full min-w-0">
-            {/* Date Navigation */}
-            <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-lg"
-                onClick={handlePrevDate}
-                title="Previous Period"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg"
-                onClick={handleNextDate}
-                disabled={isNextDisabled}
-                title="Next Period"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
-
-            {/* DatePicker Input Box (Same as Dashboard) */}
-            <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3 py-1.5 rounded-xl shadow-2xs shrink-0 h-9">
-              <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
-              <DatePicker
-                selected={selectedDate}
-                maxDate={new Date()}
-                onChange={(date: Date | null) => {
-                  if (!date) return;
-                  if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
-                  setSelectedDate(date);
-                  if (activeTab === "weekly") setWeekOffset(0);
-                  if (activeTab === "monthly") setMonthOffset(0);
-                }}
-                showMonthDropdown={activeTab !== "monthly"}
-                showYearDropdown={activeTab !== "monthly"}
-                dropdownMode="select"
-                showMonthYearPicker={activeTab === "monthly"}
-                highlightDates={
-                  activeTab === "weekly"
-                    ? [
-                        {
-                          "react-datepicker__day--highlighted-custom-1": eachDayOfInterval({
-                            start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
-                            end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
-                          }),
-                        },
-                      ]
-                    : undefined
-                }
-                dateFormat={
-                  activeTab === "daily"
-                    ? "yyyy-MM-dd"
-                    : activeTab === "weekly"
-                    ? "'Week of' yyyy-MM-dd"
-                    : "MMMM yyyy"
-                }
-                className="w-28 sm:w-32 bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-xs sm:text-sm focus:outline-none cursor-pointer p-0"
-                placeholderText="Select date..."
-              />
-              {!isSameDay(selectedDate, new Date()) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDate(new Date());
-                    if (activeTab === "weekly") setWeekOffset(0);
-                    if (activeTab === "monthly") setMonthOffset(0);
-                  }}
-                  className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-xs ml-0.5"
-                >
-                  Today
-                </button>
-              )}
-            </div>
-
             {user?.role === "ADMIN" && (
               <>
                 <SearchableSelect
-                  className="w-32 sm:w-36 shrink-0"
-                  icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />}
-                  placeholder="Department"
+                  className="w-full sm:w-auto max-w-[220px] rounded-full px-3.5 shrink-0"
+                  icon={<Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                  placeholder="All Departments"
                   searchPlaceholder="Search department..."
                   value={departmentId}
                   onValueChange={setDepartmentId}
@@ -1916,9 +1844,9 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
-                  className="w-32 sm:w-36 shrink-0"
-                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />}
-                  placeholder="Location"
+                  className="w-full sm:w-auto max-w-[220px] rounded-full px-3.5 shrink-0"
+                  icon={<MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                  placeholder="All Locations"
                   searchPlaceholder="Search location..."
                   value={locationId}
                   onValueChange={(val) => {
@@ -1937,8 +1865,8 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
-                  className="w-32 sm:w-36 shrink-0"
-                  icon={<Globe className="w-3.5 h-3.5 text-gray-400" />}
+                  className="w-full sm:w-auto max-w-[220px] rounded-full px-3.5 shrink-0"
+                  icon={<Globe className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
                   placeholder="All Entities"
                   searchPlaceholder="Search entity..."
                   value={entityId}
@@ -1953,8 +1881,8 @@ export const Attendance: React.FC = () => {
                 />
 
                 <SearchableSelect
-                  className="w-36 sm:w-40 shrink-0"
-                  icon={<User className="w-3.5 h-3.5 text-gray-400" />}
+                  className="w-full sm:w-auto max-w-[220px] rounded-full px-3.5 shrink-0"
+                  icon={<User className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
                   placeholder="All Employees"
                   searchPlaceholder="Search employee..."
                   value={selectedEmployeeId}
@@ -1972,8 +1900,8 @@ export const Attendance: React.FC = () => {
 
             {/* Attendance Status Filter */}
             <SearchableSelect
-              className="w-32 sm:w-36 shrink-0"
-              icon={<Filter className="w-3.5 h-3.5 text-gray-400" />}
+              className="w-full sm:w-auto max-w-[220px] rounded-full px-3.5 shrink-0"
+              icon={<Filter className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
               placeholder="All Statuses"
               searchPlaceholder="Filter status..."
               value={statusFilter}
@@ -1992,8 +1920,8 @@ export const Attendance: React.FC = () => {
 
         <CardContent className="p-3 sm:p-5 w-full max-w-full min-w-0">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 w-full max-w-full min-w-0">
-            {user?.role !== 'USER' && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {user?.role !== 'USER' ? (
                 <TabsList className="grid w-full grid-cols-3 max-w-md bg-gray-100/80 dark:bg-gray-900/80 p-1 rounded-2xl h-auto">
                   <TabsTrigger 
                     value="daily" 
@@ -2014,8 +1942,96 @@ export const Attendance: React.FC = () => {
                     Monthly
                   </TabsTrigger>
                 </TabsList>
+              ) : (
+                <div />
+              )}
+
+              {/* Date Navigation & DatePicker */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div className="flex items-center gap-0.5 bg-white dark:bg-gray-950 p-0.5 rounded-full border border-gray-200 dark:border-gray-800 shadow-2xs shrink-0">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 rounded-full"
+                    onClick={handlePrevDate}
+                    title="Previous Period"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-gray-600 hover:text-gray-900 dark:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+                    onClick={handleNextDate}
+                    disabled={isNextDisabled}
+                    title="Next Period"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* DatePicker Input Box */}
+                <div className="inline-flex items-center gap-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 px-3.5 py-1.5 rounded-full shadow-2xs shrink-0 h-9">
+                  <CalendarIcon className="w-4 h-4 text-blue-600 shrink-0" />
+                  <DatePicker
+                    selected={selectedDate}
+                    maxDate={new Date()}
+                    popperPlacement="bottom-end"
+                    onChange={(date: Date | null) => {
+                      if (!date) return;
+                      if (isAfter(startOfDay(date), startOfDay(new Date()))) return;
+                      setSelectedDate(date);
+                      if (activeTab === "weekly") setWeekOffset(0);
+                      if (activeTab === "monthly") setMonthOffset(0);
+                    }}
+                    showMonthDropdown={activeTab !== "monthly"}
+                    showYearDropdown={activeTab !== "monthly"}
+                    dropdownMode="select"
+                    showMonthYearPicker={activeTab === "monthly"}
+                    highlightDates={
+                      activeTab === "weekly"
+                        ? [
+                            {
+                              "react-datepicker__day--highlighted-custom-1": eachDayOfInterval({
+                                start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
+                                end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
+                              }),
+                            },
+                          ]
+                        : undefined
+                    }
+                    dateFormat={
+                      activeTab === "daily"
+                        ? "dd MMM yyyy"
+                        : activeTab === "weekly"
+                        ? "'Week of' dd MMM yyyy"
+                        : "MMMM yyyy"
+                    }
+                    className={`${
+                      activeTab === "weekly"
+                        ? "w-40 sm:w-44"
+                        : activeTab === "monthly"
+                        ? "w-32 sm:w-36"
+                        : "w-[98px] sm:w-[104px]"
+                    } bg-transparent text-gray-900 dark:text-gray-100 font-semibold text-xs sm:text-sm focus:outline-none cursor-pointer p-0`}
+                    placeholderText="Select date..."
+                  />
+                  {!isSameDay(selectedDate, new Date()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(new Date());
+                        if (activeTab === "weekly") setWeekOffset(0);
+                        if (activeTab === "monthly") setMonthOffset(0);
+                      }}
+                      className="text-xs font-semibold px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors whitespace-nowrap shadow-xs ml-0.5"
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
 
             {/* Legend - Only show in Weekly and Monthly views */}
             {activeTab !== 'daily' && (
@@ -3118,91 +3134,99 @@ export const Attendance: React.FC = () => {
                 </div>
 
                 {/* 🧾 Daily Attendance Punches (Invoice / Receipt Style) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Punch Logs ({viewRecord.punches?.length || 0})</span>
-                    </h4>
-                    <span className="text-[11px] text-gray-400 font-mono">
-                      Real-time Device Logs
-                    </span>
-                  </div>
-
-                  {viewRecord.punches?.length ? (
-                    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
-                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {viewRecord.punches.map((punch: any, idx: number) => {
-                          const isCheckIn = punch.type === "CHECK_IN";
-                          const isCheckOut = punch.type === "CHECK_OUT";
-
-                          return (
-                            <div 
-                              key={punch.id || idx} 
-                              className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
-                            >
-                              {/* Punch # and Direction */}
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                                  #{idx + 1}
-                                </span>
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <Badge 
-                                      variant="outline"
-                                      className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
-                                        isCheckIn 
-                                          ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
-                                          : isCheckOut 
-                                          ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300" 
-                                          : "bg-gray-50 text-gray-700 border-gray-300"
-                                      }`}
-                                    >
-                                      {isCheckIn ? (
-                                        <span className="inline-flex items-center gap-0.5">
-                                          <ArrowDownRight className="w-3 h-3 text-emerald-600" />
-                                          IN
-                                        </span>
-                                      ) : isCheckOut ? (
-                                        <span className="inline-flex items-center gap-0.5">
-                                          <ArrowUpRight className="w-3 h-3 text-blue-600" />
-                                          OUT
-                                        </span>
-                                      ) : (
-                                        punch.type
-                                      )}
-                                    </Badge>
-                                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                      {punch.device || "Biometric Terminal"}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
-                                    <span className="capitalize">{punch.method || "Biometric"}</span>
-                                    {punch.ip && <span>• IP: {punch.ip}</span>}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Timestamp */}
-                              <div className="text-right shrink-0">
-                                <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
-                                  {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
-                                </div>
-                                <div className="text-[10px] text-gray-400 font-mono">
-                                  {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                {(() => {
+                  let displayViewPunches = viewRecord?.punches || [];
+                  if (displayViewPunches.some((p: any) => p.type === "CHECK_OUT")) {
+                    displayViewPunches = displayViewPunches.filter((p: any) => p.type !== "AUTO_CLOCK_OUT");
+                  }
+                  return (
+                    <div>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Fingerprint className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Punch Logs ({displayViewPunches.length})</span>
+                        </h4>
+                        <span className="text-[11px] text-gray-400 font-mono">
+                          Real-time Device Logs
+                        </span>
                       </div>
+
+                      {displayViewPunches.length ? (
+                        <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-2xs">
+                          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {displayViewPunches.map((punch: any, idx: number) => {
+                              const isCheckIn = punch.type === "CHECK_IN";
+                              const isCheckOut = punch.type === "CHECK_OUT";
+
+                              return (
+                                <div 
+                                  key={punch.id || idx} 
+                                  className="p-3 hover:bg-gray-50/70 dark:hover:bg-gray-900/50 transition-colors flex items-center justify-between gap-3 text-xs"
+                                >
+                                  {/* Punch # and Direction */}
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                                      #{idx + 1}
+                                    </span>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Badge 
+                                          variant="outline"
+                                          className={`text-[10px] px-1.5 py-0 font-bold uppercase tracking-wider shrink-0 ${
+                                            isCheckIn 
+                                              ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300" 
+                                              : isCheckOut 
+                                              ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300" 
+                                              : "bg-gray-50 text-gray-700 border-gray-300"
+                                          }`}
+                                        >
+                                          {isCheckIn ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowDownRight className="w-3 h-3 text-emerald-600" />
+                                              IN
+                                            </span>
+                                          ) : isCheckOut ? (
+                                            <span className="inline-flex items-center gap-0.5">
+                                              <ArrowUpRight className="w-3 h-3 text-blue-600" />
+                                              OUT
+                                            </span>
+                                          ) : (
+                                            punch.type
+                                          )}
+                                        </Badge>
+                                        <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                          {punch.device || "Biometric Terminal"}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+                                        <span className="capitalize">{punch.method || "Biometric"}</span>
+                                        {punch.ip && <span>• IP: {punch.ip}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Timestamp */}
+                                  <div className="text-right shrink-0">
+                                    <div className="font-bold text-gray-900 dark:text-gray-100 font-mono text-xs">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "hh:mm:ss a") : "—"}
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-mono">
+                                      {punch.punchTime ? format(new Date(punch.punchTime), "MMM d") : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
+                          No raw biometric punches recorded for this date.
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-gray-400 text-xs italic py-6 text-center bg-gray-50/80 dark:bg-gray-900/60 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                      No raw biometric punches recorded for this date.
-                    </div>
-                  )}
-                </div>
+                  );
+                })()}
               </div>
             </div>
           );

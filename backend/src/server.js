@@ -1,4 +1,14 @@
 require("dotenv").config();
+
+// Global crash protection for uncaught exceptions and unhandled promise rejections
+process.on("uncaughtException", (err) => {
+  console.error("🔥 [UNCAUGHT EXCEPTION]:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("🔥 [UNHANDLED REJECTION]:", reason);
+});
+
 const app = require("./app");
 const prisma = require("./config/prisma");
 const { initMachineSyncCron, initAutoCheckoutCron } = require("./services/cron.service");

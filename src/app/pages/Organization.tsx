@@ -38,6 +38,9 @@ export default function Organization() {
   const [editingDevice, setEditingDevice] = useState<BiometricDevice | null>(null);
   const [testingDeviceId, setTestingDeviceId] = useState<number | null>(null);
   const [syncingDeviceId, setSyncingDeviceId] = useState<number | null>(null);
+  const [deviceDeleteModalOpen, setDeviceDeleteModalOpen] = useState(false);
+  const [deletingDevice, setDeletingDevice] = useState<BiometricDevice | null>(null);
+  const [isDeletingDevice, setIsDeletingDevice] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
     name: "",
     brand: "HIKVISION", // "HIKVISION" | "ZKTECO"
@@ -196,13 +199,13 @@ export default function Organization() {
     try {
       const res = await deviceService.testConnection(id);
       if (res.isOnline) {
-        toast.success("Device is ONLINE and reachable!");
+        toast.success(res.message || "Device is ONLINE and reachable!");
       } else {
-        toast.error("Device is OFFLINE or unreachable");
+        toast.error(res.message || "Device is OFFLINE or unreachable");
       }
       loadDevices();
     } catch (err: any) {
-      toast.error("Connection test failed");
+      toast.error(err?.response?.data?.message || err?.message || "Connection test failed");
     } finally {
       setTestingDeviceId(null);
     }
@@ -221,13 +224,24 @@ export default function Organization() {
     }
   };
 
-  const handleDeleteDevice = async (id: number) => {
+  const handleDeleteDevice = (device: BiometricDevice) => {
+    setDeletingDevice(device);
+    setDeviceDeleteModalOpen(true);
+  };
+
+  const handleConfirmDeleteDevice = async () => {
+    if (!deletingDevice) return;
     try {
-      await deviceService.deleteDevice(id);
+      setIsDeletingDevice(true);
+      await deviceService.deleteDevice(deletingDevice.id);
       toast.success("Device removed successfully");
+      setDeviceDeleteModalOpen(false);
+      setDeletingDevice(null);
       loadDevices();
     } catch (err: any) {
-      toast.error("Failed to delete device");
+      toast.error(err?.response?.data?.message || err?.message || "Failed to delete device");
+    } finally {
+      setIsDeletingDevice(false);
     }
   };
 
@@ -1133,7 +1147,8 @@ export default function Organization() {
                             variant="ghost"
                             size="sm"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteDevice(device.id)}
+                            onClick={() => handleDeleteDevice(device)}
+                            title="Delete Device"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -1518,6 +1533,53 @@ export default function Organization() {
           <DialogFooter>
             <Button onClick={() => setViewCompanyModalOpen(false)}>Close</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= DEVICE DELETE DIALOG ================= */}
+      <Dialog open={deviceDeleteModalOpen} onOpenChange={setDeviceDeleteModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2 text-red-600">
+              <AlertTriangle className="size-5" />
+              Delete Device
+            </DialogTitle>
+          </DialogHeader>
+
+          {deletingDevice && (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-gray-600">
+                Are you sure you want to delete the device{" "}
+                <span className="font-bold text-gray-900">
+                  {deletingDevice.name}
+                </span>
+                {deletingDevice.ipAddress ? (
+                  <span className="text-gray-500"> ({deletingDevice.ipAddress}:{deletingDevice.port})</span>
+                ) : null}
+                ? This action cannot be undone.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeviceDeleteModalOpen(false);
+                    setDeletingDevice(null);
+                  }}
+                  disabled={isDeletingDevice}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={isDeletingDevice}
+                  onClick={handleConfirmDeleteDevice}
+                >
+                  {isDeletingDevice ? "Deleting..." : "Delete Device"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

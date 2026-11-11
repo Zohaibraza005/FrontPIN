@@ -69,6 +69,7 @@ import {
 } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { employeeAPI, departmentAPI, locationAPI, scheduleAPI } from "../services/api";
+import { notifyScheduleChanged, subscribeScheduleChanged } from "../utils/scheduleSync";
 import { useAuth } from "../contexts/AuthContext";
 
 type ShiftType = "day" | "evening" | "night";
@@ -351,14 +352,10 @@ export const Schedule: React.FC = () => {
       fetchSchedules();
     };
 
-    window.addEventListener('schedule-updated', handleRealTimeSync);
-    window.addEventListener('employee-updated', handleRealTimeSync);
-    window.addEventListener('focus', handleRealTimeSync);
+    const unsubscribe = subscribeScheduleChanged(handleRealTimeSync);
 
     return () => {
-      window.removeEventListener('schedule-updated', handleRealTimeSync);
-      window.removeEventListener('employee-updated', handleRealTimeSync);
-      window.removeEventListener('focus', handleRealTimeSync);
+      unsubscribe();
     };
   }, []);
 
@@ -547,7 +544,10 @@ export const Schedule: React.FC = () => {
         seenEmployeeIds.add(empId);
       }
 
-      const empName = `${schedule.employee?.firstName || ''} ${schedule.employee?.lastName || ''}`.toLowerCase();
+      const empName = `${schedule.employee?.firstName || ''} ${schedule.employee?.lastName || ''}`
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
       const companyObj =
         schedule.company ||
         schedule.employee?.company ||
@@ -557,7 +557,7 @@ export const Schedule: React.FC = () => {
             String(l.id) === String(schedule.employee?.companyId)
         );
       const locName = (companyObj?.name || '').toLowerCase();
-      const query = searchQuery.toLowerCase().trim();
+      const query = searchQuery.replace(/\s+/g, ' ').trim().toLowerCase();
 
       const bioId = String(schedule.employee?.biometricId || '').toLowerCase();
       const empCode = String(schedule.employee?.employeeId || '').toLowerCase();
@@ -823,9 +823,7 @@ export const Schedule: React.FC = () => {
 
       setEditModalOpen(false);
       setEditingSchedule(null);
-      window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { scheduleId: editingSchedule.id, employeeId: editingSchedule.employeeId } }));
-      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: editingSchedule.employeeId } }));
-      window.dispatchEvent(new CustomEvent('schedule-updated'));
+      notifyScheduleChanged({ scheduleId: editingSchedule.id, employeeId: editingSchedule.employeeId });
       fetchSchedules(); // sync backend
     } catch (err: any) {
       toast.error(err?.data?.message || "Failed to update schedule");
@@ -851,9 +849,11 @@ export const Schedule: React.FC = () => {
       // Instant Real-Time UI Update
       setSchedules((prev) => prev.filter((s) => s.id !== deletingSchedule.id));
 
+      const deletedEmpId = deletingSchedule.employeeId;
+      const deletedId = deletingSchedule.id;
       setDeleteModalOpen(false);
       setDeletingSchedule(null);
-      window.dispatchEvent(new CustomEvent('schedule-updated'));
+      notifyScheduleChanged({ scheduleId: deletedId, employeeId: deletedEmpId });
       fetchSchedules(); // sync backend
     } catch (err: any) {
       toast.error(err?.data?.message || "Failed to delete schedule");
@@ -1513,8 +1513,7 @@ export const Schedule: React.FC = () => {
                           return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
                         });
                       }
-                      window.dispatchEvent(new CustomEvent('schedule-updated'));
-                      window.dispatchEvent(new CustomEvent('employee-updated'));
+                      notifyScheduleChanged();
                       fetchSchedules();
                     } catch (err: any) {
                       if (err.status === 409) {
@@ -1587,13 +1586,22 @@ export const Schedule: React.FC = () => {
               <Button
                 onClick={async () => {
                   try {
-                    const shortDays = selectedDays.map(d => DAYS_LIST.find(x => x.full === d)?.short || d);
+                    const daysPayload = selectedDays.map((dayFull) => {
+                      const shortName = DAYS_LIST.find((x) => x.full === dayFull)?.short || dayFull;
+                      const timeObj = daySchedules[dayFull] || { startTime, endTime };
+                      return {
+                        day: shortName,
+                        dayFull: dayFull,
+                        startTime: timeObj.startTime,
+                        endTime: timeObj.endTime,
+                      };
+                    });
                     const firstDayTime = daySchedules[selectedDays[0]] || { startTime, endTime };
 
                     const payload = {
                       scopeType,
                       selectedIds: selectedItems,
-                      days: shortDays,
+                      days: daysPayload,
                       startTime: firstDayTime.startTime || startTime,
                       endTime: firstDayTime.endTime || endTime,
                       companyId: filterLocation !== "all" ? filterLocation : (selectedLocation || undefined),
@@ -1636,8 +1644,7 @@ export const Schedule: React.FC = () => {
                         return [...newItems, ...prev.filter((p: any) => !newEmpIds.has(p.employeeId || p.employee?.id))];
                       });
                     }
-                    window.dispatchEvent(new CustomEvent('schedule-updated'));
-                    window.dispatchEvent(new CustomEvent('employee-updated'));
+                    notifyScheduleChanged();
                     fetchSchedules();
                   } catch {
                     toast.error("Failed to overwrite schedules");

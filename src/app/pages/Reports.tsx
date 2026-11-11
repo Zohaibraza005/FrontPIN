@@ -611,7 +611,7 @@ export const Reports: React.FC = () => {
   };
 
   return (
-    <div className="space-y-3 max-w-full overflow-hidden p-1">
+    <div className="w-full max-w-full min-w-0 space-y-3 overflow-hidden p-1">
 
       {/* HEADER & EXPORT BUTTONS */}
       <div className="flex flex-wrap gap-2.5 justify-between items-center">
@@ -633,14 +633,14 @@ export const Reports: React.FC = () => {
         </div>
       </div>
 
-      <Tabs defaultValue="attendance" className="space-y-3">
+      <Tabs defaultValue="attendance" className="w-full min-w-0 space-y-3">
         {/* TabsList hidden since only Attendance report is used */}
 
         {/* ================= ATTENDANCE ================= */}
-        <TabsContent value="attendance" className="space-y-3 mt-0">
+        <TabsContent value="attendance" className="w-full min-w-0 space-y-3 mt-0">
 
           {/* Real-Time Attendance Grid (Excel View) */}
-          <Card className="shadow-sm border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden" style={{ maxWidth: "1040px" }}>
+          <Card className="w-full min-w-0 shadow-sm border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
             <CardHeader className="py-2.5 px-4 flex flex-row items-center justify-between flex-wrap gap-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
               <div>
                 <CardTitle className="text-sm font-bold">Real-Time Attendance Excel Grid View</CardTitle>
@@ -742,7 +742,7 @@ export const Reports: React.FC = () => {
                 />
               </div>
             </CardHeader>
-            <CardContent className="p-2 sm:p-3">
+            <CardContent className="p-2 sm:p-3 min-w-0">
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-20 gap-2.5 text-muted-foreground">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -753,7 +753,7 @@ export const Reports: React.FC = () => {
                   No real-time employee attendance records found for the selected filters.
                 </div>
               ) : (
-                <div className="overflow-auto w-full max-w-full max-h-[calc(100vh-295px)] min-h-[220px] rounded-lg border border-gray-200 shadow-xs dark:border-gray-800" style={{ maxWidth: "1075px" }}>
+                <div className="overflow-auto w-full max-w-full max-h-[calc(100vh-295px)] min-h-[220px] rounded-lg border border-gray-200 shadow-xs dark:border-gray-800">
                   {(() => {
                     const { start, end } = getDateInterval();
                     const days = eachDayOfInterval({ start, end });

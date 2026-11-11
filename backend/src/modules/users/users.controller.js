@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const bcrypt = require("bcrypt");
+const { ensureDefaultScheduleForEmployee } = require("../schedule/schedule.helper");
 
 //////////////////////////////////////////////////////
 // GET ALL EMPLOYEES (WITH FILTERS)
@@ -973,6 +974,18 @@ exports.getEmployeeDetail = async (req, res) => {
       });
     }
 
+    // Ensure non-admin employees who never had any schedule row get a real default schedule in DB
+    if (employee.role !== "ADMIN" && (!employee.Schedule || employee.Schedule.length === 0)) {
+      try {
+        const createdSched = await ensureDefaultScheduleForEmployee(prisma, employee);
+        if (createdSched) {
+          employee.Schedule = [createdSched];
+        }
+      } catch (schedErr) {
+        console.warn("Auto schedule ensure note:", schedErr.message);
+      }
+    }
+
     return res.json({
       success: true,
       data: employee,
@@ -1582,6 +1595,10 @@ exports.importEmployees = async (req, res) => {
           jobInfo: true,
         },
       });
+
+      await ensureDefaultScheduleForEmployee(prisma, newEmp).catch((err) =>
+        console.warn("Import employee schedule note:", err.message)
+      );
 
       createdCount++;
       createdEmployees.push(newEmp);

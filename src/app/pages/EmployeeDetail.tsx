@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { Edit, Save, Plus, Trash2, Eye, Lock, Calendar, FileText, Briefcase, Clock, UserX, User, MapPin, Upload, ArrowLeft, Mail, Phone, Building2, Check, Shield, AlertCircle, Loader2, Banknote, Coins, RotateCcw, History, CreditCard, CheckSquare, ArrowRightLeft, ArrowRight, TrendingUp, ShieldCheck, UserCheck, Filter, Sparkles } from 'lucide-react';
 import { useParams, Link } from 'react-router';
 import { API_URL, employeeAPI, scheduleAPI, locationAPI, departmentAPI, roleAPI, entityAPI } from '../services/api';
+import { notifyScheduleChanged, subscribeScheduleChanged } from '../utils/scheduleSync';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
@@ -313,7 +314,7 @@ export const EmployeeDetail: React.FC = () => {
         extraHoursVal = Number(emp.jobInfo.maxExtraHours);
       } else if (emp.Schedule) {
         const schedList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
-        const aSched = schedList.find((s: any) => s && !s.deletedAt) || schedList[0];
+        const aSched = schedList.find((s: any) => s && !s.deletedAt);
         if (aSched?.overtimeMinutes) {
           extraHoursVal = Math.round(Number(aSched.overtimeMinutes) / 60);
         } else if (aSched?.overtimeAllowed) {
@@ -368,85 +369,113 @@ export const EmployeeDetail: React.FC = () => {
         setSeparation(null);
       }
 
-      // Populate schedule from emp.Schedule
-      if (emp?.Schedule) {
-        const scheduleList = Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule];
-        const activeSched = scheduleList.find((s: any) => s && !s.deletedAt) || scheduleList[0];
-        if (activeSched) {
-          const defaultStart = activeSched.startTime || '09:00';
-          const defaultEnd = activeSched.endTime || '18:00';
+      // Populate schedule from emp.Schedule (strictly active non-deleted schedule)
+      const scheduleList = emp?.Schedule
+        ? (Array.isArray(emp.Schedule) ? emp.Schedule : [emp.Schedule])
+        : [];
+      const activeSched = scheduleList.find((s: any) => s && !s.deletedAt);
 
-          let daysArr: string[] = [];
-          const newDaySchedules: Record<string, { startTime: string; endTime: string }> = {};
+      if (activeSched) {
+        const defaultStart = activeSched.startTime || '09:00';
+        const defaultEnd = activeSched.endTime || '18:00';
 
-          ALL_WEEK_DAYS.forEach((d) => {
-            newDaySchedules[d] = {
-              startTime: defaultStart,
-              endTime: defaultEnd,
-            };
+        let daysArr: string[] = [];
+        const newDaySchedules: Record<string, { startTime: string; endTime: string }> = {};
+
+        ALL_WEEK_DAYS.forEach((d) => {
+          newDaySchedules[d] = {
+            startTime: defaultStart,
+            endTime: defaultEnd,
+          };
+        });
+
+        if (Array.isArray(activeSched.days) && activeSched.days.length > 0) {
+          const dayMap: Record<string, string> = {
+            mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
+            monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
+          };
+
+          activeSched.days.forEach((d: any) => {
+            let rawName = "";
+            let sTime = defaultStart;
+            let eTime = defaultEnd;
+
+            if (typeof d === "object" && d !== null) {
+              rawName = d.dayFull || d.day || d.name || d.short || "";
+              if (d.startTime) sTime = d.startTime;
+              if (d.endTime) eTime = d.endTime;
+            } else {
+              rawName = String(d || "").trim();
+            }
+
+            const key = rawName.toLowerCase();
+            const shortDay = dayMap[key] || rawName;
+
+            if (shortDay && !daysArr.includes(shortDay)) {
+              daysArr.push(shortDay);
+              newDaySchedules[shortDay] = { startTime: sTime, endTime: eTime };
+            }
           });
-
-          if (Array.isArray(activeSched.days) && activeSched.days.length > 0) {
-            const dayMap: Record<string, string> = {
-              mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
-              monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
-            };
-
-            activeSched.days.forEach((d: any) => {
-              let rawName = "";
-              let sTime = defaultStart;
-              let eTime = defaultEnd;
-
-              if (typeof d === "object" && d !== null) {
-                rawName = d.dayFull || d.day || d.name || d.short || "";
-                if (d.startTime) sTime = d.startTime;
-                if (d.endTime) eTime = d.endTime;
-              } else {
-                rawName = String(d || "").trim();
-              }
-
-              const key = rawName.toLowerCase();
-              const shortDay = dayMap[key] || rawName;
-
-              if (shortDay && !daysArr.includes(shortDay)) {
-                daysArr.push(shortDay);
-                newDaySchedules[shortDay] = { startTime: sTime, endTime: eTime };
-              }
-            });
-          } else {
-            daysArr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-          }
-
-          const isHalfDayAllowed = Boolean(
-            activeSched.allowHalfDay ?? activeSched.allow_half_day ?? activeSched.halfDayAllowed ?? activeSched.half_day_allowed ?? false
-          );
-          const halfDayMins = Number(
-            activeSched.halfDayMinutes ?? activeSched.half_day_minutes ?? 240
-          );
-
-          const isOtAllowed = Boolean(activeSched.overtimeAllowed ?? activeSched.overtime_allowed ?? false);
-          const otMins = Number(activeSched.overtimeMinutes ?? activeSched.overtime_minutes ?? 30);
-
-          const breaksArr = Array.isArray(activeSched.breakDurations) ? activeSched.breakDurations : [];
-          const hasBreaks = Boolean(activeSched.breaksAllowed || breaksArr.length > 0);
-
-          setDaySchedules(newDaySchedules);
-
-          setSchedule({
-            id: activeSched.id,
-            workingDays: daysArr,
-            shiftStart: defaultStart,
-            shiftEnd: defaultEnd,
-            earlyInMargin: activeSched.earlyInMargin ?? activeSched.early_in_margin ?? 15,
-            earlyOutMargin: activeSched.earlyOutMargin ?? activeSched.early_out_margin ?? 15,
-            overtimeAllowed: isOtAllowed,
-            overtimeMinutes: otMins,
-            allowHalfDay: isHalfDayAllowed,
-            halfDayMinutes: halfDayMins,
-            numBreaks: hasBreaks ? (breaksArr.length || 1) : 0,
-            breakMinutes: breaksArr[0] || 15,
-          });
+        } else {
+          daysArr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
         }
+
+        const isHalfDayAllowed = Boolean(
+          activeSched.allowHalfDay ?? activeSched.allow_half_day ?? activeSched.halfDayAllowed ?? activeSched.half_day_allowed ?? false
+        );
+        const halfDayMins = Number(
+          activeSched.halfDayMinutes ?? activeSched.half_day_minutes ?? 240
+        );
+
+        const isOtAllowed = Boolean(activeSched.overtimeAllowed ?? activeSched.overtime_allowed ?? false);
+        const otMins = Number(activeSched.overtimeMinutes ?? activeSched.overtime_minutes ?? 30);
+
+        const earlyInVal = activeSched.allowEarlyIn === false
+          ? 0
+          : Number(activeSched.earlyInMinutes ?? activeSched.earlyInMargin ?? activeSched.early_in_margin ?? 15);
+        const earlyOutVal = activeSched.allowEarlyOut === false
+          ? 0
+          : Number(activeSched.earlyOutMinutes ?? activeSched.earlyOutMargin ?? activeSched.early_out_margin ?? 15);
+
+        const breaksArr = Array.isArray(activeSched.breakDurations) ? activeSched.breakDurations : [];
+        const hasBreaks = Boolean(activeSched.breaksAllowed ?? breaksArr.length > 0);
+
+        setDaySchedules(newDaySchedules);
+
+        setSchedule({
+          id: activeSched.id,
+          workingDays: daysArr,
+          shiftStart: defaultStart,
+          shiftEnd: defaultEnd,
+          earlyInMargin: earlyInVal,
+          earlyOutMargin: earlyOutVal,
+          overtimeAllowed: isOtAllowed,
+          overtimeMinutes: otMins,
+          allowHalfDay: isHalfDayAllowed,
+          halfDayMinutes: halfDayMins,
+          numBreaks: hasBreaks ? (breaksArr.length || 1) : 0,
+          breakMinutes: breaksArr[0] ?? 15,
+        });
+      } else {
+        const defaultDayMap: Record<string, { startTime: string; endTime: string }> = {};
+        ALL_WEEK_DAYS.forEach((d) => {
+          defaultDayMap[d] = { startTime: '09:00', endTime: '18:00' };
+        });
+        setDaySchedules(defaultDayMap);
+        setSchedule({
+          id: null,
+          workingDays: [],
+          shiftStart: '09:00',
+          shiftEnd: '18:00',
+          earlyInMargin: 15,
+          earlyOutMargin: 15,
+          overtimeAllowed: false,
+          overtimeMinutes: 30,
+          allowHalfDay: false,
+          halfDayMinutes: 240,
+          numBreaks: 0,
+          breakMinutes: 15,
+        });
       }
       
       if (emp.privileges) {
@@ -650,14 +679,10 @@ export const EmployeeDetail: React.FC = () => {
       fetchEmployee();
     };
 
-    window.addEventListener('schedule-updated', handleRealTimeSync);
-    window.addEventListener('employee-updated', handleRealTimeSync);
-    window.addEventListener('focus', handleRealTimeSync);
+    const unsubscribe = subscribeScheduleChanged(handleRealTimeSync);
 
     return () => {
-      window.removeEventListener('schedule-updated', handleRealTimeSync);
-      window.removeEventListener('employee-updated', handleRealTimeSync);
-      window.removeEventListener('focus', handleRealTimeSync);
+      unsubscribe();
     };
   }, [id]);
 
@@ -988,8 +1013,7 @@ export const EmployeeDetail: React.FC = () => {
       });
       toast.success('Payroll information updated successfully');
       setIsEditingPayroll(false);
-      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
-      window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { employeeId: id } }));
+      notifyScheduleChanged({ employeeId: id });
       fetchEmployee();
     } catch (err: any) {
       console.error("Save Payroll Error:", err);
@@ -998,62 +1022,95 @@ export const EmployeeDetail: React.FC = () => {
   };
 
   const handleSaveSchedule = async () => {
+    if (!schedule.workingDays || schedule.workingDays.length === 0) {
+      toast.error('Please select at least one working day');
+      return;
+    }
+
     try {
+      const daysPayload = schedule.workingDays.map((dayName: string) => {
+        const timeObj = daySchedules[dayName] || { startTime: schedule.shiftStart || '09:00', endTime: schedule.shiftEnd || '18:00' };
+        const fullDayName = FULL_DAY_NAMES[dayName] || dayName;
+        return {
+          day: dayName,
+          dayFull: fullDayName,
+          startTime: timeObj.startTime,
+          endTime: timeObj.endTime,
+        };
+      });
+
+      const firstWorkingDayTime = schedule.workingDays.length > 0 && daySchedules[schedule.workingDays[0]]
+        ? daySchedules[schedule.workingDays[0]]
+        : { startTime: schedule.shiftStart, endTime: schedule.shiftEnd };
+
+      const earlyInMins = Math.max(0, Number(schedule.earlyInMargin) || 0);
+      const earlyOutMins = Math.max(0, Number(schedule.earlyOutMargin) || 0);
+      const numBreaksCount = Math.max(0, Number(schedule.numBreaks) || 0);
+      const breakMinsVal = Math.max(0, Number(schedule.breakMinutes) || 15);
+      const breakDursPayload = numBreaksCount > 0 ? Array.from({ length: numBreaksCount }, () => breakMinsVal) : [];
+
+      const payload = {
+        days: daysPayload,
+        startTime: firstWorkingDayTime.startTime || schedule.shiftStart || '09:00',
+        endTime: firstWorkingDayTime.endTime || schedule.shiftEnd || '18:00',
+        companyId: employee?.companyId || null,
+        allowEarlyIn: earlyInMins > 0,
+        earlyInMinutes: earlyInMins > 0 ? earlyInMins : null,
+        allowEarlyOut: earlyOutMins > 0,
+        earlyOutMinutes: earlyOutMins > 0 ? earlyOutMins : null,
+        overtimeAllowed: Boolean(schedule.overtimeAllowed),
+        overtimeMinutes: schedule.overtimeAllowed ? (Number(schedule.overtimeMinutes) || 30) : null,
+        allowHalfDay: Boolean(schedule.allowHalfDay),
+        halfDayMinutes: schedule.allowHalfDay ? (Number(schedule.halfDayMinutes) || 240) : null,
+        breaksAllowed: numBreaksCount > 0,
+        breakDurations: breakDursPayload,
+      };
+
+      const activePrevSched = Array.isArray(employee?.Schedule)
+        ? employee.Schedule.find((s: any) => s && !s.deletedAt)
+        : employee?.Schedule;
+      const prevSchedStart = activePrevSched?.startTime || '09:00';
+      const prevSchedEnd = activePrevSched?.endTime || '18:00';
+      const prevDays = activePrevSched?.days || [];
+      const prevDaysStr = Array.isArray(prevDays) && prevDays.length > 0
+        ? prevDays.map((d: any) => typeof d === 'string' ? d : (d.day || d.name)).join(', ')
+        : 'None';
+      const newDaysStr = schedule.workingDays.join(', ');
+
+      appendAuditLog({
+        type: 'SCHEDULE',
+        category: 'Schedule',
+        title: schedule.id ? `Shift Schedule & Timings Updated` : `Shift Schedule Assigned`,
+        fromValue: schedule.id ? `${prevDaysStr} (${formatTimeTo12h(prevSchedStart)} - ${formatTimeTo12h(prevSchedEnd)})` : 'No Schedule',
+        toValue: `${newDaysStr} (${formatTimeTo12h(payload.startTime)} - ${formatTimeTo12h(payload.endTime)})`,
+        description: `Working schedule ${schedule.id ? 'updated' : 'assigned'} to ${schedule.workingDays.length} working days (${newDaysStr}) with shift hours ${formatTimeTo12h(payload.startTime)} - ${formatTimeTo12h(payload.endTime)}. Early-in: ${earlyInMins}m, Early-out: ${earlyOutMins}m, Overtime: ${schedule.overtimeAllowed ? `${payload.overtimeMinutes}m` : 'No'}.`,
+        actor: 'HR Admin',
+      });
+
+      let savedScheduleId = schedule.id;
+
       if (schedule.id) {
-        const daysPayload = schedule.workingDays.map((dayName: string) => {
-          const timeObj = daySchedules[dayName] || { startTime: schedule.shiftStart || '09:00', endTime: schedule.shiftEnd || '18:00' };
-          const fullDayName = FULL_DAY_NAMES[dayName] || dayName;
-          return {
-            day: dayName,
-            dayFull: fullDayName,
-            startTime: timeObj.startTime,
-            endTime: timeObj.endTime,
-          };
+        await scheduleAPI.updateSchedule(schedule.id, payload);
+      } else {
+        const empNumericId = Number(employee?.id || id);
+        const res = await scheduleAPI.createSchedule({
+          scopeType: 'individual',
+          selectedIds: [empNumericId],
+          overwriteEmployeeIds: [empNumericId],
+          ...payload,
         });
-
-        const firstWorkingDayTime = schedule.workingDays.length > 0 && daySchedules[schedule.workingDays[0]]
-          ? daySchedules[schedule.workingDays[0]]
-          : { startTime: schedule.shiftStart, endTime: schedule.shiftEnd };
-
-        const prevSchedStart = employee?.Schedule?.[0]?.startTime || '09:00';
-        const prevSchedEnd = employee?.Schedule?.[0]?.endTime || '18:00';
-        const prevDays = employee?.Schedule?.[0]?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-        const prevDaysStr = Array.isArray(prevDays) ? prevDays.map((d: any) => typeof d === 'string' ? d : (d.day || d.name)).join(', ') : 'Mon - Fri';
-        const newDaysStr = schedule.workingDays.join(', ');
-
-        appendAuditLog({
-          type: 'SCHEDULE',
-          category: 'Schedule',
-          title: `Shift Schedule & Timings Updated`,
-          fromValue: `${prevDaysStr} (${formatTimeTo12h(prevSchedStart)} - ${formatTimeTo12h(prevSchedEnd)})`,
-          toValue: `${newDaysStr} (${formatTimeTo12h(schedule.shiftStart)} - ${formatTimeTo12h(schedule.shiftEnd)})`,
-          description: `Working schedule updated to ${schedule.workingDays.length} working days (${newDaysStr}) with shift hours ${formatTimeTo12h(schedule.shiftStart)} - ${formatTimeTo12h(schedule.shiftEnd)}. Early-in: ${schedule.earlyInMargin}m, Early-out: ${schedule.earlyOutMargin}m, Overtime: ${schedule.overtimeAllowed ? `${schedule.overtimeMinutes}m` : 'No'}.`,
-          actor: 'HR Admin',
-        });
-
-        await scheduleAPI.updateSchedule(schedule.id, {
-          days: daysPayload,
-          startTime: firstWorkingDayTime.startTime || schedule.shiftStart,
-          endTime: firstWorkingDayTime.endTime || schedule.shiftEnd,
-          allowEarlyIn: true,
-          earlyInMinutes: schedule.earlyInMargin,
-          allowEarlyOut: true,
-          earlyOutMinutes: schedule.earlyOutMargin,
-          overtimeAllowed: schedule.overtimeAllowed,
-          overtimeMinutes: schedule.overtimeMinutes,
-          allowHalfDay: schedule.allowHalfDay,
-          halfDayMinutes: schedule.allowHalfDay ? schedule.halfDayMinutes : null,
-          breaksAllowed: schedule.numBreaks > 0,
-          breakDurations: schedule.numBreaks > 0 ? [schedule.breakMinutes] : [],
-        });
+        const createdItem = Array.isArray(res?.data) ? res.data[0] : res?.data;
+        if (createdItem?.id) {
+          savedScheduleId = createdItem.id;
+        }
       }
-      toast.success('Schedule updated successfully');
+
+      toast.success(schedule.id ? 'Schedule updated successfully' : 'Schedule created successfully');
       setIsEditingSchedule(false);
-      window.dispatchEvent(new CustomEvent('schedule-updated', { detail: { scheduleId: schedule.id, employeeId: id } }));
-      window.dispatchEvent(new CustomEvent('employee-updated', { detail: { employeeId: id } }));
+      notifyScheduleChanged({ scheduleId: savedScheduleId, employeeId: employee?.id || id });
       fetchEmployee();
-    } catch (err) {
-      toast.error('Failed to update schedule');
+    } catch (err: any) {
+      toast.error(err?.data?.message || err?.message || 'Failed to update schedule');
     }
   };
 
@@ -1865,17 +1922,32 @@ export const EmployeeDetail: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsEditingSchedule(true)}
+                  onClick={() => {
+                    if (!schedule.id && (!schedule.workingDays || schedule.workingDays.length === 0)) {
+                      setSchedule((prev: any) => ({
+                        ...prev,
+                        workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+                        shiftStart: '09:00',
+                        shiftEnd: '18:00',
+                        numBreaks: 2,
+                        breakMinutes: 15,
+                      }));
+                    }
+                    setIsEditingSchedule(true);
+                  }}
                   className="rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 text-xs font-semibold px-3.5 py-1.5 h-9 flex items-center gap-1.5"
                 >
-                  <Edit className="size-3.5 text-blue-600" /> Edit Schedule
+                  <Edit className="size-3.5 text-blue-600" /> {schedule.id ? 'Edit Schedule' : 'Assign Schedule'}
                 </Button>
               ) : (
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setIsEditingSchedule(false)}
+                    onClick={() => {
+                      setIsEditingSchedule(false);
+                      fetchEmployee();
+                    }}
                     className="rounded-xl border-slate-200 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold px-4 h-9"
                   >
                     Cancel
@@ -1893,6 +1965,17 @@ export const EmployeeDetail: React.FC = () => {
 
             <CardContent className="p-5 sm:p-6 space-y-6">
               {!isEditingSchedule ? (
+                !schedule.id ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-8 text-center space-y-3">
+                    <Clock className="size-8 text-slate-300 mx-auto" />
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">No active work schedule assigned</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Assign a work schedule so it stays synchronized across Schedule Management and Attendance.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                 /* ── View Mode: Weekly Shift Pattern + Metric Cards (Image 1) ── */
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-slate-200/80 bg-white p-5 space-y-4">
@@ -1952,13 +2035,13 @@ export const EmployeeDetail: React.FC = () => {
                       {/* 1. Early in margin */}
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <p className="text-xs font-medium text-slate-500 mb-1">Early in margin</p>
-                        <p className="text-xl font-bold text-slate-900">{schedule.earlyInMargin || 15} min</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.earlyInMargin ?? 0} min</p>
                       </div>
 
                       {/* 2. Early out margin */}
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <p className="text-xs font-medium text-slate-500 mb-1">Early out margin</p>
-                        <p className="text-xl font-bold text-slate-900">{schedule.earlyOutMargin || 15} min</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.earlyOutMargin ?? 0} min</p>
                       </div>
 
                       {/* 3. Half day */}
@@ -1983,12 +2066,15 @@ export const EmployeeDetail: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <p className="text-xs font-medium text-slate-500 mb-1">Breaks</p>
-                        <p className="text-xl font-bold text-slate-900">{schedule.numBreaks ?? 2}</p>
-                        <p className="text-xs text-slate-400 mt-1">{schedule.breakMinutes ?? 15} min each</p>
+                        <p className="text-xl font-bold text-slate-900">{schedule.numBreaks ?? 0}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {(schedule.numBreaks ?? 0) > 0 ? `${schedule.breakMinutes ?? 15} min each` : 'No breaks'}
+                        </p>
                       </div>
                     </div>
                   </div>
                 </div>
+                )
               ) : (
                 /* ── Edit Mode: Daily Shift Timings + Edit Cards (Exact Image 2) ── */
                 <div className="space-y-6">
